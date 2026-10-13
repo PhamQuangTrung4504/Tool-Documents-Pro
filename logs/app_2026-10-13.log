@@ -1,0 +1,186 @@
+2026-10-13 08:02:47 | INFO     | __main__:main:53 | ============================================================
+2026-10-13 08:02:47 | INFO     | __main__:main:54 | Tool-Documents-Pro — Starting application …
+2026-10-13 08:02:47 | INFO     | __main__:main:55 | ============================================================
+2026-10-13 08:02:47 | WARNING  | __main__:main:60 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 08:02:48 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 08:02:48 | INFO     | __main__:main:96 | Application window opened.
+2026-10-13 08:04:46 | INFO     | __main__:main:53 | ============================================================
+2026-10-13 08:04:46 | INFO     | __main__:main:54 | Tool-Documents-Pro — Starting application …
+2026-10-13 08:04:46 | INFO     | __main__:main:55 | ============================================================
+2026-10-13 08:04:46 | WARNING  | __main__:main:60 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 08:04:47 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 08:04:47 | INFO     | __main__:main:96 | Application window opened.
+2026-10-13 08:04:57 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((492, 282, 3))
+2026-10-13 08:05:05 | INFO     | app.core.ocr_engine:__init__:159 | OCREngine created: lang=vi, gpu=False, angle_cls=True
+2026-10-13 08:05:05 | INFO     | app.core.ocr_engine:_ensure_loaded:193 | Loading PaddleOCR model for lang='vi' …
+2026-10-13 08:05:08 | ERROR    | app.core.ocr_engine:_ensure_loaded:248 | Failed to load PaddleOCR: No models are available for lang='vi' and ocr_version='PP-OCRv4'.
+2026-10-13 08:05:08 | ERROR    | app.ui.main_window:run:162 | OCR worker error: No models are available for lang='vi' and ocr_version='PP-OCRv4'.
+2026-10-13 08:07:25 | ERROR    | app.ui.main_window:_on_ocr_finished:931 | OCR failed: No models are available for lang='vi' and ocr_version='PP-OCRv4'.
+2026-10-13 08:07:27 | INFO     | app.core.ocr_engine:clear_cache:182 | OCREngine cache cleared.
+2026-10-13 08:07:27 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 08:07:27 | INFO     | __main__:main:99 | Application exited with code 0.
+2026-10-13 08:22:07 | INFO     | __main__:main:53 | ============================================================
+2026-10-13 08:22:07 | INFO     | __main__:main:54 | Tool-Documents-Pro — Starting application …
+2026-10-13 08:22:07 | INFO     | __main__:main:55 | ============================================================
+2026-10-13 08:22:07 | WARNING  | __main__:main:60 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 08:22:07 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 08:22:07 | INFO     | __main__:main:96 | Application window opened.
+2026-10-13 08:22:15 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((492, 261, 3))
+2026-10-13 08:22:17 | INFO     | app.core.ocr_engine:__init__:161 | OCREngine created: lang=vi, gpu=False, angle_cls=True
+2026-10-13 08:22:17 | INFO     | app.core.ocr_engine:_ensure_loaded:201 | Loading PaddleOCR model for lang='vi', ocr_version='PP-OCRv3' …
+2026-10-13 08:22:20 | INFO     | app.core.ocr_engine:_ensure_loaded:295 | PaddleOCR model loaded successfully in 3.28s (API v3, PP-OCRv3).
+2026-10-13 08:22:21 | DEBUG    | app.core.ocr_engine:recognize:425 | Running PaddleOCR inference …
+2026-10-13 08:22:26 | INFO     | app.core.ocr_engine:recognize:502 | OCR completed: 19 lines, avg_conf=0.96, elapsed=6.30s
+2026-10-13 08:22:26 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 19 lines, avg_conf=0.96
+2026-10-13 08:23:16 | DEBUG    | app.core.ocr_engine:recognize:425 | Running PaddleOCR inference …
+2026-10-13 08:23:22 | INFO     | app.core.ocr_engine:recognize:502 | OCR completed: 19 lines, avg_conf=0.96, elapsed=6.23s
+2026-10-13 08:23:22 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 19 lines, avg_conf=0.96
+2026-10-13 08:23:37 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((734, 925, 3))
+2026-10-13 08:23:40 | DEBUG    | app.core.ocr_engine:recognize:425 | Running PaddleOCR inference …
+2026-10-13 08:24:00 | INFO     | app.core.ocr_engine:recognize:502 | OCR completed: 23 lines, avg_conf=0.96, elapsed=20.53s
+2026-10-13 08:24:00 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 23 lines, avg_conf=0.96
+2026-10-13 08:25:29 | INFO     | app.core.ocr_engine:clear_cache:184 | OCREngine cache cleared.
+2026-10-13 08:25:29 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 08:25:29 | INFO     | __main__:main:99 | Application exited with code 0.
+2026-10-13 08:34:32 | INFO     | __main__:main:53 | ============================================================
+2026-10-13 08:34:32 | INFO     | __main__:main:54 | Tool-Documents-Pro — Starting application …
+2026-10-13 08:34:32 | INFO     | __main__:main:55 | ============================================================
+2026-10-13 08:34:32 | WARNING  | __main__:main:60 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 08:34:33 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 08:34:33 | INFO     | __main__:main:96 | Application window opened.
+2026-10-13 08:34:42 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((669, 947, 3))
+2026-10-13 08:34:44 | INFO     | app.core.ocr_engine:__init__:370 | OCREngine created: lang=vi, gpu=False, angle_cls=True, unclip=1.9
+2026-10-13 08:34:44 | INFO     | app.core.ocr_engine:_ensure_loaded:410 | Loading PaddleOCR model for lang='vi', ocr_version='PP-OCRv3' …
+2026-10-13 08:34:46 | INFO     | app.core.ocr_engine:_ensure_loaded:517 | PaddleOCR model loaded successfully in 2.19s (API v3, PP-OCRv3).
+2026-10-13 08:34:46 | DEBUG    | app.core.ocr_engine:preprocess_image:575 | Image upscaled for OCR clarity: 947x669 → 1415x1000 (scale=1.49)
+2026-10-13 08:34:47 | DEBUG    | app.core.ocr_engine:recognize:683 | Running PaddleOCR inference …
+2026-10-13 08:35:04 | INFO     | app.core.ocr_engine:recognize:767 | OCR completed: 22 lines, avg_conf=0.96, elapsed=18.35s
+2026-10-13 08:35:04 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 22 lines, avg_conf=0.96
+2026-10-13 08:35:35 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((1080, 1920, 3))
+2026-10-13 08:35:43 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((731, 898, 3))
+2026-10-13 08:35:52 | INFO     | app.core.ocr_engine:clear_cache:393 | OCREngine cache cleared.
+2026-10-13 08:35:52 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 08:35:52 | INFO     | __main__:main:99 | Application exited with code 0.
+2026-10-13 09:10:03 | INFO     | __main__:main:53 | ============================================================
+2026-10-13 09:10:03 | INFO     | __main__:main:54 | Tool-Documents-Pro — Starting application …
+2026-10-13 09:10:03 | INFO     | __main__:main:55 | ============================================================
+2026-10-13 09:10:03 | WARNING  | __main__:main:60 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 09:10:04 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 09:10:04 | INFO     | __main__:main:96 | Application window opened.
+2026-10-13 09:10:18 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((545, 1021, 3))
+2026-10-13 09:10:19 | INFO     | app.core.ocr_engine:__init__:367 | OCREngine created: lang=vi, gpu=False, vietocr=vgg_transformer, unclip=1.9
+2026-10-13 09:10:21 | INFO     | app.core.ocr_engine:_ensure_loaded:419 | Loading PaddleOCR detector for lang='vi' …
+2026-10-13 09:10:23 | WARNING  | app.core.ocr_engine:_ensure_loaded:470 | Không thể khởi tạo VietOCR (No module named 'torch'). Sẽ dùng PaddleOCR recognition mặc định.
+2026-10-13 09:10:23 | INFO     | app.core.ocr_engine:_ensure_loaded:478 | Hybrid OCR engines loaded in 3.60s.
+2026-10-13 09:10:24 | DEBUG    | app.core.ocr_engine:recognize:594 | Running PaddleOCR Text Detection …
+2026-10-13 09:10:42 | INFO     | app.core.ocr_engine:recognize:693 | Hybrid OCR completed: 19 lines, avg_conf=0.91, elapsed=18.86s
+2026-10-13 09:10:42 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 19 lines, avg_conf=0.91
+2026-10-13 09:15:22 | INFO     | app.core.ocr_engine:clear_cache:385 | OCREngine cache cleared.
+2026-10-13 09:15:22 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 09:15:22 | INFO     | __main__:main:99 | Application exited with code 0.
+2026-10-13 09:18:10 | INFO     | __main__:main:59 | ============================================================
+2026-10-13 09:18:10 | INFO     | __main__:main:60 | Tool-Documents-Pro — Starting application …
+2026-10-13 09:18:10 | INFO     | __main__:main:61 | ============================================================
+2026-10-13 09:18:10 | WARNING  | __main__:main:66 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 09:18:10 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 09:18:10 | INFO     | __main__:main:102 | Application window opened.
+2026-10-13 09:18:18 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((537, 927, 3))
+2026-10-13 09:18:20 | INFO     | app.core.ocr_engine:__init__:367 | OCREngine created: lang=vi, gpu=False, vietocr=vgg_transformer, unclip=1.9
+2026-10-13 09:18:20 | INFO     | app.core.ocr_engine:_ensure_loaded:419 | Loading PaddleOCR detector for lang='vi' …
+2026-10-13 09:18:20 | ERROR    | app.ui.main_window:run:162 | OCR worker error: PDX has already been initialized. Reinitialization is not supported.
+2026-10-13 09:18:24 | ERROR    | app.ui.main_window:_on_ocr_finished:931 | OCR failed: PDX has already been initialized. Reinitialization is not supported.
+2026-10-13 09:18:25 | INFO     | app.core.ocr_engine:clear_cache:385 | OCREngine cache cleared.
+2026-10-13 09:18:25 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 09:18:25 | INFO     | __main__:main:105 | Application exited with code 0.
+2026-10-13 09:27:36 | INFO     | __main__:main:59 | ============================================================
+2026-10-13 09:27:36 | INFO     | __main__:main:60 | Tool-Documents-Pro — Starting application …
+2026-10-13 09:27:36 | INFO     | __main__:main:61 | ============================================================
+2026-10-13 09:27:36 | WARNING  | __main__:main:66 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 09:27:37 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 09:27:37 | INFO     | __main__:main:102 | Application window opened.
+2026-10-13 09:27:47 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((540, 983, 3))
+2026-10-13 09:27:48 | INFO     | app.core.ocr_engine:get_global_detector:399 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-13 09:27:48 | ERROR    | app.ui.main_window:run:162 | OCR worker error: PDX has already been initialized. Reinitialization is not supported.
+2026-10-13 09:27:55 | ERROR    | app.ui.main_window:_on_ocr_finished:931 | OCR failed: PDX has already been initialized. Reinitialization is not supported.
+2026-10-13 09:27:56 | INFO     | app.core.ocr_engine:clear_cache:530 | OCREngine cache cleared.
+2026-10-13 09:27:56 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 09:27:56 | INFO     | __main__:main:105 | Application exited with code 0.
+2026-10-13 09:37:35 | INFO     | __main__:main:63 | ============================================================
+2026-10-13 09:37:35 | INFO     | __main__:main:64 | Tool-Documents-Pro — Starting application …
+2026-10-13 09:37:35 | INFO     | __main__:main:65 | ============================================================
+2026-10-13 09:37:35 | WARNING  | __main__:main:70 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 09:37:36 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 09:37:36 | INFO     | __main__:main:106 | Application window opened.
+2026-10-13 09:37:42 | INFO     | app.ui.main_window:_load_image_from_clipboard:815 | Image loaded from clipboard ((551, 1064, 3))
+2026-10-13 09:37:43 | INFO     | app.core.ocr_engine:get_global_detector:428 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-13 09:37:43 | ERROR    | app.ui.main_window:run:162 | OCR worker error:
+Traceback (most recent call last):
+
+> File "C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\ui\main_window.py", line 153, in run
+    self._engine._ensure_loaded()
+    │    │       └ <function OCREngine._ensure_loaded at 0x00000170AFA82840>
+    │    └ OCREngine(lang='vi', hybrid=True, not loaded)
+    └ <app.ui.main_window.OCRWorker object at 0x00000170AF6FBA40>
+
+  File "C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\ocr_engine.py", line 577, in _ensure_loaded
+    self._ocr = get_global_detector(
+    │    │      └ <function get_global_detector at 0x00000170AFA82340>
+    │    └ None
+    └ OCREngine(lang='vi', hybrid=True, not loaded)
+
+  File "C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\ocr_engine.py", line 429, in get_global_detector
+    from paddleocr import PaddleOCR
+
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddleocr\__init__.py", line 17, in <module>
+    from ._models import (
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddleocr\_models\__init__.py", line 15, in <module>
+    from .chart_parsing import ChartParsing
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddleocr\_models\chart_parsing.py", line 16, in <module>
+    from ._doc_vlm import (
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddleocr\_models\_doc_vlm.py", line 21, in <module>
+    from .base import PaddleXPredictorWrapper, PredictorCLISubcommandExecutor
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddleocr\_models\base.py", line 17, in <module>
+    from paddlex import create_predictor
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddlex\__init__.py", line 53, in <module>
+    from .inference import create_pipeline, create_predictor
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddlex\inference\__init__.py", line 16, in <module>
+    from .models import HPIConfig, PaddlePredictorOption, create_predictor
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddlex\inference\models\__init__.py", line 25, in <module>
+    from ..utils.official_models import official_models
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\paddlex\inference\utils\official_models.py", line 33, in <module>
+    import modelscope
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\__init__.py", line 5, in <module>
+    from modelscope.utils.import_utils import (LazyImportModule,
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\utils\import_utils.py", line 23, in <module>
+    from modelscope.utils.ast_utils import (INDEX_KEY, MODULE_KEY, REQUIREMENT_KEY,
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\utils\ast_utils.py", line 23, in <module>
+    from modelscope.utils.file_utils import get_modelscope_cache_dir
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\utils\file_utils.py", line 13, in <module>
+    logger = get_logger()
+             └ <function get_logger at 0x00000170AF9AB600>
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\utils\logger.py", line 49, in get_logger
+    from modelscope.utils.torch_utils import is_dist, is_master
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\modelscope\utils\torch_utils.py", line 14, in <module>
+    import torch
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\__init__.py", line 309, in <module>
+    _load_dll_libraries()
+    └ <function _load_dll_libraries at 0x00000170AFA6EC00>
+  File "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\__init__.py", line 292, in _load_dll_libraries
+    raise err
+          └ OSError(22, 'A dynamic link library (DLL) initialization routine failed.', None, 1114)
+
+OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+2026-10-13 09:41:02 | INFO     | app.ui.main_window:__init__:492 | MainWindow initialized.
+2026-10-13 09:41:02 | INFO     | app.core.ocr_engine:get_global_detector:436 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-13 09:41:03 | INFO     | app.core.ocr_engine:get_global_detector:472 | PaddleOCR detector singleton initialized successfully.
+2026-10-13 09:41:04 | INFO     | app.core.ocr_engine:get_global_vietocr:493 | Loading VietOCR model 'vgg_transformer' (Singleton) …
+2026-10-13 09:41:06 | INFO     | app.core.ocr_engine:get_global_vietocr:500 | VietOCR (vgg_transformer) singleton initialized on cpu.
+2026-10-13 09:41:06 | INFO     | app.core.ocr_engine:_ensure_loaded:608 | Hybrid OCR engines ready in 3.85s.
+2026-10-13 09:41:06 | DEBUG    | app.core.ocr_engine:recognize:724 | Running PaddleOCR Text Detection …
+2026-10-13 09:41:06 | DEBUG    | app.core.ocr_engine:recognize:763 | Recognizing 0 text lines with VietOCR (vgg_transformer) …
+2026-10-13 09:41:06 | INFO     | app.core.ocr_engine:recognize:820 | Hybrid OCR completed: 0 lines, avg_conf=0.00, elapsed=0.89s
+2026-10-13 09:41:06 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 0 lines, avg_conf=0.00
+2026-10-13 09:43:18 | ERROR    | app.ui.main_window:_on_ocr_finished:931 | OCR failed: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading "C:\Users\pqtru\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+2026-10-13 09:43:20 | INFO     | app.core.ocr_engine:clear_cache:563 | OCREngine cache cleared.
+2026-10-13 09:43:20 | INFO     | app.ui.main_window:closeEvent:1064 | MainWindow closed.
+2026-10-13 09:43:20 | INFO     | __main__:main:109 | Application exited with code 0.
