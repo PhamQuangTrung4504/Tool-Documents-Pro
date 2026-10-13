@@ -75,7 +75,7 @@ Tool-Documents-Pro/
 
 ## ⌨️ Phím tắt
 
-| Phím tắt          | Chức năng                         |
+| Phím tắt           | Chức năng                         |
 | ------------------ | --------------------------------- |
 | `Ctrl+O`           | Mở file ảnh                       |
 | `Ctrl+V`           | Dán ảnh từ clipboard              |

@@ -251,3 +251,43 @@ OSError: [WinError 1114] A dynamic link library (DLL) initialization routine fai
 2026-10-13 10:32:50 | DEBUG    | app.core.ocr_engine:recognize:803 | Recognizing 19 text lines with VietOCR (vgg_transformer) …
 2026-10-13 10:33:31 | INFO     | app.core.ocr_engine:recognize:869 | Hybrid OCR completed: 19 lines, avg_conf=0.95, elapsed=57.72s
 2026-10-13 10:33:31 | INFO     | app.ui.main_window:_on_ocr_finished:966 | OCR result displayed: 19 lines, avg_conf=0.95
+2026-10-13 13:31:24 | INFO     | __main__:main:71 | ============================================================
+2026-10-13 13:31:24 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-13 13:31:24 | INFO     | __main__:main:73 | ============================================================
+2026-10-13 13:31:24 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 13:31:30 | INFO     | app.ui.main_window:__init__:537 | MainWindow initialized.
+2026-10-13 13:31:30 | INFO     | __main__:main:114 | Application window opened.
+2026-10-13 13:32:16 | INFO     | app.core.ocr_engine:clear_cache:611 | OCREngine cache cleared.
+2026-10-13 13:32:16 | INFO     | app.ui.main_window:closeEvent:1222 | MainWindow closed.
+2026-10-13 13:32:16 | INFO     | __main__:main:117 | Application exited with code 0.
+2026-10-13 13:37:34 | INFO     | __main__:main:71 | ============================================================
+2026-10-13 13:37:34 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-13 13:37:34 | INFO     | __main__:main:73 | ============================================================
+2026-10-13 13:37:34 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-13 13:37:35 | INFO     | app.ui.main_window:__init__:537 | MainWindow initialized.
+2026-10-13 13:37:35 | INFO     | __main__:main:114 | Application window opened.
+2026-10-13 13:37:42 | INFO     | app.ui.main_window:_load_image_from_clipboard:889 | Image loaded from clipboard ((744, 1130, 3))
+2026-10-13 13:37:45 | INFO     | app.core.ocr_engine:get_global_detector:473 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-13 13:37:48 | INFO     | app.core.ocr_engine:get_global_detector:509 | PaddleOCR detector singleton initialized successfully.
+2026-10-13 13:37:49 | INFO     | app.core.ocr_engine:get_global_vietocr:533 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-13 13:37:55 | INFO     | app.core.ocr_engine:get_global_vietocr:540 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-13 13:37:55 | INFO     | app.core.ocr_engine:_ensure_loaded:648 | Hybrid OCR engines ready in 9.78s.
+2026-10-13 13:37:56 | DEBUG    | app.core.ocr_engine:recognize:764 | Running PaddleOCR Text Detection …
+2026-10-13 13:38:15 | DEBUG    | app.core.ocr_engine:recognize:803 | Recognizing 23 text lines with VietOCR (vgg_transformer) …
+2026-10-13 13:40:08 | INFO     | app.core.ocr_engine:recognize:869 | Hybrid OCR completed: 23 lines, avg_conf=0.95, elapsed=132.93s
+2026-10-13 13:40:08 | INFO     | app.ui.main_window:_on_ocr_finished:1040 | OCR result displayed: 23 lines, avg_conf=0.95
+2026-10-13 13:41:16 | DEBUG    | app.core.spell_corrector:_load_datasets:156 | Loaded 7698 syllables from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_syllables.txt
+2026-10-13 13:41:16 | DEBUG    | app.core.spell_corrector:_load_datasets:180 | Loaded 82834 English words from symspellpy.
+2026-10-13 13:41:16 | INFO     | app.ui.main_window:_on_spell_check_finished:1180 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-13 13:41:24 | INFO     | app.ui.main_window:_on_spell_check_finished:1180 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-13 13:41:25 | INFO     | app.ui.main_window:_on_spell_check_finished:1180 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-13 13:41:25 | INFO     | app.ui.main_window:_on_spell_check_finished:1180 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-13 13:41:26 | INFO     | app.ui.main_window:_on_clear_spelling_highlights:1188 | Spell check highlights cleared.
+2026-10-13 13:41:27 | INFO     | app.ui.main_window:_on_spell_check_finished:1180 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-13 13:42:18 | INFO     | app.ui.main_window:_on_spell_check_finished:1153 | Spell check finished: 0 suspicious tokens found.
+2026-10-13 13:42:38 | INFO     | app.ui.main_window:_on_spell_check_finished:1153 | Spell check finished: 0 suspicious tokens found.
+2026-10-13 13:42:44 | INFO     | app.ui.main_window:_on_spell_check_finished:1153 | Spell check finished: 0 suspicious tokens found.
+2026-10-13 13:42:50 | DEBUG    | app.core.ocr_engine:recognize:764 | Running PaddleOCR Text Detection …
+2026-10-13 13:43:02 | INFO     | app.core.ocr_engine:clear_cache:611 | OCREngine cache cleared.
+2026-10-13 13:43:02 | INFO     | app.ui.main_window:closeEvent:1222 | MainWindow closed.
+2026-10-13 13:43:02 | INFO     | __main__:main:117 | Application exited with code 0.

@@ -47,6 +47,8 @@ from PyQt5.QtGui import (
     QPainter,
     QPalette,
     QPixmap,
+    QTextCharFormat,
+    QTextCursor,
 )
 from PyQt5.QtWidgets import (
     QAction,
@@ -68,6 +70,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStatusBar,
+    QTextEdit,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -81,6 +84,7 @@ from app.core.ocr_engine import (
     get_display_languages,
     get_lang_code,
 )
+from app.core.spell_corrector import check_text_spelling
 
 # ---------------------------------------------------------------------------
 # Hằng số giao diện
@@ -161,6 +165,28 @@ class OCRWorker(QThread):
         except Exception as exc:
             logger.exception("OCR worker error:")
             self.finished.emit(exc)
+
+
+class SpellCheckWorker(QThread):
+    """Thread chạy kiểm tra chính tả tiếng Việt để không block giao diện."""
+
+    finished = pyqtSignal(list, str)  # (suspicious_list, original_text)
+
+    def __init__(
+        self,
+        text: str,
+        parent: Optional[QThread] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._text = text
+
+    def run(self) -> None:
+        try:
+            results = check_text_spelling(self._text)
+            self.finished.emit(results, self._text)
+        except Exception as exc:
+            logger.exception("Spell check worker error:")
+            self.finished.emit([], self._text)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +317,24 @@ def build_stylesheet() -> str:
     }}
     QPushButton#btnCopy:hover {{
         background-color: #00d9a5;
+    }}
+
+    QPushButton#btnSpellCheck {{
+        background-color: #d63031;
+        color: #ffffff;
+        border: none;
+    }}
+    QPushButton#btnSpellCheck:hover {{
+        background-color: #e17055;
+    }}
+
+    QPushButton#btnClearSpell {{
+        background-color: #2d3436;
+        color: #dfe6e9;
+        border: 1px solid #4a4a5a;
+    }}
+    QPushButton#btnClearSpell:hover {{
+        background-color: #3b3b4f;
     }}
 
     /* ===== COMBO BOX ===== */
@@ -475,6 +519,7 @@ class MainWindow(QMainWindow):
         self._current_result: Optional[OCRResult] = None
         self._image_path: Optional[str] = None
         self._ocr_worker: Optional[OCRWorker] = None
+        self._spell_worker: Optional[SpellCheckWorker] = None
 
         # Engine (lazy)
         self._engine: Optional[OCREngine] = None
@@ -555,6 +600,18 @@ class MainWindow(QMainWindow):
         self.act_ocr.triggered.connect(self._on_run_ocr)
         tb.addAction(self.act_ocr)
 
+        # --- Kiểm tra chính tả ---
+        self.act_spell_check = QAction("📝 Kiểm tra chính tả", self)
+        self.act_spell_check.setToolTip("Kiểm tra chính tả tiếng Việt trong khung văn bản (Ctrl+K)")
+        self.act_spell_check.triggered.connect(self._on_check_spelling)
+        tb.addAction(self.act_spell_check)
+
+        # --- Bỏ đánh dấu ---
+        self.act_clear_spell = QAction("🧹 Bỏ đánh dấu", self)
+        self.act_clear_spell.setToolTip("Xóa các đánh dấu chính tả (Ctrl+Shift+K)")
+        self.act_clear_spell.triggered.connect(self._on_clear_spelling_highlights)
+        tb.addAction(self.act_clear_spell)
+
         # --- Spacer ---
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -634,6 +691,7 @@ class MainWindow(QMainWindow):
             "Kết quả OCR sẽ hiển thị tại đây …"
         )
         self.text_result.setReadOnly(False)
+        self.text_result.textChanged.connect(self._on_text_changed)
         right_layout.addWidget(self.text_result, stretch=1)
 
         # Info label
@@ -662,6 +720,20 @@ class MainWindow(QMainWindow):
         self.btn_copy.setFixedHeight(42)
         self.btn_copy.clicked.connect(self._on_copy_result)
         btn_row.addWidget(self.btn_copy)
+
+        self.btn_spell_check = QPushButton("📝  Kiểm tra chính tả")
+        self.btn_spell_check.setObjectName("btnSpellCheck")
+        self.btn_spell_check.setFixedHeight(42)
+        self.btn_spell_check.setToolTip("Dò soát và đánh dấu nghi vấn chính tả trên Textbox (Ctrl+K)")
+        self.btn_spell_check.clicked.connect(self._on_check_spelling)
+        btn_row.addWidget(self.btn_spell_check)
+
+        self.btn_clear_spell = QPushButton("🧹  Bỏ đánh dấu")
+        self.btn_clear_spell.setObjectName("btnClearSpell")
+        self.btn_clear_spell.setFixedHeight(42)
+        self.btn_clear_spell.setToolTip("Xóa định dạng đánh dấu chính tả (Ctrl+Shift+K)")
+        self.btn_clear_spell.clicked.connect(self._on_clear_spelling_highlights)
+        btn_row.addWidget(self.btn_clear_spell)
 
         self.btn_export = QPushButton("💾  Xuất TXT")
         self.btn_export.setFixedHeight(42)
@@ -706,6 +778,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+R"), self, self._on_run_ocr)
         QShortcut(QKeySequence("Ctrl+S"), self, self._on_export_txt)
         QShortcut(QKeySequence("Ctrl+Shift+C"), self, self._on_copy_result)
+        QShortcut(QKeySequence("Ctrl+K"), self, self._on_check_spelling)
+        QShortcut(QKeySequence("Ctrl+Shift+K"), self, self._on_clear_spelling_highlights)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.close)
 
     # ==================================================================
@@ -1040,6 +1114,87 @@ class MainWindow(QMainWindow):
         self._set_status("Đã xoá. Sẵn sàng.")
 
     # ==================================================================
+    # SLOTS — Spell Checking
+    # ==================================================================
+
+    @pyqtSlot()
+    def _on_check_spelling(self) -> None:
+        """
+        Dò soát nội dung trong khung Textbox, phát hiện và bôi đỏ/gạch chân đỏ
+        các vị trí có dấu hiệu sai chính tả tiếng Việt.
+        NGUYÊN TẮC: CHỈ KIỂM TRA VÀ ĐÁNH DẤU, KHÔNG TỰ ĐỘNG SỬA HAY THAY ĐỔI VĂN BẢN.
+        """
+        text = self.text_result.toPlainText()
+        if not text or not text.strip():
+            self._set_status("Không đủ dữ liệu để kiểm tra.")
+            return
+
+        if self._spell_worker is not None and self._spell_worker.isRunning():
+            self._set_status("Đang kiểm tra chính tả, vui lòng đợi …")
+            return
+
+        self._set_status("Đang dò soát chính tả tiếng Việt …")
+        self._spell_worker = SpellCheckWorker(text, self)
+        self._spell_worker.finished.connect(self._on_spell_check_finished)
+        self._spell_worker.start()
+
+    @pyqtSlot(list, str)
+    def _on_spell_check_finished(self, results: list, checked_text: str) -> None:
+        """Callback khi kiểm tra chính tả hoàn thành."""
+        # Kiểm tra xem người dùng có chỉnh sửa văn bản trong lúc worker chạy hay không
+        current_text = self.text_result.toPlainText()
+        if current_text != checked_text:
+            logger.debug("Text was modified during spell check; discarding stale highlights.")
+            return
+
+        if not results:
+            self.text_result.setExtraSelections([])
+            self._set_status("Không phát hiện dấu hiệu sai chính tả.")
+            logger.info("Spell check finished: 0 suspicious tokens found.")
+            return
+
+        # Tạo định dạng đánh dấu: Màu đỏ, gạch chân lượn sóng (WaveUnderline), nền đỏ nhạt
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#ff4d4f"))
+        fmt.setFontUnderline(True)
+        fmt.setUnderlineColor(QColor("#ff4d4f"))
+        fmt.setUnderlineStyle(QTextCharFormat.WaveUnderline)
+        fmt.setBackground(QColor(255, 77, 79, 40))
+
+        doc = self.text_result.document()
+        selections = []
+        for start_idx, end_idx, token in results:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start_idx)
+            cursor.setPosition(end_idx, QTextCursor.KeepAnchor)
+
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = cursor
+            sel.format = fmt
+            selections.append(sel)
+
+        # Áp dụng đánh dấu không xâm lấn nội dung
+        self.text_result.setExtraSelections(selections)
+        count = len(results)
+        self._set_status(f"Phát hiện {count} vị trí nghi vấn chính tả.")
+        logger.info(f"Spell check finished: {count} suspicious tokens highlighted.")
+
+    @pyqtSlot()
+    def _on_clear_spelling_highlights(self) -> None:
+        """Xóa toàn bộ đánh dấu chính tả trên Textbox mà không thay đổi nội dung."""
+        if self.text_result.extraSelections():
+            self.text_result.setExtraSelections([])
+            self._set_status("Đã xoá các đánh dấu chính tả.")
+            logger.info("Spell check highlights cleared.")
+
+    @pyqtSlot()
+    def _on_text_changed(self) -> None:
+        """Xóa hoặc cập nhật các đánh dấu cũ khi người dùng chỉnh sửa văn bản."""
+        if self.text_result.extraSelections():
+            self.text_result.setExtraSelections([])
+            self._set_status("Văn bản đã chỉnh sửa — đã xoá các đánh dấu cũ.")
+
+    # ==================================================================
     # RESIZE — Cập nhật ảnh khi resize cửa sổ
     # ==================================================================
 
@@ -1060,6 +1215,9 @@ class MainWindow(QMainWindow):
         if self._ocr_worker and self._ocr_worker.isRunning():
             self._ocr_worker.terminate()
             self._ocr_worker.wait(2000)
+        if self._spell_worker and self._spell_worker.isRunning():
+            self._spell_worker.terminate()
+            self._spell_worker.wait(1000)
         OCREngine.clear_cache()
         logger.info("MainWindow closed.")
         event.accept()
