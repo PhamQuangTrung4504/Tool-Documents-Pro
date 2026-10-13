@@ -3,6 +3,18 @@ app.core — Module lõi chứa OCR engine và các tiện ích xử lý ảnh, 
 """
 
 from app.core.ocr_engine import OCREngine, OCRResult
-from app.core.spell_corrector import check_text_spelling
+from app.core.spell_corrector import (
+    SpellError,
+    check_text_spelling,
+    check_text_spelling_detailed,
+    get_suggestions,
+)
 
-__all__ = ["OCREngine", "OCRResult", "check_text_spelling"]
+__all__ = [
+    "OCREngine",
+    "OCRResult",
+    "SpellError",
+    "check_text_spelling",
+    "check_text_spelling_detailed",
+    "get_suggestions",
+]

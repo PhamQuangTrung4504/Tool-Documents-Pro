@@ -250,41 +250,95 @@ def get_rotate_crop_image(
         return None
 
 
-def sort_boxes_reading_order(boxes: List[OCRBox]) -> List[OCRBox]:
+def group_boxes_into_lines(boxes: List[OCRBox]) -> List[List[OCRBox]]:
     """
-    Sắp xếp bounding box theo thứ tự đọc tự nhiên của tài liệu hành chính:
-    Từ trên xuống dưới, từ trái sang phải.
-    Gom nhóm các khối chữ cùng hàng (chênh lệch toạ độ Y nhỏ) để sắp xếp theo X.
+    Gom nhóm các khối chữ theo từng dòng đọc (Line-level grouping) dựa trên
+    toạ độ hình học bounding box, bảo đảm các khối chữ nằm trên cùng hàng ngang
+    được sắp xếp theo thứ tự đọc từ trái sang phải.
+    Chuẩn hóa biểu tượng bullet (•) khi có đầy đủ căn cứ vị trí và kích thước.
     """
     if not boxes:
         return []
 
-    # Ước lượng chiều cao trung bình của một dòng chữ
-    heights = [abs(b.bbox[2][1] - b.bbox[0][1]) for b in boxes if len(b.bbox) >= 4]
-    avg_h = float(np.median(heights)) if heights else 20.0
-    y_threshold = max(8.0, avg_h * 0.55)
+    # Tính toạ độ hình học cho mỗi box
+    box_info = []
+    for b in boxes:
+        pts = b.bbox
+        x_left = min(pt[0] for pt in pts)
+        x_right = max(pt[0] for pt in pts)
+        y_top = min(pt[1] for pt in pts)
+        y_bottom = max(pt[1] for pt in pts)
+        h = max(1, y_bottom - y_top)
+        w = max(1, x_right - x_left)
+        cy = (y_top + y_bottom) / 2.0
+        box_info.append({
+            "box": b,
+            "left": x_left,
+            "right": x_right,
+            "top": y_top,
+            "bottom": y_bottom,
+            "h": h,
+            "w": w,
+            "cy": cy,
+        })
 
-    # Sắp xếp sơ bộ theo toạ độ Y đỉnh trái
-    sorted_by_y = sorted(boxes, key=lambda b: (b.bbox[0][1], b.bbox[0][0]))
+    # Ước lượng chiều cao dòng trung bình
+    heights = [info["h"] for info in box_info]
+    median_h = float(np.median(heights)) if heights else 20.0
+    y_thresh = max(6.0, median_h * 0.45)
 
-    lines: List[OCRBox] = []
-    current_line: List[OCRBox] = [sorted_by_y[0]]
+    # Sắp xếp sơ bộ theo cy tăng dần, rồi left tăng dần
+    box_info.sort(key=lambda item: (item["cy"], item["left"]))
 
-    for box in sorted_by_y[1:]:
-        line_avg_y = float(np.mean([b.bbox[0][1] for b in current_line]))
-        if abs(box.bbox[0][1] - line_avg_y) < y_threshold:
-            current_line.append(box)
+    grouped_lines: List[List[dict]] = []
+    current_line: List[dict] = [box_info[0]]
+
+    for info in box_info[1:]:
+        line_avg_cy = float(np.mean([item["cy"] for item in current_line]))
+        line_avg_h = float(np.mean([item["h"] for item in current_line]))
+        line_top = min(item["top"] for item in current_line)
+        line_bottom = max(item["bottom"] for item in current_line)
+
+        overlap_y = max(0, min(info["bottom"], line_bottom) - max(info["top"], line_top))
+        is_same_line = (
+            abs(info["cy"] - line_avg_cy) < y_thresh
+            or overlap_y >= 0.40 * min(info["h"], line_avg_h)
+        )
+
+        if is_same_line:
+            current_line.append(info)
         else:
-            # Sắp xếp hàng hiện tại theo X từ trái sang phải
-            current_line.sort(key=lambda b: b.bbox[0][0])
-            lines.extend(current_line)
-            current_line = [box]
+            grouped_lines.append(current_line)
+            current_line = [info]
 
     if current_line:
-        current_line.sort(key=lambda b: b.bbox[0][0])
-        lines.extend(current_line)
+        grouped_lines.append(current_line)
 
-    return lines
+    # Sắp xếp các dòng từ trên xuống dưới, và trong từng dòng sắp xếp từ trái sang phải
+    result_lines: List[List[OCRBox]] = []
+    for line in grouped_lines:
+        line.sort(key=lambda item: item["left"])
+
+        # Chuẩn hóa biểu tượng bullet có căn cứ (box đầu dòng nhỏ dạng icon list)
+        if len(line) >= 2:
+            first = line[0]
+            if first["w"] <= 35 and first["h"] <= 35 and first["box"].text.strip() in [
+                "o", "O", "•", "·", "*", "■", "□", "回", "▫", "▪"
+            ]:
+                first["box"].text = "•"
+
+        result_lines.append([item["box"] for item in line])
+
+    return result_lines
+
+
+def sort_boxes_reading_order(boxes: List[OCRBox]) -> List[OCRBox]:
+    """
+    Sắp xếp bounding box theo thứ tự đọc tự nhiên từ trên xuống dưới, từ trái sang phải.
+    Gom nhóm theo dòng và bảo toàn toàn bộ danh sách boxes.
+    """
+    grouped_lines = group_boxes_into_lines(boxes)
+    return [b for line in grouped_lines for b in line]
 
 
 # ---------------------------------------------------------------------------
@@ -294,92 +348,12 @@ def sort_boxes_reading_order(boxes: List[OCRBox]) -> List[OCRBox]:
 
 class VietnameseTextPostProcessor:
     """
-    Module chuẩn hóa và làm sạch văn bản tiếng Việt sau khi nhận dạng.
+    Module chuẩn hóa và làm sạch kỹ thuật văn bản OCR:
     - Chuẩn hóa Unicode dựng sẵn (NFC).
-    - Chuẩn hóa viết tắt hành chính (UBND, HĐND, PCT,...).
-    - Khôi phục dấu các cụm từ hành chính phổ biến nếu phát hiện sai sót.
+    - Chuẩn hóa khoảng trắng quanh dấu câu.
+    - TUYỆT ĐỐI KHÔNG tự động sửa nội dung từ vựng hoặc viết lại câu,
+      bảo toàn 100% dữ liệu gốc OCR theo nguyên tắc chống sửa sai.
     """
-
-    @staticmethod
-    def apply_case(original: str, replacement: str) -> str:
-        """Bảo toàn định dạng viết hoa của từ gốc."""
-        if original.isupper():
-            return replacement.upper()
-        orig_words = original.split()
-        rep_words = replacement.split()
-        if len(orig_words) == len(rep_words):
-            return " ".join(
-                r.upper() if o.isupper() else (r.capitalize() if o and o[0].isupper() else r.lower())
-                for o, r in zip(orig_words, rep_words)
-            )
-        if original and original[0].isupper():
-            return replacement[0].upper() + replacement[1:]
-        return replacement.lower()
-
-    PHRASE_PATTERNS: List[Tuple[str, str]] = [
-        (r"\b(uy|ủy)\s+(ban|ban)\s+(nhan|nhân)\s+(dan|dân)\s+(xa|xã)\b", "Ủy ban nhân dân xã"),
-        (r"\b(uy|ủy)\s+(ban|ban)\s+(nhan|nhân)\s+(dan|dân)\b", "Ủy ban nhân dân"),
-        (r"\b(hoi|hội)\s+(dong|đồng)\s+(nhan|nhân)\s+(dan|dân)\b", "Hội đồng nhân dân"),
-        (r"\b(van|văn)\s+(phong|phòng)\s+(hdnd|hđnd)\s+(va|và)\s+(ubnd|ubnd)\b", "Văn phòng HĐND và UBND"),
-        (r"\b(phong|phòng)\s+(van|văn)\s+(hoa|hóa)\s*-\s*(xa|xã)\s+(hoi|hội)\b", "Phòng Văn hóa - Xã hội"),
-        (r"\b(bo|bộ)\s+(van|văn)\s+(hoa|hóa),\s*(the|thể)\s+(thao|thao)\s+(va|và)\s+(du|du)\s+(lich|lịch)\b", "Bộ Văn hóa, Thể thao và Du lịch"),
-        (r"\b(van|văn)\s+(hoa|hóa),\s*(the|thể)\s+(thao|thao)\s+(va|và)\s+(du|du)\s+(lich|lịch)\b", "Văn hóa, Thể thao và Du lịch"),
-        (r"\b(trung|trung)\s+(tam|tâm)\s+(phuc|phục)\s+(vu|vụ)\s+(hanh|hành)\s+(chinh|chính)\s+(cong|công)\b", "Trung tâm Phục vụ hành chính công"),
-        (r"\b(thanh|thành)\s+(pho|phố)\s+(ho|hồ)\s+(chi|chí)\s+(minh|minh)\b", "Thành phố Hồ Chí Minh"),
-        (r"\b(cong|công)\s+(hoa|hòa)\s+(xa|xã)\s+(hoi|hội)\s+(chu|chủ)\s+(nghia|nghĩa)\s+(viet|việt)\s+(nam|nam)\b", "Cộng hòa xã hội chủ nghĩa Việt Nam"),
-        (r"\b(doc|độc)\s+(lap|lập)\s*-\s*(tu|tự)\s+(do|do)\s*-\s*(hanh|hạnh)\s+(phuc|phúc)\b", "Độc lập - Tự do - Hạnh phúc"),
-        (r"\b(cong|công)\s+(van|văn)\s+(so|số)\b", "Công văn số"),
-        (r"\b(quyet|quyết)\s+(dinh|định)\s+(so|số)\b", "Quyết định số"),
-        (r"\b(kinh|kính)\s+(gui|gửi)\b", "Kính gửi"),
-        (r"\b(noi|nơi)\s+(nhan|nhận)\b", "Nơi nhận"),
-        (r"\b(nhu|như)\s+(tren|trên)\b", "Như trên"),
-        (r"\b(chu|chủ)\s+(tich|tịch)\b", "Chủ tịch"),
-        (r"\b(pho|phó)\s+(chu|chủ)\s+(tich|tịch)\b", "Phó Chủ tịch"),
-        (r"\b(pct|pct)\s+(ubnd|ubnd)\s+(xa|xã)\b", "PCT UBND xã"),
-        (r"\b(ubnd|ubnd)\s+(xa|xã)\b", "UBND xã"),
-        (r"\b(cap|cấp)\s+(xa|xã)\b", "cấp xã"),
-        (r"\b(thu|thủ)\s+(tuc|tục)\s+(hanh|hành)\s+(chinh|chính)\b", "thủ tục hành chính"),
-        (r"\b(quan|quản)\s+(ly|lý)\s+(nha|nhà)\s+(nuoc|nước)\b", "quản lý nhà nước"),
-        (r"\b(ke|kế)\s+(hoach|hoạch)\s+(trien|triển)\s+(khai|khai)\b", "kế hoạch triển khai"),
-        (r"\b(trien|triển)\s+(khai|khai)\s+(thuc|thực)\s+(hien|hiện)\b", "triển khai thực hiện"),
-        (r"\b(he|hệ)\s+(thong|thống)\s+(thong|thông)\s+(tin|tin)\b", "hệ thống thông tin"),
-        (r"\b(giai|giải)\s+(quyet|quyết)\b", "giải quyết"),
-        (r"\b(nghiem|nghiêm)\s+(tuc|túc)\b", "nghiêm túc"),
-        (r"\b(khan|khẩn)\s+(truong|trương)\b", "khẩn trương"),
-        (r"\b(chu|chủ)\s+(tri|trì)\b", "chủ trì"),
-        (r"\b(phoi|phối)\s+(hop|hợp)\b", "phối hợp"),
-        (r"\b(chu|chủ)\s+(dong|động)\b", "chủ động"),
-        (r"\b(ra|rà)\s+(soat|soát)\b", "rà soát"),
-        (r"\b(bao|bảo)\s+(dam|đảm)\b", "bảo đảm"),
-        (r"\b(dong|đồng)\s+(bo|bộ)\b", "đồng bộ"),
-        (r"\b(dung|đúng)\s+(quy|quy)\s+(dinh|định)\b", "đúng quy định"),
-        (r"\b(kip|kịp)\s+(thoi|thời)\b", "kịp thời"),
-        (r"\b(bao|báo)\s+(cao|cáo)\b", "báo cáo"),
-        (r"\b(y|ý)\s+(kien|kiến)\s+(chi|chỉ)\s+(dao|đạo)\b", "ý kiến chỉ đạo"),
-        (r"\b(tham|tham)\s+(muu|mưu)\b", "tham mưu"),
-        (r"\b(dieu|điều)\s+(kien|kiện)\s+(can|cần)\s+(thiet|thiết)\b", "điều kiện cần thiết"),
-        (r"\b(van|vận)\s+(hanh|hành)\b", "vận hành"),
-        (r"\b(vuot|vượt)\s+(tham|thẩm)\s+(quyen|quyền)\b", "vượt thẩm quyền"),
-        (r"\b(theo|theo)\s+(doi|dõi)\b", "theo dõi"),
-        (r"\b(don|đôn)\s+(doc|đốc)\b", "đôn đốc"),
-        (r"\b(yeu|yêu)\s+(cau|cầu)\b", "yêu cầu"),
-        (r"\b(co|cơ)\s+(quan|quan),\s*(don|đơn)\s+(vi|vị)\b", "cơ quan, đơn vị"),
-        (r"\b(nhung|những)\s+(van|vấn)\s+(de|đề)\b", "những vấn đề"),
-        (r"\b(ban|ban)\s+(bi|bí)\s+(thu|thư)\b", "Ban Bí thư"),
-        (r"\b(bi|bí)\s+(thu|thư)\b", "Bí thư"),
-        (r"\b(tai|tại)\s+(dieu|điều)\b", "tại Điều"),
-        (r"\b(tai|tại)\s+(khoan|khoản)\b", "tại Khoản"),
-        (r"\b(tai|tại)\s+(diem|điểm)\b", "tại Điểm"),
-        (r"\b(tai|tại)\s+(quyet|quyết)\s+(dinh|định)\b", "tại Quyết định"),
-        (r"\b(tai|tại)\s+(thong|thông)\s+(bao|báo)\b", "tại Thông báo"),
-        (r"\b(tai|tại)\s+(van|văn)\s+(ban|bản)\b", "tại Văn bản"),
-        (r"\b(tai|tại)\s+(nghi|nghị)\s+(dinh|định)\b", "tại Nghị định"),
-        (r"\b(tai|tại)\s+(ke|kế)\s+(hoach|hoạch)\b", "tại Kế hoạch"),
-        (r"\b(tai|tại)\s+(bo|bộ)\s+(phan|phận)\b", "tại Bộ phận"),
-        (r"\b(bo|bộ)\s+(phan|phận)\s+(mot|một)\s+(cua|cửa)\b", "Bộ phận Một cửa"),
-        (r"\b(mot|một)\s+(cua|cửa)\s+(lien|liên)\s+(thong|thông)\b", "Một cửa liên thông"),
-        (r"\bngay\s+(\d{1,2})\s+thang\s+(\d{1,2})\s+nam\s+(\d{4})\b", r"ngày \1 tháng \2 năm \3"),
-    ]
 
     @classmethod
     def clean_and_restore(cls, text: str) -> str:
@@ -389,36 +363,14 @@ class VietnameseTextPostProcessor:
         # 1. Chuẩn hóa Unicode NFC
         text = unicodedata.normalize("NFC", text).strip()
 
-        # 2. Chuẩn hóa các từ viết tắt phổ biến trong văn bản hành chính
-        abbrev_map = {
-            r"\bubnd\b": "UBND",
-            r"\bhdnd\b": "HĐND",
-            r"\bpct\b": "PCT",
-            r"\bhcc\b": "HCC",
-            r"\bvhttdl\b": "BVHTTDL",
-            r"\bqd\b": "QĐ",
-            r"\btphcm\b": "TP.HCM",
-        }
-        for pat, rep in abbrev_map.items():
-            text = re.sub(pat, rep, text, flags=re.IGNORECASE)
-
-        # 3. Khôi phục cụm từ hành chính
-        for pat, rep in cls.PHRASE_PATTERNS:
-            def _repl(m, r=rep):
-                if r.startswith("ngày"):
-                    return m.expand(r)
-                return cls.apply_case(m.group(0), r)
-
-            text = re.sub(pat, _repl, text, flags=re.IGNORECASE)
-
-        # 4. Chuẩn hóa khoảng trắng quanh dấu câu
-        text = re.sub(r"\s+([,.:;?!])", r"\1", text)
+        # 2. Chuẩn hóa khoảng trắng quanh dấu câu (loại bỏ khoảng trắng thừa trước dấu)
+        text = re.sub(r"[ \t]+([,.:;?!])", r"\1", text)
         text = re.sub(r"([,.:;?!])(?=[^\s\d/])", r"\1 ", text)
 
-        # 5. Ký hiệu kết thúc văn bản hành chính ./.
+        # 3. Ký hiệu kết thúc văn bản hành chính ./.
         text = re.sub(r"\.\s*/\s*\.", "./.", text)
 
-        # 6. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
+        # 4. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
         return unicodedata.normalize("NFC", text)
 
 
@@ -849,11 +801,15 @@ class OCREngine:
             if text and conf >= self.drop_score:
                 boxes.append(OCRBox(text=text, confidence=conf, bbox=bbox_int))
 
-        # 5. Sắp xếp thứ tự đọc tự nhiên (Reading Order)
-        boxes = sort_boxes_reading_order(boxes)
+        # 5. Gom nhóm các khối chữ theo dòng và sắp xếp thứ tự đọc tự nhiên
+        grouped_lines = group_boxes_into_lines(boxes)
+        boxes = [b for line in grouped_lines for b in line]
 
-        # 6. Tổng hợp toàn bộ văn bản
-        full_text = "\n".join(b.text for b in boxes)
+        # 6. Tổng hợp toàn bộ văn bản (nối các khối trên cùng dòng bằng space, các dòng bằng newline)
+        full_text = "\n".join(
+            " ".join(b.text.strip() for b in line if b.text.strip())
+            for line in grouped_lines
+        )
         full_text = VietnameseTextPostProcessor.clean_and_restore(full_text)
 
         elapsed = time.perf_counter() - t0

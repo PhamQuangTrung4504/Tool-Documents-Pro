@@ -340,5 +340,125 @@ class TestVietnameseSpellChecker(unittest.TestCase):
         self.assertEqual(start_indices, sorted(start_indices))
 
 
+class TestAntiFalsePositiveAndContext(unittest.TestCase):
+    """
+    Kiểm thử cơ chế chống sửa sai (Anti-False-Positive) và độ chính xác gợi ý theo ngữ cảnh:
+    - Bảo đảm các từ vựng phổ thông tiếng Việt (đúng, để, qua, tại, tỉnh, số,...)
+      không bị đánh dấu sai lệch hoặc gợi ý sửa vớ vẩn.
+    - Kiểm thử đa lĩnh vực: Hành chính, Thương mại, Kỹ thuật/CNTT, Sách báo.
+    - Đảm bảo phát hiện đúng các lỗi thực tế (kỹ su -> kỹ sư, lâu nơm -> lâu năm,...).
+    - Đảm bảo không sinh gợi ý giả/rác khi không có bằng chứng đủ mạnh.
+    """
+
+    def setUp(self) -> None:
+        self.checker = get_default_spell_checker()
+
+    def test_screenshot_real_world_case(self) -> None:
+        """Kiểm thử trực tiếp câu trong tài liệu thực tế của người dùng: 'đúng' không bị đánh dấu."""
+        text = "Cần bổ sung đúng số hotline theo tài liệu: (028) 38.211.238"
+        errors = check_text_spelling(text)
+        self.assertEqual(
+            errors,
+            [],
+            f"'đúng số' là cụm từ hợp lệ, không được đánh dấu thành 'đứng số': {errors}",
+        )
+
+        text2 = "Tuyên truyền đường dây nóng để người dân được biết."
+        errors2 = check_text_spelling(text2)
+        self.assertEqual(
+            errors2,
+            [],
+            f"'để người' là ngữ cảnh hoàn toàn chuẩn xác, không được sửa thành 'dể người': {errors2}",
+        )
+
+    def test_multi_domain_texts_clean(self) -> None:
+        """Kiểm thử các văn bản đa lĩnh vực hợp lệ không có lỗi giả."""
+        domains = [
+            # Thương mại / Tài chính
+            "Hóa đơn giá trị gia tăng số 001245 ngày 15/10/2026, tổng thanh toán 2.500.000 VNĐ.",
+            # Kỹ thuật / Công nghệ thông tin
+            "Hệ thống backend viết bằng Python kết nối cơ sở dữ liệu PostgreSQL và Redis cache.",
+            # Quản trị / Hợp đồng
+            "Hợp đồng dịch vụ tư vấn quản trị doanh nghiệp và thỏa thuận bảo mật thông tin giữa hai bên.",
+            # Giáo dục / Sách báo
+            "Nghiên cứu về lịch sử văn hóa dân tộc và phong tục tập quán truyền thống của Việt Nam.",
+            # Đời sống / Giao tiếp
+            "Tôi đi làm đúng giờ, giải quyết công việc nhanh chóng và phân công đúng người đúng việc.",
+        ]
+        for doc in domains:
+            errs = check_text_spelling(doc)
+            self.assertEqual(errs, [], f"Tài liệu hợp lệ không được có lỗi: '{doc}', phát hiện: {errs}")
+
+    def test_real_errors_detected_with_valid_suggestions(self) -> None:
+        """Phát hiện lỗi thực tế và gợi ý sửa đúng có căn cứ."""
+        # 1. OCR confusion: kỹ su -> kỹ sư
+        errs = check_text_spelling("kỹ su")
+        self.assertEqual(len(errs), 1)
+        self.assertEqual(errs[0].token, "su")
+        self.assertIn("sư", errs[0].suggestions)
+
+        # 2. OCR confusion: lâu nơm -> lâu năm
+        errs2 = check_text_spelling("lâu nơm")
+        self.assertEqual(len(errs2), 1)
+        self.assertEqual(errs2[0].token, "nơm")
+        self.assertIn("năm", errs2[0].suggestions)
+
+        # 3. OCR confusion: Bí thu -> Bí thư
+        errs3 = check_text_spelling("Bí thu")
+        self.assertEqual(len(errs3), 1)
+        self.assertEqual(errs3[0].token, "thu")
+        self.assertIn("thư", errs3[0].suggestions)
+
+        # 4. Thiếu dấu âm tiết: chuyên nghiêp -> chuyên nghiệp
+        errs4 = check_text_spelling("chuyên nghiêp")
+        self.assertEqual(len(errs4), 1)
+        self.assertEqual(errs4[0].token, "nghiêp")
+        self.assertIn("nghiệp", errs4[0].suggestions)
+
+        # 5. Lỗi Telex sót đuôi: kiêmr tra -> kiểm tra
+        errs5 = check_text_spelling("Đang kiêmr tra dữ liệu")
+        self.assertEqual(len(errs5), 1)
+        self.assertEqual(errs5[0].token, "kiêmr")
+        self.assertIn("kiểm", errs5[0].suggestions)
+
+    def test_no_bogus_suggestions_when_insufficient_evidence(self) -> None:
+        """Không sinh gợi ý giả từ khoảng cách Levenshtein khi không có căn cứ ngữ âm/OCR/ngữ cảnh."""
+        from app.core.spell_corrector import get_suggestions
+        # Một từ gõ loạn hoàn toàn không có quan hệ ngữ âm với từ tiếng Việt
+        suggs = get_suggestions("zkjqqw")
+        self.assertEqual(
+            suggs,
+            [],
+            f"Từ rác không được sinh gợi ý tiếng Việt bừa bãi: {suggs}",
+        )
+
+
+class TestOCRLineGroupingAndBullets(unittest.TestCase):
+    """Kiểm thử tính năng gom nhóm dòng và cấu trúc danh sách/bullet trong ocr_engine."""
+
+    def test_line_grouping_and_bullet_normalization(self) -> None:
+        from app.core.ocr_engine import OCRBox, group_boxes_into_lines
+
+        # Mô phỏng các box cùng một hàng ngang: Bullet nhỏ + Dòng chữ
+        boxes = [
+            OCRBox("o", 0.85, [[70, 75], [85, 75], [85, 90], [70, 90]]),
+            OCRBox("Trong file ghi: đường dây nóng", 0.98, [[100, 70], [500, 70], [500, 95], [100, 95]]),
+            OCRBox("3.", 0.95, [[70, 150], [90, 150], [90, 170], [70, 170]]),
+            OCRBox("Căn lề phần Kính gửi:", 0.98, [[100, 150], [350, 150], [350, 170], [100, 170]]),
+        ]
+
+        lines = group_boxes_into_lines(boxes)
+        self.assertEqual(len(lines), 2, "Phải gom nhóm thành đúng 2 dòng")
+
+        # Dòng 1: icon 'o' ở đầu được chuẩn hóa thành '•' và đi cùng text
+        line1_text = " ".join(b.text for b in lines[0])
+        self.assertTrue(line1_text.startswith("• "))
+        self.assertIn("Trong file ghi:", line1_text)
+
+        # Dòng 2: '3.' là số thứ tự được giữ nguyên, đi cùng text trên cùng một hàng
+        line2_text = " ".join(b.text for b in lines[1])
+        self.assertEqual(line2_text, "3. Căn lề phần Kính gửi:")
+
+
 if __name__ == "__main__":
     unittest.main()

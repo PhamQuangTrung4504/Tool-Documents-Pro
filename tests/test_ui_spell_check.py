@@ -120,6 +120,57 @@ class TestMainWindowSpellCheckUI(unittest.TestCase):
             "Đánh dấu phải bị xóa khi người dùng chỉnh sửa văn bản",
         )
 
+    def test_apply_suggestion_and_undo(self) -> None:
+        """Người dùng chọn gợi ý sửa: thay đúng từ, cập nhật highlight và hỗ trợ Undo."""
+        sample_text = "Kế họach triển khai công việc"
+        self.window.text_result.setPlainText(sample_text)
+
+        self.window._on_check_spelling()
+        if self.window._spell_worker:
+            self.window._spell_worker.wait(3000)
+            QApplication.processEvents()
+
+        self.assertEqual(len(self.window._active_spell_errors), 1)
+        err = self.window._active_spell_errors[0]
+        self.assertEqual(err.token, "họach")
+        self.assertIn("hoạch", err.suggestions)
+
+        # Áp dụng gợi ý sửa
+        self.window._apply_spell_suggestion(err, "hoạch")
+        self.assertEqual(
+            self.window.text_result.toPlainText(),
+            "Kế hoạch triển khai công việc",
+            "Văn bản phải được thay thế chính xác token được chọn",
+        )
+        self.assertEqual(len(self.window.text_result.extraSelections()), 0)
+
+        # Kiểm tra tính năng Undo (Ctrl+Z)
+        self.window.text_result.undo()
+        self.assertEqual(
+            self.window.text_result.toPlainText(),
+            sample_text,
+            "Undo phải khôi phục nguyên trạng văn bản trước khi áp dụng gợi ý",
+        )
+
+    def test_ignore_spell_error(self) -> None:
+        """Bỏ qua vị trí nghi vấn: không thay đổi văn bản, chỉ xóa đánh dấu của lỗi đó."""
+        sample_text = "Kế họach triển khai công việc"
+        self.window.text_result.setPlainText(sample_text)
+
+        self.window._on_check_spelling()
+        if self.window._spell_worker:
+            self.window._spell_worker.wait(3000)
+            QApplication.processEvents()
+
+        self.assertEqual(len(self.window._active_spell_errors), 1)
+        err = self.window._active_spell_errors[0]
+
+        # Bỏ qua lỗi
+        self.window._ignore_spell_error(err)
+        self.assertEqual(self.window.text_result.toPlainText(), sample_text)
+        self.assertEqual(len(self.window.text_result.extraSelections()), 0)
+        self.assertEqual(len(self.window._active_spell_errors), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

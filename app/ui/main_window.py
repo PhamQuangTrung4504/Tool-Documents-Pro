@@ -28,6 +28,7 @@ from loguru import logger
 
 from PyQt5.QtCore import (
     QMimeData,
+    QPoint,
     QSize,
     Qt,
     QThread,
@@ -61,6 +62,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -84,7 +86,7 @@ from app.core.ocr_engine import (
     get_display_languages,
     get_lang_code,
 )
-from app.core.spell_corrector import check_text_spelling
+from app.core.spell_corrector import SpellError, check_text_spelling
 
 # ---------------------------------------------------------------------------
 # Hằng số giao diện
@@ -520,6 +522,8 @@ class MainWindow(QMainWindow):
         self._image_path: Optional[str] = None
         self._ocr_worker: Optional[OCRWorker] = None
         self._spell_worker: Optional[SpellCheckWorker] = None
+        self._active_spell_errors: List[SpellError] = []
+        self._is_replacing_suggestion: bool = False
 
         # Engine (lazy)
         self._engine: Optional[OCREngine] = None
@@ -692,6 +696,8 @@ class MainWindow(QMainWindow):
         )
         self.text_result.setReadOnly(False)
         self.text_result.textChanged.connect(self._on_text_changed)
+        self.text_result.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.text_result.customContextMenuRequested.connect(self._on_text_context_menu)
         right_layout.addWidget(self.text_result, stretch=1)
 
         # Info label
@@ -1098,6 +1104,7 @@ class MainWindow(QMainWindow):
         self._current_pixmap = None
         self._current_result = None
         self._image_path = None
+        self._active_spell_errors = []
 
         self.label_image.clear()
         self.label_image.setText(
@@ -1107,6 +1114,7 @@ class MainWindow(QMainWindow):
             "Ctrl+V  để dán từ clipboard"
         )
         self.text_result.clear()
+        self.text_result.setExtraSelections([])
         self.label_info.setText("")
         self.status_size.setText("")
 
@@ -1114,7 +1122,7 @@ class MainWindow(QMainWindow):
         self._set_status("Đã xoá. Sẵn sàng.")
 
     # ==================================================================
-    # SLOTS — Spell Checking
+    # SLOTS — Spell Checking & Context Menu
     # ==================================================================
 
     @pyqtSlot()
@@ -1133,7 +1141,7 @@ class MainWindow(QMainWindow):
             self._set_status("Đang kiểm tra chính tả, vui lòng đợi …")
             return
 
-        self._set_status("Đang dò soát chính tả tiếng Việt …")
+        self._set_status("Đang dò soát chính tả tiếng Việt theo ngữ cảnh …")
         self._spell_worker = SpellCheckWorker(text, self)
         self._spell_worker.finished.connect(self._on_spell_check_finished)
         self._spell_worker.start()
@@ -1141,19 +1149,32 @@ class MainWindow(QMainWindow):
     @pyqtSlot(list, str)
     def _on_spell_check_finished(self, results: list, checked_text: str) -> None:
         """Callback khi kiểm tra chính tả hoàn thành."""
-        # Kiểm tra xem người dùng có chỉnh sửa văn bản trong lúc worker chạy hay không
         current_text = self.text_result.toPlainText()
         if current_text != checked_text:
             logger.debug("Text was modified during spell check; discarding stale highlights.")
             return
 
+        self._active_spell_errors = list(results)
+
         if not results:
             self.text_result.setExtraSelections([])
-            self._set_status("Không phát hiện dấu hiệu sai chính tả.")
+            self._set_status("Không phát hiện lỗi rõ ràng theo các quy tắc hiện có.")
             logger.info("Spell check finished: 0 suspicious tokens found.")
             return
 
-        # Tạo định dạng đánh dấu: Màu đỏ, gạch chân lượn sóng (WaveUnderline), nền đỏ nhạt
+        self._update_spell_highlights()
+        count = len(results)
+        self._set_status(
+            f"Phát hiện {count} vị trí nghi vấn. Nhấp chuột phải vào từ được đánh dấu để xem gợi ý sửa."
+        )
+        logger.info(f"Spell check finished: {count} suspicious tokens highlighted.")
+
+    def _update_spell_highlights(self) -> None:
+        """Vẽ lại định dạng bôi đỏ cho các vị trí nghi vấn còn lại."""
+        if not self._active_spell_errors:
+            self.text_result.setExtraSelections([])
+            return
+
         fmt = QTextCharFormat()
         fmt.setForeground(QColor("#ff4d4f"))
         fmt.setFontUnderline(True)
@@ -1162,35 +1183,159 @@ class MainWindow(QMainWindow):
         fmt.setBackground(QColor(255, 77, 79, 40))
 
         doc = self.text_result.document()
+        doc_len = doc.characterCount()
         selections = []
-        for start_idx, end_idx, token in results:
-            cursor = QTextCursor(doc)
-            cursor.setPosition(start_idx)
-            cursor.setPosition(end_idx, QTextCursor.KeepAnchor)
+        for err in self._active_spell_errors:
+            if err.end_idx <= doc_len:
+                cursor = QTextCursor(doc)
+                cursor.setPosition(err.start_idx)
+                cursor.setPosition(err.end_idx, QTextCursor.KeepAnchor)
+                sel = QTextEdit.ExtraSelection()
+                sel.cursor = cursor
+                sel.format = fmt
+                selections.append(sel)
 
-            sel = QTextEdit.ExtraSelection()
-            sel.cursor = cursor
-            sel.format = fmt
-            selections.append(sel)
-
-        # Áp dụng đánh dấu không xâm lấn nội dung
         self.text_result.setExtraSelections(selections)
-        count = len(results)
-        self._set_status(f"Phát hiện {count} vị trí nghi vấn chính tả.")
-        logger.info(f"Spell check finished: {count} suspicious tokens highlighted.")
+
+    @pyqtSlot(QPoint)
+    def _on_text_context_menu(self, pos: QPoint) -> None:
+        """
+        Hiển thị menu chuột phải tương tác:
+        Nếu nhấp chuột vào token nghi vấn đã đánh dấu, hiển thị các lựa chọn gợi ý sửa
+        ở đầu menu (ví dụ: '✨ Đổi thành: kỹ sư', '🚫 Bỏ qua lỗi này').
+        """
+        cursor = self.text_result.cursorForPosition(pos)
+        click_pos = cursor.position()
+        doc_text = self.text_result.toPlainText()
+
+        # Tìm token nghi vấn tại vị trí con trỏ chuột
+        target_error: Optional[SpellError] = None
+        for err in self._active_spell_errors:
+            if err.start_idx <= click_pos <= err.end_idx:
+                if doc_text[err.start_idx:err.end_idx] == err.token:
+                    target_error = err
+                    break
+
+        menu = QMenu(self)
+
+        if target_error is not None:
+            # Tiêu đề thông tin lỗi
+            header_act = QAction(f"🔍 Nghi vấn: '{target_error.token}'", menu)
+            header_act.setEnabled(False)
+            menu.addAction(header_act)
+
+            if target_error.reason:
+                reason_act = QAction(f"ℹ️ {target_error.reason}", menu)
+                reason_act.setEnabled(False)
+                menu.addAction(reason_act)
+
+            menu.addSeparator()
+
+            # Danh sách các gợi ý sửa
+            if target_error.suggestions:
+                for sugg in target_error.suggestions:
+                    act = QAction(f"✨ Đổi thành: {sugg}", menu)
+                    act.triggered.connect(
+                        lambda checked, err=target_error, s=sugg: self._apply_spell_suggestion(err, s)
+                    )
+                    menu.addAction(act)
+            else:
+                no_sugg = QAction("Không có gợi ý chắc chắn", menu)
+                no_sugg.setEnabled(False)
+                menu.addAction(no_sugg)
+
+            menu.addSeparator()
+
+            # Tùy chọn bỏ qua lỗi này
+            act_ignore = QAction("🚫 Bỏ qua lỗi này", menu)
+            act_ignore.triggered.connect(
+                lambda checked, err=target_error: self._ignore_spell_error(err)
+            )
+            menu.addAction(act_ignore)
+
+            menu.addSeparator()
+
+        # Menu chỉnh sửa văn bản tiêu chuẩn (Undo, Redo, Cut, Copy, Paste, Select All)
+        std_menu = self.text_result.createStandardContextMenu()
+        menu.addActions(std_menu.actions())
+
+        menu.exec_(self.text_result.mapToGlobal(pos))
+
+    def _apply_spell_suggestion(self, err: SpellError, suggestion: str) -> None:
+        """Thay thế token nghi vấn bằng gợi ý sửa do người dùng chủ động chọn."""
+        doc_text = self.text_result.toPlainText()
+        if doc_text[err.start_idx:err.end_idx] != err.token:
+            self._set_status("Văn bản đã thay đổi so với vị trí đánh dấu — vui lòng kiểm tra lại.")
+            self._on_clear_spelling_highlights()
+            return
+
+        # Bảo toàn kiểu chữ (casing) của token gốc
+        replacement = suggestion
+        if err.token.isupper() and len(err.token) > 1:
+            replacement = suggestion.upper()
+        elif err.token and err.token[0].isupper() and not suggestion[0].isupper():
+            replacement = suggestion[0].upper() + suggestion[1:]
+
+        # Thay thế bằng QTextCursor với EditBlock để cho phép Undo (Ctrl+Z)
+        self._is_replacing_suggestion = True
+        try:
+            cursor = self.text_result.textCursor()
+            cursor.setPosition(err.start_idx)
+            cursor.setPosition(err.end_idx, QTextCursor.KeepAnchor)
+            cursor.beginEditBlock()
+            cursor.insertText(replacement)
+            cursor.endEditBlock()
+        finally:
+            self._is_replacing_suggestion = False
+
+        # Cập nhật vị trí các lỗi còn lại sau khi độ dài thay đổi
+        delta = len(replacement) - len(err.token)
+        remaining: List[SpellError] = []
+        for other in self._active_spell_errors:
+            if other is err or (other.start_idx == err.start_idx and other.end_idx == err.end_idx):
+                continue
+            if other.start_idx > err.start_idx:
+                other.start_idx += delta
+                other.end_idx += delta
+            remaining.append(other)
+
+        self._active_spell_errors = remaining
+        self._update_spell_highlights()
+
+        remaining_count = len(self._active_spell_errors)
+        if remaining_count > 0:
+            self._set_status(f"Đã đổi '{err.token}' → '{replacement}'. Còn {remaining_count} vị trí nghi vấn.")
+        else:
+            self._set_status(f"Đã đổi '{err.token}' → '{replacement}'. Đã xử lý hết nghi vấn.")
+        logger.info(f"Spell suggestion applied: '{err.token}' -> '{replacement}'")
+
+    def _ignore_spell_error(self, err: SpellError) -> None:
+        """Bỏ qua vị trí nghi vấn hiện tại."""
+        self._active_spell_errors = [
+            e for e in self._active_spell_errors
+            if not (e.start_idx == err.start_idx and e.end_idx == err.end_idx)
+        ]
+        self._update_spell_highlights()
+        remaining_count = len(self._active_spell_errors)
+        self._set_status(f"Đã bỏ qua '{err.token}'. Còn {remaining_count} vị trí nghi vấn.")
+        logger.info(f"Spell error ignored: '{err.token}'")
 
     @pyqtSlot()
     def _on_clear_spelling_highlights(self) -> None:
         """Xóa toàn bộ đánh dấu chính tả trên Textbox mà không thay đổi nội dung."""
+        self._active_spell_errors = []
         if self.text_result.extraSelections():
             self.text_result.setExtraSelections([])
-            self._set_status("Đã xoá các đánh dấu chính tả.")
-            logger.info("Spell check highlights cleared.")
+        self._set_status("Đã xoá các đánh dấu chính tả.")
+        logger.info("Spell check highlights cleared.")
 
     @pyqtSlot()
     def _on_text_changed(self) -> None:
-        """Xóa hoặc cập nhật các đánh dấu cũ khi người dùng chỉnh sửa văn bản."""
-        if self.text_result.extraSelections():
+        """Xóa hoặc cập nhật các đánh dấu cũ khi người dùng chỉnh sửa văn bản trực tiếp."""
+        if getattr(self, "_is_replacing_suggestion", False):
+            return
+        if self._active_spell_errors:
+            self._active_spell_errors = []
             self.text_result.setExtraSelections([])
             self._set_status("Văn bản đã chỉnh sửa — đã xoá các đánh dấu cũ.")
 
