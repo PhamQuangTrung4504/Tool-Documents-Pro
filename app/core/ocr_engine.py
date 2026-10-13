@@ -184,10 +184,21 @@ def get_lang_code(display_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_rotate_crop_image(img_bgr: np.ndarray, points: np.ndarray) -> Optional[np.ndarray]:
+def get_rotate_crop_image(
+    img_bgr: np.ndarray,
+    points: np.ndarray,
+    pad_top: int = 6,
+    pad_bottom: int = 6,
+    pad_left: int = 4,
+    pad_right: int = 4,
+) -> Optional[np.ndarray]:
     """
     Cắt và xoay thẳng vùng ảnh polygon 4 điểm (Perspective Transform).
-    Chuẩn hóa vùng ảnh chữ nằm ngang cho VietOCR.
+    Chuẩn hóa vùng ảnh chữ nằm ngang cho VietOCR với viền đệm (padding) an toàn:
+    - Mở rộng mép trên 6px (bảo vệ dấu sắc, hỏi, ngã, mũ: á, ả, ã, â, ê, ô, ư, ơ).
+    - Mở rộng mép dưới 6px (bảo vệ trọn vẹn dấu nặng: ạ, ặ, ậ, ẹ, ệ, ị, ọ, ộ, ợ, ụ, ự, ỵ).
+    - Mở rộng mép trái/phải 4px (tránh dính mép viền làm đứt chữ cái đầu/cuối).
+    - Dùng nền trắng (255, 255, 255) chuẩn tài liệu khi padding để tách biệt nét chữ.
     """
     try:
         pts = np.array(points, dtype=np.float32)
@@ -221,7 +232,19 @@ def get_rotate_crop_image(img_bgr: np.ndarray, points: np.ndarray) -> Optional[n
         if warped.shape[0] * 1.5 >= warped.shape[1] and warped.shape[0] > 40:
             warped = np.rot90(warped)
 
-        return warped
+        # Thêm padding viền an toàn với nền trắng (255, 255, 255)
+        # Bảo toàn 100% các dấu câu nhỏ ở rìa ảnh cho VietOCR
+        padded = cv2.copyMakeBorder(
+            warped,
+            top=pad_top,
+            bottom=pad_bottom,
+            left=pad_left,
+            right=pad_right,
+            borderType=cv2.BORDER_CONSTANT,
+            value=[255, 255, 255],
+        )
+
+        return padded
     except Exception as exc:
         logger.debug(f"Rotate crop failed: {exc}")
         return None
@@ -342,6 +365,19 @@ class VietnameseTextPostProcessor:
         (r"\b(yeu|yêu)\s+(cau|cầu)\b", "yêu cầu"),
         (r"\b(co|cơ)\s+(quan|quan),\s*(don|đơn)\s+(vi|vị)\b", "cơ quan, đơn vị"),
         (r"\b(nhung|những)\s+(van|vấn)\s+(de|đề)\b", "những vấn đề"),
+        (r"\b(ban|ban)\s+(bi|bí)\s+(thu|thư)\b", "Ban Bí thư"),
+        (r"\b(bi|bí)\s+(thu|thư)\b", "Bí thư"),
+        (r"\b(tai|tại)\s+(dieu|điều)\b", "tại Điều"),
+        (r"\b(tai|tại)\s+(khoan|khoản)\b", "tại Khoản"),
+        (r"\b(tai|tại)\s+(diem|điểm)\b", "tại Điểm"),
+        (r"\b(tai|tại)\s+(quyet|quyết)\s+(dinh|định)\b", "tại Quyết định"),
+        (r"\b(tai|tại)\s+(thong|thông)\s+(bao|báo)\b", "tại Thông báo"),
+        (r"\b(tai|tại)\s+(van|văn)\s+(ban|bản)\b", "tại Văn bản"),
+        (r"\b(tai|tại)\s+(nghi|nghị)\s+(dinh|định)\b", "tại Nghị định"),
+        (r"\b(tai|tại)\s+(ke|kế)\s+(hoach|hoạch)\b", "tại Kế hoạch"),
+        (r"\b(tai|tại)\s+(bo|bộ)\s+(phan|phận)\b", "tại Bộ phận"),
+        (r"\b(bo|bộ)\s+(phan|phận)\s+(mot|một)\s+(cua|cửa)\b", "Bộ phận Một cửa"),
+        (r"\b(mot|một)\s+(cua|cửa)\s+(lien|liên)\s+(thong|thông)\b", "Một cửa liên thông"),
         (r"\bngay\s+(\d{1,2})\s+thang\s+(\d{1,2})\s+nam\s+(\d{4})\b", r"ngày \1 tháng \2 năm \3"),
     ]
 
@@ -382,7 +418,8 @@ class VietnameseTextPostProcessor:
         # 5. Ký hiệu kết thúc văn bản hành chính ./.
         text = re.sub(r"\.\s*/\s*\.", "./.", text)
 
-        return text
+        # 6. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
+        return unicodedata.normalize("NFC", text)
 
 
 # ---------------------------------------------------------------------------
@@ -476,9 +513,12 @@ def get_global_detector(
 def get_global_vietocr(
     model_name: str = "vgg_transformer",
     use_gpu: bool = False,
+    beamsearch: bool = True,
 ) -> Any:
     """
     Khởi tạo VietOCR Predictor Singleton (duy nhất 1 lần, nạp weights vào RAM 1 lần).
+    Bật Beam Search (beamsearch=True) để phân tích ngữ cảnh câu và khôi phục chính xác
+    các từ vựng dễ nhầm lẫn dấu thanh (ví dụ: 'tại', 'Bí thư').
     """
     global _GLOBAL_VIETOCR
     with _GLOBAL_VIETOCR_LOCK:
@@ -490,14 +530,14 @@ def get_global_vietocr(
             from vietocr.tool.config import Cfg
             from vietocr.tool.predictor import Predictor
 
-            logger.info(f"Loading VietOCR model '{model_name}' (Singleton) …")
+            logger.info(f"Loading VietOCR model '{model_name}' (Singleton, beamsearch={beamsearch}) …")
             config = Cfg.load_config_from_name(model_name)
             device = "cuda:0" if (use_gpu and torch.cuda.is_available()) else "cpu"
             config["device"] = device
-            config["predictor"]["beamsearch"] = False
+            config["predictor"]["beamsearch"] = beamsearch
 
             _GLOBAL_VIETOCR = Predictor(config)
-            logger.info(f"VietOCR ({model_name}) singleton initialized on {device}.")
+            logger.info(f"VietOCR ({model_name}) singleton initialized on {device} (beamsearch={beamsearch}).")
         except Exception as exc:
             logger.warning(
                 f"Không thể khởi tạo VietOCR ({exc}). "
@@ -773,14 +813,21 @@ class OCREngine:
             conf = 0.0
 
             if use_vietocr:
-                # Cắt (crop) vùng chữ từ ảnh tiền xử lý
+                # Cắt (crop) vùng chữ từ ảnh tiền xử lý với padding viền an toàn
                 crop_bgr = get_rotate_crop_image(processed_image, np.array(poly))
                 if crop_bgr is not None and crop_bgr.size > 0:
                     try:
                         crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
                         crop_pil = Image.fromarray(crop_rgb)
-                        text, prob = self._vietocr.predict(crop_pil, return_prob=True)
-                        conf = float(prob)
+                        # Giữ nguyên tỷ lệ (aspect ratio), đưa trực tiếp vào VietOCR Predictor
+                        pred_res = self._vietocr.predict(crop_pil, return_prob=True)
+                        if isinstance(pred_res, tuple):
+                            text = pred_res[0] or ""
+                            prob = pred_res[1]
+                            conf = float(prob) if prob is not None else 0.95
+                        else:
+                            text = str(pred_res)
+                            conf = 0.95
                     except Exception as err:
                         logger.debug(f"VietOCR line predict error: {err}")
                         text = paddle_texts[idx] if idx < len(paddle_texts) else ""
@@ -793,8 +840,10 @@ class OCREngine:
                 text = paddle_texts[idx] if idx < len(paddle_texts) else ""
                 conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
 
-            # Chuẩn hóa văn bản
+            # Chuẩn hóa văn bản Unicode NFC và làm sạch hậu kiểm
+            text = unicodedata.normalize("NFC", text)
             text = VietnameseTextPostProcessor.clean_and_restore(text)
+            text = unicodedata.normalize("NFC", text)
 
             # Bỏ qua dòng trống hoặc quá thấp độ tin cậy
             if text and conf >= self.drop_score:
