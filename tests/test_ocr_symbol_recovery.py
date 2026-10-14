@@ -869,4 +869,65 @@ class TestPhase7AdvancedVisionAndTableReconstruction:
         assert tbl.grid[3][1] == "Tỷ lệ đảng viên dự sinh hoạt"
 
 
+class TestEmailDomainAndInternshipProgressRecovery:
+    """Kiểm thử phục hồi Ký tự Email (@), Dấu gạch ngang (-) và Bảng tiến độ thực tập."""
+
+    def test_recover_emails_and_urls_at_symbol(self):
+        """Khôi phục ký tự @ trong Email bị nhận nhầm thành Q, O, (a, (D và sửa amaron.com."""
+        from app.core.ocr_engine import recover_emails_and_urls
+
+        assert recover_emails_and_urls("vpt.luan Qhutech.edu.vn") == "vpt.luan@hutech.edu.vn"
+        assert recover_emails_and_urls("hunggia (Damaron.com") == "hunggia@amazon.com"
+        assert recover_emails_and_urls("hunggia (Damazon.com") == "hunggia@amazon.com"
+        assert recover_emails_and_urls("contact @ hutech.edu.vn") == "contact@hutech.edu.vn"
+        assert recover_emails_and_urls("info (a hutech.edu.vn") == "info@hutech.edu.vn"
+
+    def test_recover_dashes_and_hyphens(self):
+        """Khôi phục dấu gạch ngang giữa ngày tháng và trong cụm họ tên – email."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        raw1 = "2. Cán bộ hướng dẫn tại đơn vị thực tập (họ tên? email): Nguyễn Gia Hưng. hunggia (Damaron.com"
+        cleaned1 = VietnameseTextPostProcessor.clean_and_restore(raw1)
+        assert "họ tên – email" in cleaned1
+        assert "Nguyễn Gia Hưng – hunggia@amazon.com" in cleaned1 or "Nguyễn Gia Hưng - hunggia@amazon.com" in cleaned1
+
+        raw2 = "3. Giảng viên theo dõi/ hướng dẫn thực tập tại trường (họ tên? email): Võ Phạm Thành Luân ? vpt.luan Qhutech.edu.vn"
+        cleaned2 = VietnameseTextPostProcessor.clean_and_restore(raw2)
+        assert "họ tên – email" in cleaned2
+        assert "vpt.luan@hutech.edu.vn" in cleaned2
+
+        raw_dates = "20/04/2026 ? 26/04/2026 và 27/04/2026 03/05/2026"
+        cleaned_dates = VietnameseTextPostProcessor.clean_and_restore(raw_dates)
+        assert "20/04/2026 - 26/04/2026" in cleaned_dates
+        assert "27/04/2026 - 03/05/2026" in cleaned_dates
+
+    def test_internship_progress_table_formatting(self):
+        """Cố định cấu trúc bảng tiến độ thực tập 3 cột: Tuần | Ngày | Nội dung."""
+        from app.core.ocr_engine import format_progress_table_row
+
+        row1 = "1 20/04/2026 26/04/2026 | - Họp nhóm, tìm hiểu về AWS."
+        formatted1 = format_progress_table_row(row1)
+        assert formatted1 == "1 | 20/04/2026 - 26/04/2026 | - Họp nhóm, tìm hiểu về AWS."
+
+        row2 = "2 | 27/04/2026 03/05/2026 - Đã tạo và cấu hình AWS Free Tier account."
+        formatted2 = format_progress_table_row(row2)
+        assert formatted2 == "2 | 27/04/2026 - 03/05/2026 | - Đã tạo và cấu hình AWS Free Tier account."
+
+    def test_spell_checker_ignores_emails_and_tech_terms(self):
+        """Spell checker bảo vệ 100% email, url và thuật ngữ kỹ thuật, không bôi đỏ."""
+        from app.core.spell_corrector import check_text_spelling
+
+        text = (
+            "Cán bộ hướng dẫn: Nguyễn Gia Hưng – hunggia@amazon.com\n"
+            "Giảng viên hướng dẫn: Võ Phạm Thành Luân – vpt.luan@hutech.edu.vn\n"
+            "Cấu hình AWS Free Tier account và làm quen với AWS Management Console."
+        )
+        errors = check_text_spelling(text)
+        error_tokens = [err.token for err in errors]
+
+        for safe_word in ["hunggia", "amazon", "vpt", "luan", "hutech", "edu", "aws", "tier", "console", "account"]:
+            assert safe_word not in error_tokens, f"Từ an toàn '{safe_word}' không được bôi đỏ trong spell checker!"
+
+
+
 

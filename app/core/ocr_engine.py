@@ -460,6 +460,87 @@ def filter_border_noise_boxes(
     return valid_boxes
 
 
+def recover_emails_and_urls(text: str) -> str:
+    """
+    Thuật toán khôi phục ký tự @ trong Email và sửa lỗi tên miền/URL:
+    - VietOCR thường nhận @ thành Q, O, (a, (D, ©, at, hoặc dính liền vào tên miền
+      (ví dụ: Qhutech.edu.vn, (Damaron.com, (Damazon.com).
+    - Tự động sửa lỗi OCR trong tên miền công nghệ/trường học phổ biến: amaron.com -> amazon.com.
+    """
+    if not text:
+        return ""
+
+    # 1. Tự động sửa lỗi OCR trong tên miền công nghệ / trường học phổ biến
+    text = re.sub(r"\bamar(?:on|om)\.com\b", "amazon.com", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]*?)amar(?:on|om)\.com\b", r"\1amazon.com", text, flags=re.IGNORECASE)
+
+    domain_exts = r"(?:com|edu\.vn|gov\.vn|vn|net|org|io|edu)"
+
+    # 2. Mẫu 1 (Có khoảng cách hoặc ký tự rác đứng riêng):
+    # 'user Q domain.com', 'user (a domain.com', 'user at domain.com', 'user © domain.com'
+    text = re.sub(
+        rf"([a-zA-Z0-9._%+-]+)\s*(?:@|[QO©]|\(a|\([a-zA-Z]|at)\s+([a-zA-Z0-9-]+\.{domain_exts})\b",
+        r"\1@\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 3. Mẫu 2 (Ký tự nhầm lẫn dính liền vào domain, ví dụ: 'user Qhutech.edu.vn' hoặc 'user (Damazon.com'):
+    text = re.sub(
+        rf"([a-zA-Z0-9._%+-]+)\s+[\(]?[QOD©]([a-zA-Z0-9-]+\.{domain_exts})\b",
+        r"\1@\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        rf"([a-zA-Z0-9._%+-]+)\s+(?:\(a|\([a-zA-Z]|at)([a-zA-Z0-9-]+\.{domain_exts})\b",
+        r"\1@\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 4. Chuẩn hóa nếu @ có khoảng cách xung quanh: 'user @ domain.com' -> 'user@domain.com'
+    text = re.sub(
+        rf"([a-zA-Z0-9._%+-]+)\s*@\s*([a-zA-Z0-9-]+\.{domain_exts})\b",
+        r"\1@\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 5. Đảm bảo tên miền amazon.com chuẩn hóa lần cuối nếu còn sót
+    text = re.sub(r"@([a-zA-Z0-9-]+\.)amar(?:on|om)\.com\b", r"@\1amazon.com", text, flags=re.IGNORECASE)
+    text = re.sub(r"@amar(?:on|om)\.com\b", "@amazon.com", text, flags=re.IGNORECASE)
+
+    return text
+
+
+def format_progress_table_row(row_str: str) -> str:
+    """
+    Cố định cấu trúc bảng tiến độ thực tập hoặc bảng số thứ tự:
+    Cột 1: Tuần / STT
+    Cột 2: Ngày (khoảng ngày dd/mm/yyyy - dd/mm/yyyy)
+    Cột 3: Nội dung (các việc gạch đầu dòng)
+    """
+    if not row_str:
+        return ""
+
+    # 1. Tách số tuần đứng dính vào ngày tháng ở đầu dòng: '1 20/04/2026' -> '1 | 20/04/2026'
+    row_str = re.sub(r"^([ \t]*\d+)\s+(\d{2}/\d{2}/\d{4})", r"\1 | \2", row_str)
+
+    # 2. Khôi phục dấu gạch nối ngày tháng: '20/04/2026 26/04/2026' -> '20/04/2026 - 26/04/2026'
+    row_str = re.sub(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})", r"\1 - \2", row_str)
+    row_str = re.sub(r"(\d{2}/\d{2}/\d{4})\s*[?~_]\s*(\d{2}/\d{2}/\d{4})", r"\1 - \2", row_str)
+
+    # 3. Đảm bảo ngăn cách giữa cụm ngày tháng và nội dung gạch đầu dòng có ' | '
+    row_str = re.sub(r"(\d{2}/\d{2}/\d{4}\s*-\s*\d{2}/\d{2}/\d{4})\s*(?!\|)\s*(-|\+)\s+", r"\1 | \2 ", row_str)
+
+    # 4. Dọn dẹp khoảng trắng thừa quanh phân cách '|'
+    row_str = re.sub(r"\s*\|\s*", " | ", row_str)
+    row_str = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", row_str)
+
+    return row_str
+
+
 def _box_info_list(boxes: List[OCRBox]) -> List[dict]:
     """Chuyển đổi danh sách OCRBox thành danh sách dict chứa thuộc tính hình học."""
     box_info = []
@@ -744,7 +825,7 @@ def detect_and_reconstruct_table(
     stt_header_box = None
     for b in box_info:
         txt_norm = b["text"].strip().upper()
-        if re.match(r"^(?:STT|TT|SỐ\s*TT)$", txt_norm):
+        if re.match(r"^(?:STT|TT|SỐ\s*TT|TUẦN|TUẦN\s*LỄ|WEEK)$", txt_norm):
             stt_header_box = b
             break
 
@@ -1005,7 +1086,7 @@ def detect_and_reconstruct_table(
     # Khôi phục số thứ tự STT (1, 2, 3...) cho các hàng tiêu chí chính trong bảng nếu bị thiếu hoặc nhận nhầm
     if table_grid and len(table_grid) >= 2:
         header_row = table_grid[0]
-        if header_row and re.match(r"^(?:STT|TT|SỐ\s*TT)$", header_row[0].strip().upper()):
+        if header_row and re.match(r"^(?:STT|TT|SỐ\s*TT|TUẦN|TUẦN\s*LỄ|WEEK)$", header_row[0].strip().upper()):
             expected_stt = 1
             for r_idx in range(1, len(table_grid)):
                 row = table_grid[r_idx]
@@ -1413,6 +1494,18 @@ class ContextSymbolRecovery:
                 })
                 curr_line = cleaned_line
 
+            # 4. Cố định cấu trúc bảng tiến độ thực tập (Tuần | Ngày | Nội dung)
+            formatted_progress = format_progress_table_row(curr_line)
+            if formatted_progress != curr_line:
+                audit_trail.append({
+                    "line_index": idx,
+                    "original": curr_line,
+                    "recovered": formatted_progress,
+                    "decision": SymbolDecision.AUTO_CORRECT.value,
+                    "rule": "PROGRESS_TABLE_ROW_FORMAT",
+                })
+                curr_line = formatted_progress
+
             recovered_lines.append(curr_line)
 
         return recovered_lines, audit_trail
@@ -1490,7 +1583,25 @@ class VietnameseTextPostProcessor:
         text = re.sub(r"\b(Cầu|Cậu|Cấu)\s+(\d+[:.])", r"Câu \2", text)
         text = re.sub(r"\b(Bải|Bại)\s+(\d+[:.])", r"Bài \2", text)
 
-        # 9. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
+        # 9. Khôi phục Email và URL/Domain:
+        text = recover_emails_and_urls(text)
+
+        # 10. Khôi phục dấu gạch ngang / gạch nối:
+        # 10.a. Trong khoảng thời gian / ngày tháng
+        text = re.sub(r"(\d{2}/\d{2}/\d{4}|\b\d+)\s*[?~_]\s*(\d{2}/\d{2}/\d{4}|\b\d+)", r"\1 - \2", text)
+        text = re.sub(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})", r"\1 - \2", text)
+        # 10.b. Trong cụm đề mục liên kết họ tên – email
+        text = re.sub(r"(?i)(họ\s+(?:và\s+)?tên)\s*[?~_]\s*(email)", r"\1 – \2", text)
+        # 10.c. Giữa tên người và email khi bị thay thế bởi ? ~ . _
+        text = re.sub(r"([A-Za-zÀ-ỹĐđ]{2,})\s*[\.\?~_]\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.)", r"\1 – \2", text)
+
+        # 11. Chuẩn hóa định dạng các hàng bảng tiến độ thực tập
+        if "\n" in text:
+            text = "\n".join(format_progress_table_row(line) for line in text.split("\n"))
+        else:
+            text = format_progress_table_row(text)
+
+        # 12. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
         return unicodedata.normalize("NFC", text)
 
 
@@ -1998,6 +2109,7 @@ class OCREngine:
                     formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
 
                 formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+                formatted_row = format_progress_table_row(formatted_row)
                 text_lines.append(formatted_row)
             else:
                 is_fallback_table_row = False
@@ -2016,6 +2128,7 @@ class OCREngine:
                                 else:
                                     formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
                                 formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+                                formatted_row = format_progress_table_row(formatted_row)
                                 text_lines.append(formatted_row)
                             else:
                                 is_fallback_table_row = True

@@ -80,3 +80,41 @@
 2026-10-14 09:37:48 | INFO     | app.core.ocr_engine:clear_cache:1495 | OCREngine cache cleared.
 2026-10-14 09:37:48 | INFO     | app.ui.main_window:closeEvent:1411 | MainWindow closed.
 2026-10-14 09:37:48 | INFO     | __main__:main:117 | Application exited with code 0.
+2026-10-14 10:31:21 | INFO     | __main__:main:71 | ============================================================
+2026-10-14 10:31:21 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-14 10:31:21 | INFO     | __main__:main:73 | ============================================================
+2026-10-14 10:31:21 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-14 10:31:23 | INFO     | app.ui.main_window:__init__:542 | MainWindow initialized.
+2026-10-14 10:31:23 | INFO     | __main__:main:114 | Application window opened.
+2026-10-14 10:31:31 | INFO     | app.ui.main_window:_load_image_from_clipboard:903 | Image loaded from clipboard ((794, 549, 3))
+2026-10-14 10:31:33 | INFO     | app.core.ocr_engine:get_global_detector:1545 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-14 10:31:34 | INFO     | app.core.ocr_engine:get_global_detector:1581 | PaddleOCR detector singleton initialized successfully.
+2026-10-14 10:31:35 | INFO     | app.core.ocr_engine:get_global_vietocr:1605 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-14 10:31:40 | INFO     | app.core.ocr_engine:get_global_vietocr:1612 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-14 10:31:40 | INFO     | app.core.ocr_engine:_ensure_loaded:1720 | Hybrid OCR engines ready in 7.02s.
+2026-10-14 10:31:41 | DEBUG    | app.core.ocr_engine:recognize:1846 | Running PaddleOCR Text Detection …
+2026-10-14 10:32:03 | DEBUG    | app.core.ocr_engine:recognize:1900 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-14 10:32:58 | INFO     | app.core.ocr_engine:recognize:2054 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=0.95, elapsed=78.35s
+2026-10-14 10:32:58 | INFO     | app.ui.main_window:_on_ocr_finished:1054 | OCR result displayed: 34 lines, avg_conf=0.95
+2026-10-14 10:33:03 | DEBUG    | app.core.spell_corrector:_load_datasets:387 | Loaded 7698 syllables from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_syllables.txt
+2026-10-14 10:33:03 | DEBUG    | app.core.spell_corrector:_load_datasets:407 | Loaded 72535 words from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_words.txt
+2026-10-14 10:33:04 | DEBUG    | app.core.spell_corrector:_load_datasets:426 | Loaded 82834 English words from symspellpy.
+2026-10-14 10:33:04 | INFO     | app.ui.main_window:_on_spell_check_finished:1214 | Spell check finished: 3 suspicious tokens highlighted.
+2026-10-14 10:33:55 | INFO     | app.ui.main_window:_load_image_from_clipboard:903 | Image loaded from clipboard ((708, 1050, 3))
+2026-10-14 10:33:57 | DEBUG    | app.core.ocr_engine:recognize:1846 | Running PaddleOCR Text Detection …
+2026-10-14 10:34:16 | DEBUG    | app.core.ocr_engine:recognize:1900 | Recognizing 41 text lines with VietOCR (vgg_transformer) …
+2026-10-14 10:34:53 | INFO     | app.core.ocr_engine:recognize:2054 | Hybrid OCR completed: 41 lines, 1 tables detected, avg_conf=0.95, elapsed=57.04s
+2026-10-14 10:34:53 | INFO     | app.ui.main_window:_on_ocr_finished:1054 | OCR result displayed: 41 lines, avg_conf=0.95
+2026-10-14 10:35:07 | INFO     | app.ui.main_window:_on_spell_check_finished:1206 | Spell check finished: 0 suspicious tokens found.
+2026-10-14 10:43:12 | INFO     | app.ui.main_window:_load_image_from_clipboard:903 | Image loaded from clipboard ((754, 541, 3))
+2026-10-14 10:43:13 | DEBUG    | app.core.ocr_engine:recognize:1846 | Running PaddleOCR Text Detection …
+2026-10-14 10:43:35 | DEBUG    | app.core.ocr_engine:recognize:1900 | Recognizing 47 text lines with VietOCR (vgg_transformer) …
+2026-10-14 10:44:14 | INFO     | app.core.ocr_engine:recognize:2054 | Hybrid OCR completed: 47 lines, 1 tables detected, avg_conf=0.95, elapsed=61.55s
+2026-10-14 10:44:14 | INFO     | app.ui.main_window:_on_ocr_finished:1054 | OCR result displayed: 47 lines, avg_conf=0.95
+2026-10-14 10:44:25 | INFO     | app.ui.main_window:_on_spell_check_finished:1214 | Spell check finished: 8 suspicious tokens highlighted.
+2026-10-14 10:44:57 | INFO     | app.ui.main_window:_load_image_from_clipboard:903 | Image loaded from clipboard ((776, 907, 3))
+2026-10-14 10:45:00 | DEBUG    | app.core.ocr_engine:recognize:1846 | Running PaddleOCR Text Detection …
+2026-10-14 10:45:15 | DEBUG    | app.core.ocr_engine:recognize:1900 | Recognizing 32 text lines with VietOCR (vgg_transformer) …
+2026-10-14 10:45:45 | INFO     | app.core.ocr_engine:recognize:2054 | Hybrid OCR completed: 32 lines, 1 tables detected, avg_conf=0.95, elapsed=46.08s
+2026-10-14 10:45:45 | INFO     | app.ui.main_window:_on_ocr_finished:1054 | OCR result displayed: 32 lines, avg_conf=0.95
+2026-10-14 10:46:44 | INFO     | app.ui.main_window:_on_spell_check_finished:1214 | Spell check finished: 5 suspicious tokens highlighted.

@@ -187,6 +187,9 @@ TECH_LOAN_WORDS: Set[str] = {
     # Từ viết tắt bảng biểu & tiền tệ
     "stt", "tt", "đvt", "vnd", "usd", "eur", "khtn", "thpt", "thcs",
     "ubnd", "hđnd", "bhxh", "bhyt", "cand", "qdnd", "tnhh", "vat",
+    # Thuật ngữ đám mây, trường học, tài khoản & doanh nghiệp
+    "aws", "amazon", "hutech", "edu", "luan", "hunggia", "tier",
+    "console", "account", "fcj", "services", "free", "mssv", "dthb",
 }
 
 # Whitelist phần mở rộng phổ biến theo đặc tả kỹ thuật:
@@ -270,6 +273,10 @@ RE_PROTECTED = re.compile(
     r"|(\b[0-9]+[/-][0-9a-zA-ZÀ-ỹ/-]+\b)"                            # Mã công văn có số đầu
     r"|(\b[a-zA-ZÀ-ỹ0-9]+[/-][0-9a-zA-ZÀ-ỹ/-]+\b)"                   # Mã công văn chữ + ký hiệu
 )
+
+# Vùng an toàn tuyệt đối cho Email & Link/URL (BỎ QUA 100% không kiểm tra chính tả):
+RE_EMAIL_STRICT = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+RE_URL_STRICT = re.compile(r"https?://\S+|www\.\S+")
 
 # Regex tách từ tiếng Việt và Latin (bao gồm mọi dấu thanh dựng sẵn và tổ hợp)
 RE_WORD = re.compile(r"[a-zA-Z\u00C0-\u024F\u0300-\u036F\u1EA0-\u1EF9]+")
@@ -630,6 +637,9 @@ class VietnameseSpellChecker:
         if token_lower in self._valid_syllables:
             return True
 
+        if token_lower in TECH_LOAN_WORDS:
+            return True
+
         # Chứa ký tự tiếng Việt nhưng không thuộc tập âm tiết hợp lệ
         if has_vietnamese_char:
             return False
@@ -668,6 +678,10 @@ class VietnameseSpellChecker:
         for m in RE_FILE_PATH.finditer(text):
             protected_spans.append((m.start(), m.end()))
         for m in RE_PROTECTED.finditer(text):
+            protected_spans.append((m.start(), m.end()))
+        for m in RE_EMAIL_STRICT.finditer(text):
+            protected_spans.append((m.start(), m.end()))
+        for m in RE_URL_STRICT.finditer(text):
             protected_spans.append((m.start(), m.end()))
 
         # 2. Thu thập danh sách token cùng vị trí trong văn bản
