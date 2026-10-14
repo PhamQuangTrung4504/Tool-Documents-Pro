@@ -171,6 +171,46 @@ class TestMainWindowSpellCheckUI(unittest.TestCase):
         self.assertEqual(len(self.window.text_result.extraSelections()), 0)
         self.assertEqual(len(self.window._active_spell_errors), 0)
 
+    def test_vdng_highlight_and_suggest_in_ui(self) -> None:
+        """Kiểm thử tích hợp UI: 'Vdng mặt' được bôi đỏ đúng span [2:6] và gợi ý 'Vắng'."""
+        sample_text = "- Vdng mặt: 0 đồng chí."
+        self.window.text_result.setPlainText(sample_text)
+
+        self.window._on_check_spelling()
+        if self.window._spell_worker:
+            self.window._spell_worker.wait(3000)
+            QApplication.processEvents()
+
+        # 1. Xác minh có 1 vị trí nghi vấn được phát hiện
+        selections = self.window.text_result.extraSelections()
+        self.assertEqual(len(selections), 1, "Phải có đúng 1 vị trí được đánh dấu trên UI")
+        cursor = selections[0].cursor
+        self.assertEqual(cursor.selectionStart(), 2)
+        self.assertEqual(cursor.selectionEnd(), 6)
+        self.assertEqual(cursor.selectedText(), "Vdng")
+
+        # 2. Xác minh lỗi và gợi ý 'Vắng'
+        self.assertEqual(len(self.window._active_spell_errors), 1)
+        err = self.window._active_spell_errors[0]
+        self.assertEqual(err.token, "Vdng")
+        self.assertIn("Vắng", err.suggestions)
+
+        # 3. Áp dụng gợi ý 'Vắng'
+        self.window._apply_spell_suggestion(err, "Vắng")
+        self.assertEqual(
+            self.window.text_result.toPlainText(),
+            "- Vắng mặt: 0 đồng chí.",
+            "Văn bản sau khi người dùng chọn gợi ý phải trở thành '- Vắng mặt: 0 đồng chí.'",
+        )
+
+        # 4. Thử Undo để kiểm tra khôi phục
+        self.window.text_result.undo()
+        self.assertEqual(
+            self.window.text_result.toPlainText(),
+            sample_text,
+            "Undo phải trả về nguyên vẹn văn bản OCR gốc",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

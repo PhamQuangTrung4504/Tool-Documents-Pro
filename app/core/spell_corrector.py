@@ -131,6 +131,21 @@ OCR_CONFUSIONS: Dict[Tuple[str, str], float] = {
     ("a", "ă"): 0.5, ("ă", "a"): 0.5,
     ("a", "â"): 0.5, ("â", "a"): 0.5,
     ("e", "ê"): 0.5, ("ê", "e"): 0.5,
+    ("đ", "ă"): 0.5, ("ă", "đ"): 0.5,
+    ("đ", "ắ"): 0.6, ("ắ", "đ"): 0.6,
+    ("đ", "ằ"): 0.6, ("ằ", "đ"): 0.6,
+    ("đ", "ẳ"): 0.6, ("ẳ", "đ"): 0.6,
+    ("đ", "ẵ"): 0.6, ("ẵ", "đ"): 0.6,
+    ("đ", "ặ"): 0.6, ("ặ", "đ"): 0.6,
+    ("d", "ă"): 0.6, ("ă", "d"): 0.6,
+    ("d", "ắ"): 0.6, ("ắ", "d"): 0.6,
+    ("d", "ằ"): 0.6, ("ằ", "d"): 0.6,
+    ("d", "ẳ"): 0.6, ("ẳ", "d"): 0.6,
+    ("d", "ẵ"): 0.6, ("ẵ", "d"): 0.6,
+    ("d", "ặ"): 0.6, ("ặ", "d"): 0.6,
+    ("d", "a"): 0.6, ("a", "d"): 0.6,
+    ("d", "á"): 0.6, ("á", "d"): 0.6,
+    ("d", "à"): 0.6, ("à", "d"): 0.6,
     ("o", "0"): 0.6, ("0", "o"): 0.6,
     ("l", "1"): 0.6, ("1", "l"): 0.6,
     ("i", "1"): 0.6, ("1", "i"): 0.6,
@@ -168,7 +183,23 @@ TECH_LOAN_WORDS: Set[str] = {
     "backend", "frontend", "fullstack", "database", "redis", "postgres",
     "postgresql", "sql", "nosql", "cache", "docker", "k8s", "devops",
     "git", "github", "gitlab", "hotline", "blog", "post", "review",
+    "py", "js", "ts", "cpp", "html", "css", "yaml", "json",
 }
+
+# Whitelist phần mở rộng phổ biến theo đặc tả kỹ thuật:
+FILE_EXTENSIONS = (
+    "py|cpp|c|h|js|ts|html|css|json|sql|txt|md|doc|docx|pdf|png|jpg|jpeg|"
+    "xml|yaml|yml|dart|java|cs|xlsx|pptx|zip|exe|dll|toml|ini|log|sh|bat|gz|tar"
+)
+
+# Regex bảo vệ đường dẫn file và tên file có phần mở rộng:
+# - Hỗ trợ đường dẫn tương đối, tuyệt đối, nhiều cấp, dấu /, \, gạch dưới, gạch ngang.
+# - Không bao gồm dấu chấm kết thúc câu ở cuối đường dẫn (ví dụ: 'Mở main.py.' -> match 'main.py')
+RE_FILE_PATH = re.compile(
+    rf"(?i)"
+    rf"(?:\b(?:[a-zA-Z]:[\\/]|(?:\.{1,2}[\\/]))?[\w.-]+(?:[\\/][\w.-]+)+\.\s*(?:{FILE_EXTENSIONS})\b)"
+    rf"|(?:\b[\w-]+\.(?:{FILE_EXTENSIONS})\b)"
+)
 
 # Độ ưu tiên từ vựng phổ biến khi xếp hạng gợi ý
 COMMON_WORD_PRIORITY: Dict[str, float] = {
@@ -519,12 +550,12 @@ class VietnameseSpellChecker:
                 if weighted_edit_distance(w_norm, syl) <= 1.5:
                     candidates.add(syl)
 
-        # 5. Khôi phục theo cặp nhầm lẫn OCR có cơ sở (ví dụ u/ư, ơ/ă, o/ô, b/đ)
-        if len(candidates) < 3:
+        # 5. Khôi phục theo cặp nhầm lẫn OCR có cơ sở (ví dụ u/ư, ơ/ă, o/ô, b/đ, đ/ă)
+        if len(candidates) < 5:
             for syl in self._valid_syllables:
                 if abs(len(syl) - len(w_norm)) <= 1:
                     dist = weighted_edit_distance(w_norm, syl)
-                    if dist <= 0.6:  # Chỉ chấp nhận khi có bằng chứng OCR/ngữ âm mạnh
+                    if dist <= 0.65:  # Chấp nhận khi có bằng chứng OCR/ngữ âm mạnh (<= 0.65)
                         candidates.add(syl)
 
         # Loại bỏ từ trùng với từ gốc
@@ -589,18 +620,15 @@ class VietnameseSpellChecker:
         if token_lower in self._english_words:
             return True
 
-        if is_capitalized:
-            return True
+        # Kiểm tra nguyên âm: Mọi từ / âm tiết hợp lệ (kể cả tên riêng tiếng Anh/Latin)
+        # bắt buộc phải chứa ít nhất một nguyên âm (a, e, i, o, u, y, ă, â, ê, ô, ơ, ư).
+        # Nếu không có nguyên âm nào (ví dụ: vdng, dng, bct,...) -> chắc chắn là lỗi.
+        has_vowel = any(c in "aeiouyăâêôơư" for c in token_lower)
+        if not has_vowel:
+            return False
 
-        # Nhận diện đặc trưng ngữ âm ngoại lai (ký tự f, j, w, z hoặc cụm phụ âm không có trong tiếng Việt)
-        if any(c in token_lower for c in "fjwz"):
-            return True
-        non_vn_clusters = (
-            "ck", "nd", "st", "sh", "ct", "pt", "ft", "lt", "rt", "nt", "xt",
-            "mp", "rk", "lk", "ld", "ts", "ps", "pr", "pl", "br", "bl", "cr",
-            "cl", "dr", "fr", "fl", "gr", "gl", "str", "spr", "scr",
-        )
-        if any(cluster in token_lower for cluster in non_vn_clusters):
+        # Tên riêng nước ngoài hoặc từ viết hoa có nguyên âm (Obama, Alexander, Tesla, Samsung,...)
+        if is_capitalized and len(token_lower) >= 2:
             return True
 
         return False
@@ -617,8 +645,10 @@ class VietnameseSpellChecker:
         if not text or not text.strip():
             return []
 
-        # 1. Thu thập các vùng được bảo vệ (URLs, emails, ngày tháng, mã công văn)
+        # 1. Thu thập các vùng được bảo vệ (File paths, URLs, emails, ngày tháng, mã công văn)
         protected_spans: List[Tuple[int, int]] = []
+        for m in RE_FILE_PATH.finditer(text):
+            protected_spans.append((m.start(), m.end()))
         for m in RE_PROTECTED.finditer(text):
             protected_spans.append((m.start(), m.end()))
 
@@ -723,6 +753,8 @@ class VietnameseSpellChecker:
         suspicious_list.sort(key=lambda err: err.start_idx)
         return suspicious_list
 
+    find_spelling_errors = check_text_spelling
+
     def _evaluate_context_confusion(
         self,
         prev_token: str,
@@ -744,6 +776,21 @@ class VietnameseSpellChecker:
 
         # 1. Bảo vệ từ chức năng, liên từ, giới từ, loại từ và từ vựng phổ thông cơ bản
         if curr_lower in PROTECTED_COMMON_WORDS:
+            return None
+
+        # 1b. Phân biệt theo ngữ cảnh cho 'Ban' <-> 'Bạn'
+        if curr_lower == "ban":
+            # Nếu đi cùng từ chỉ cơ quan, tổ chức, ban ngành, thời gian: 'ban hành', 'ban chỉ đạo', 'ban quản lý', 'ban ngày', 'ban đầu' -> HỢP LỆ
+            if next_lower in {"hành", "ngày", "đêm", "đầu", "chỉ", "giám", "quản", "chấp", "tổ", "ngành", "bệ", "phát", "thường"}:
+                return None
+            # Nếu đứng đầu câu hoặc sau lời chào và đi liền đại từ / trợ động từ:
+            # ví dụ: "Ban có thể", "Ban hãy", "Ban cần", "chào Ban" -> Nghi vấn thiếu dấu thanh
+            if next_lower in {"có", "cần", "hãy", "sẽ", "đang", "muốn", "thân", "đọc", "nhớ", "ơi", "ạ", "nhé"}:
+                sugg_fmt = "Bạn" if curr_token and curr_token[0].isupper() else "bạn"
+                return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong ngữ cảnh '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+            if prev_lower in {"chào", "gửi", "thưa"}:
+                sugg_fmt = "Bạn" if curr_token and curr_token[0].isupper() else "bạn"
+                return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong ngữ cảnh '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
             return None
 
         # 2. Bảo vệ tên riêng (cả 2 từ liền nhau đều viết hoa)
@@ -831,3 +878,7 @@ def get_suggestions(word: str, context_prev: str = "", context_next: str = "") -
     """
     checker = get_default_spell_checker()
     return checker.get_suggestions(word, context_prev, context_next)
+
+
+# Alias tương thích hoàn toàn theo quy chuẩn yêu cầu (Phase 4 Master Prompt)
+find_spelling_errors = check_text_spelling

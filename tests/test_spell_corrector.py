@@ -460,5 +460,461 @@ class TestOCRLineGroupingAndBullets(unittest.TestCase):
         self.assertEqual(line2_text, "3. Căn lề phần Kính gửi:")
 
 
+class TestPunctuationAndFilePaths(unittest.TestCase):
+    """Kiểm thử chuyên sâu xử lý dấu câu, khoảng trắng, đường dẫn và phần mở rộng file."""
+
+    def test_file_paths_and_extensions_protected(self) -> None:
+        """Đường dẫn, tên file và phần mở rộng hợp lệ không bị đánh dấu lỗi."""
+        cases = [
+            "Mở app/core/spell_corrector.py để kiểm tra.",
+            "Đọc app/core/ocr_engine.py rồi chạy main.py.",
+            "File document.docx đã được xuất thành report.pdf.",
+            "Dữ liệu lưu tại data.json và ảnh giao diện image.png.",
+            "Xem trang index.html hoặc tệp cấu hình config.yaml.",
+            "Mở file app/core/spell_corrector.py.",
+        ]
+        for text in cases:
+            errs = check_text_spelling(text)
+            self.assertEqual(
+                errs, [],
+                f"Đường dẫn/tên file không được bị báo lỗi trong câu: {text!r} (phát hiện: {errs})"
+            )
+
+    def test_typo_near_file_path_detected(self) -> None:
+        """Từ sai chính tả thực sự đứng trước/sau đường dẫn vẫn phải được phát hiện chính xác."""
+        text = "Mở flle app/core/spell_corrector.py để kiêmr tra."
+        errs = check_text_spelling(text)
+        self.assertEqual(len(errs), 2, f"Phải phát hiện đúng 2 lỗi 'flle' và 'kiêmr' trong câu: {errs}")
+
+        tokens = [err.token for err in errs]
+        self.assertIn("flle", tokens)
+        self.assertIn("kiêmr", tokens)
+
+        # Kiểm tra offset chính xác 100% trong văn bản gốc
+        for err in errs:
+            self.assertEqual(text[err.start_idx:err.end_idx], err.token)
+
+    def test_punctuation_and_whitespace_preservation(self) -> None:
+        """Phân biệt dấu chấm theo ngữ cảnh: kết thúc câu, giữa 2 câu, số thập phân, v.v."""
+        # 1. Dấu chấm giữa 2 câu không có khoảng trắng: không làm biến đổi chuỗi gốc
+        text1 = "Xin chào.Bạn khỏe không."
+        errs1 = check_text_spelling(text1)
+        self.assertEqual(errs1, [])
+
+        # 2. Số thập phân
+        text2 = "Giá trị đo được là 3.14."
+        errs2 = check_text_spelling(text2)
+        self.assertEqual(errs2, [])
+
+        # 3. Dấu chấm liên tiếp và dấu ngoặc
+        text3 = "Nội dung đang tiếp tục cập nhật... (Theo quy định tại Điều 1.)"
+        errs3 = check_text_spelling(text3)
+        self.assertEqual(errs3, [])
+
+    def test_common_sentence_words_matching_extensions(self) -> None:
+        """Từ trong câu thông thường chứa chuỗi trùng với phần mở rộng không gây crash hoặc bỏ sót."""
+        text = "Một câu thông thường chứa các chuỗi doc hoặc c hoặc py không phải tên file."
+        errs = check_text_spelling(text)
+        # Không có ngoại lệ nào xảy ra và xử lý an toàn
+        self.assertIsInstance(errs, list)
+
+
+class TestContextBanBan(unittest.TestCase):
+    """Kiểm thử phân biệt ngữ cảnh giữa Ban (hành chính) và Bạn (đại từ/lời chào)."""
+
+    def test_ban_vs_ban_contextual_differentiation(self) -> None:
+        # 1. 'Ban' trong ngữ cảnh giao tiếp -> gợi ý 'Bạn'
+        errs1 = check_text_spelling("Ban có thể kiểm tra lại giúp tôi.")
+        self.assertEqual(len(errs1), 1)
+        self.assertEqual(errs1[0].token, "Ban")
+        self.assertIn("Bạn", errs1[0].suggestions)
+
+        errs2 = check_text_spelling("Chào Ban, chúc một ngày làm việc hiệu quả.")
+        self.assertEqual(len(errs2), 1)
+        self.assertEqual(errs2[0].token, "Ban")
+        self.assertIn("Bạn", errs2[0].suggestions)
+
+        # 2. 'Ban' trong ngữ cảnh hành chính / tổ chức -> HỢP LỆ, không báo lỗi
+        clean_cases = [
+            "Ban hành Nghị định số 14/2026/NĐ-CP của Chính phủ.",
+            "Ban chỉ đạo quốc gia về phòng chống thiên tai.",
+            "Ban quản lý dự án công trình giao thông.",
+            "Ủy ban nhân dân tỉnh Quảng Ninh.",
+            "Làm việc vào ban ngày và nghỉ ngơi vào ban đêm.",
+        ]
+        for s in clean_cases:
+            errs = check_text_spelling(s)
+            self.assertEqual(errs, [], f"Không được đánh dấu 'Ban' hành chính trong câu: {s!r}")
+
+
+class TestTwoColumnReadingOrderAndLayout(unittest.TestCase):
+    """Kiểm thử sắp xếp thứ tự đọc và tách cột trong ocr_engine."""
+
+    def test_two_column_administrative_header(self) -> None:
+        from app.core.ocr_engine import OCRBox, group_boxes_into_lines, sort_boxes_reading_order
+
+        # Mô phỏng tiêu đề hành chính 2 cột trong văn bản thật:
+        # Cột trái: BỘ TƯ PHÁP, Số: 14/2026/TT-BTP
+        # Cột phải: CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM, Độc lập - Tự do - Hạnh phúc, Hà Nội, ngày 30...
+        # Dưới: THÔNG TƯ, Hướng dẫn về thực hiện...
+        boxes = [
+            OCRBox("BỘ TƯ PHÁP", 0.98, [[100, 100], [220, 100], [220, 130], [100, 130]]),
+            OCRBox("Số: 14/2026/TT-BTP", 0.97, [[80, 170], [250, 170], [250, 200], [80, 200]]),
+            OCRBox("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", 0.99, [[450, 100], [900, 100], [900, 130], [450, 130]]),
+            OCRBox("Độc lập - Tự do - Hạnh phúc", 0.99, [[520, 135], [820, 135], [820, 165], [520, 165]]),
+            OCRBox("Hà Nội, ngày 30 tháng 9 năm 2026", 0.98, [[480, 170], [860, 170], [860, 200], [480, 200]]),
+            OCRBox("THÔNG TƯ", 0.99, [[420, 250], [580, 250], [580, 280], [420, 280]]),
+            OCRBox("Hướng dẫn về thực hiện thủ tục hành chính", 0.98, [[100, 300], [900, 300], [900, 330], [100, 330]]),
+        ]
+
+        lines = group_boxes_into_lines(boxes)
+        line_texts = [" ".join(b.text for b in line) for line in lines]
+
+        # Kiểm tra: Cột trái và Cột phải tuyệt đối KHÔNG bị ghép nối ngang thành cùng 1 dòng
+        for t in line_texts:
+            self.assertNotIn("BỘ TƯ PHÁP CỘNG HÒA", t)
+            self.assertNotIn("TT-BTP Hà Nội", t)
+
+        # Thứ tự đọc: Cột trái trước, Cột phải sau, rồi tới THÔNG TƯ
+        self.assertEqual(line_texts[0], "BỘ TƯ PHÁP")
+        self.assertEqual(line_texts[1], "Số: 14/2026/TT-BTP")
+        self.assertEqual(line_texts[2], "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM")
+        self.assertEqual(line_texts[3], "Độc lập - Tự do - Hạnh phúc")
+        self.assertEqual(line_texts[4], "Hà Nội, ngày 30 tháng 9 năm 2026")
+        self.assertEqual(line_texts[5], "THÔNG TƯ")
+        self.assertEqual(line_texts[6], "Hướng dẫn về thực hiện thủ tục hành chính")
+
+        # Kiểm tra hàm sort_boxes_reading_order
+        sorted_boxes = sort_boxes_reading_order(boxes)
+        self.assertEqual([b.text for b in sorted_boxes], line_texts)
+
+    def test_different_box_heights_on_same_line(self) -> None:
+        from app.core.ocr_engine import OCRBox, group_boxes_into_lines
+
+        # Hai box cùng một dòng nhưng chiều cao khác nhau (ví dụ: số thứ tự/bullet và text)
+        boxes = [
+            OCRBox("1.", 0.95, [[50, 105], [70, 105], [70, 125], [50, 125]]),         # h=20
+            OCRBox("Nội dung điều khoản", 0.98, [[80, 100], [350, 100], [350, 135], [80, 135]]), # h=35
+        ]
+        lines = group_boxes_into_lines(boxes)
+        self.assertEqual(len(lines), 1, "Box khác chiều cao nhưng cùng dòng phải được gom chung 1 dòng")
+        self.assertEqual(" ".join(b.text for b in lines[0]), "1. Nội dung điều khoản")
+
+
+class TestBorderNoiseFilter(unittest.TestCase):
+    """Kiểm thử lọc nhiễu quét tại mép ảnh trong ocr_engine."""
+
+    def test_filter_border_noise_cases(self) -> None:
+        from app.core.ocr_engine import OCRBox, filter_border_noise_boxes
+
+        img_w, img_h = 1000, 800
+        boxes = [
+            # 1. Box bị cắt rõ tại mép dưới (h=8 khi median_h=24) -> Bị lọc
+            OCRBox("1 1 118/05/11", 0.85, [[100, 792], [300, 792], [300, 800], [100, 800]]),
+            # 2. Dòng số trang hợp lệ sát đáy (h=22) -> Giữ lại
+            OCRBox("Trang 1/5", 0.98, [[450, 775], [550, 775], [550, 797], [450, 797]]),
+            # 3. Ngày tháng hợp lệ gần đáy (h=24) -> Giữ lại
+            OCRBox("Hà Nội, ngày 30 tháng 9 năm 2026", 0.98, [[300, 772], [700, 772], [700, 796], [300, 796]]),
+            # 4. Box sát mép nhưng chiều cao đầy đủ (h=25) -> Giữ lại
+            OCRBox("Ủy ban nhân dân thành phố", 0.99, [[100, 773], [400, 773], [400, 798], [100, 798]]),
+            # 5. Box bị cắt tại mép dưới nhưng confidence cao (conf=0.96, h=8) -> Bị lọc
+            OCRBox("và Nghị", 0.96, [[100, 792], [200, 792], [200, 800], [100, 800]]),
+            # 6. Box bị cắt tại mép trên (top=1, h=7) -> Bị lọc
+            OCRBox("Việt", 0.88, [[500, 1], [560, 1], [560, 8], [500, 8]]),
+            # 7. Box bình thường ở giữa trang
+            OCRBox("Thông báo chính thức", 0.99, [[200, 400], [500, 400], [500, 425], [200, 425]]),
+        ]
+
+        filtered = filter_border_noise_boxes(boxes, image_width=img_w, image_height=img_h)
+        remaining_texts = [b.text for b in filtered]
+
+        # Kiểm tra các box bị lọc
+        self.assertNotIn("1 1 118/05/11", remaining_texts)
+        self.assertNotIn("và Nghị", remaining_texts)
+        self.assertNotIn("Việt", remaining_texts)
+
+        # Kiểm tra các box hợp lệ được bảo toàn
+        self.assertIn("Trang 1/5", remaining_texts)
+        self.assertIn("Hà Nội, ngày 30 tháng 9 năm 2026", remaining_texts)
+        self.assertIn("Ủy ban nhân dân thành phố", remaining_texts)
+        self.assertIn("Thông báo chính thức", remaining_texts)
+
+
+class TestParallelHeaderScreenshot1(unittest.TestCase):
+    """Kiểm thử bố cục tiêu đề hành chính 2 khối thực tế (Screenshot 1: Đảng ủy xã Phước Hải)."""
+
+    def test_phuoc_hai_header_reading_order(self) -> None:
+        from app.core.ocr_engine import OCRBox, group_boxes_into_lines, sort_boxes_reading_order
+
+        boxes = [
+            # Khối trái (Cơ quan ban hành, số hiệu):
+            OCRBox("ĐẢNG ỦY XÃ PHƯỚC HẢI", 0.98, [[80, 100], [260, 100], [260, 125], [80, 125]]),
+            OCRBox("CHI BỘ VĂN PHÒNG HĐND", 0.97, [[70, 130], [270, 130], [270, 150], [70, 150]]),
+            OCRBox("VÀ UBND XÃ", 0.96, [[100, 155], [210, 155], [210, 175], [100, 175]]),
+            OCRBox("*", 0.95, [[150, 180], [165, 180], [165, 195], [150, 195]]),
+            OCRBox("Số: 01-BB/CB", 0.97, [[100, 200], [200, 200], [200, 225], [100, 225]]),
+            # Khối phải (Quốc hiệu, ngày tháng):
+            OCRBox("ĐẢNG CỘNG SẢN VIỆT NAM", 0.99, [[380, 100], [580, 100], [580, 125], [380, 125]]),
+            OCRBox("Phước Hải, ngày 05 tháng 10 năm 2026", 0.98, [[350, 150], [580, 150], [580, 175], [350, 175]]),
+            # Tiêu đề trung tâm giữa trang:
+            OCRBox("BIÊN BẢN", 0.99, [[250, 250], [370, 250], [370, 280], [250, 280]]),
+            OCRBox("sinh hoạt chi bộ định kỳ tháng 10 năm 2026", 0.98, [[180, 285], [480, 285], [480, 310], [180, 310]]),
+            # Thân bài:
+            OCRBox("Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026, tại Phòng họp UBND xã", 0.98, [[80, 330], [580, 330], [580, 360], [80, 360]]),
+        ]
+
+        lines = group_boxes_into_lines(boxes)
+        line_texts = [" ".join(b.text for b in line) for line in lines]
+
+        # Khối trái phải được đọc trọn vẹn từ trên xuống dưới (đường kẻ trang trí '*' đã bị loại bỏ theo Phase 3.3)
+        self.assertEqual(line_texts[0], "ĐẢNG ỦY XÃ PHƯỚC HẢI")
+        self.assertEqual(line_texts[1], "CHI BỘ VĂN PHÒNG HĐND")
+        self.assertEqual(line_texts[2], "VÀ UBND XÃ")
+        self.assertEqual(line_texts[3], "Số: 01-BB/CB")
+
+        # Sau đó mới đến Khối phải:
+        self.assertEqual(line_texts[4], "ĐẢNG CỘNG SẢN VIỆT NAM")
+        self.assertEqual(line_texts[5], "Phước Hải, ngày 05 tháng 10 năm 2026")
+
+        # Tiếp theo là Tiêu đề chính giữa trang và Thân bài:
+        self.assertEqual(line_texts[6], "BIÊN BẢN")
+        self.assertEqual(line_texts[7], "sinh hoạt chi bộ định kỳ tháng 10 năm 2026")
+        self.assertEqual(line_texts[8], "Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026, tại Phòng họp UBND xã")
+
+        # Tuyệt đối không để ĐẢNG CỘNG SẢN VIỆT NAM bị chèn vào giữa Khối trái
+        sorted_boxes = sort_boxes_reading_order(boxes)
+        sorted_texts = [b.text for b in sorted_boxes]
+        self.assertEqual(sorted_texts[:4], [
+            "ĐẢNG ỦY XÃ PHƯỚC HẢI",
+            "CHI BỘ VĂN PHÒNG HĐND",
+            "VÀ UBND XÃ",
+            "Số: 01-BB/CB",
+        ])
+
+
+class TestTableReconstructionScreenshot2(unittest.TestCase):
+    """Kiểm thử tái dựng cấu trúc bảng biểu 5 cột thực tế (Screenshot 2: Bảng điểm đánh giá)."""
+
+    def test_reconstruct_table_grid_and_alignment(self) -> None:
+        from app.core.ocr_engine import OCRBox, reconstruct_document_layout
+
+        boxes = [
+            # Tiêu đề ngoài bảng
+            OCRBox("BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ", 0.98, [[100, 40], [750, 40], [750, 65], [100, 65]]),
+            OCRBox("THÁNG 10 NĂM 2026", 0.98, [[320, 70], [520, 70], [520, 90], [320, 90]]),
+            # Hàng tiêu đề bảng (5 cột, ô 'Điểm tối đa' và 'Điểm tự chấm' bị tách box)
+            OCRBox("STT", 0.95, [[30, 110], [65, 110], [65, 135], [30, 135]]),
+            OCRBox("Tiêu chí đánh giá", 0.98, [[150, 110], [400, 110], [400, 135], [150, 135]]),
+            OCRBox("Điểm tối", 0.95, [[630, 105], [690, 105], [690, 122], [630, 122]]),
+            OCRBox("đa", 0.95, [[645, 125], [675, 125], [675, 140], [645, 140]]),
+            OCRBox("Điểm tự", 0.95, [[710, 105], [770, 105], [770, 122], [710, 122]]),
+            OCRBox("chấm", 0.95, [[720, 125], [760, 125], [760, 140], [720, 140]]),
+            OCRBox("Ghi chú", 0.96, [[790, 110], [840, 110], [840, 135], [790, 135]]),
+            # Hàng 1
+            OCRBox("1", 0.95, [[40, 150], [55, 150], [55, 175], [40, 175]]),
+            OCRBox("Chấp hành thời gian, thời lượng sinh hoạt", 0.98, [[80, 150], [550, 150], [550, 175], [80, 175]]),
+            OCRBox("05", 0.95, [[640, 150], [670, 150], [670, 175], [640, 175]]),
+            OCRBox("05", 0.95, [[725, 150], [755, 150], [755, 175], [725, 175]]),
+            # Hàng 2
+            OCRBox("+", 0.95, [[40, 185], [55, 185], [55, 210], [40, 210]]),
+            OCRBox("Chi bộ dưới 30 đảng viên ít nhất 90 phút; chi bộ trên 30 đảng viên ít nhất 120 phút", 0.98, [[80, 185], [600, 185], [600, 210], [80, 210]]),
+            OCRBox("05", 0.95, [[640, 185], [670, 185], [670, 210], [640, 210]]),
+            OCRBox("05", 0.95, [[725, 185], [755, 185], [755, 210], [725, 210]]),
+            # Hàng 3
+            OCRBox("+", 0.95, [[40, 220], [55, 220], [55, 245], [40, 245]]),
+            OCRBox("Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút", 0.98, [[80, 220], [580, 220], [580, 245], [80, 245]]),
+            OCRBox("04", 0.95, [[640, 220], [670, 220], [670, 245], [640, 245]]),
+            # Hàng 4
+            OCRBox("+", 0.95, [[40, 255], [55, 255], [55, 280], [40, 280]]),
+            OCRBox("Thời gian sinh hoạt chi bộ ít hơn quy định 15 - 30 phút", 0.98, [[80, 255], [590, 255], [590, 280], [80, 280]]),
+            OCRBox("03", 0.95, [[640, 255], [670, 255], [670, 280], [640, 280]]),
+            # Hàng 5
+            OCRBox("+", 0.95, [[40, 290], [55, 290], [55, 315], [40, 315]]),
+            OCRBox("Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định", 0.98, [[80, 290], [560, 290], [560, 315], [80, 315]]),
+            OCRBox("02", 0.95, [[640, 290], [670, 290], [670, 315], [640, 315]]),
+            # Hàng 6
+            OCRBox("+", 0.95, [[40, 325], [55, 325], [55, 350], [40, 350]]),
+            OCRBox("Thời gian sinh hoạt chi bộ dưới ½ so với quy định", 0.98, [[80, 325], [550, 325], [550, 350], [80, 350]]),
+            OCRBox("01", 0.95, [[640, 325], [670, 325], [670, 350], [640, 350]]),
+            # Hàng 7
+            OCRBox("2", 0.95, [[40, 360], [55, 360], [55, 385], [40, 385]]),
+            OCRBox("Tỷ lệ đảng viên dự sinh hoạt chi bộ", 0.98, [[80, 360], [480, 360], [480, 385], [80, 385]]),
+            OCRBox("05", 0.95, [[640, 360], [670, 360], [670, 385], [640, 385]]),
+        ]
+
+        lines, tables = reconstruct_document_layout(boxes)
+
+        # 1. Kiểm tra phát hiện đúng bảng biểu
+        self.assertEqual(len(tables), 1, "Phải phát hiện chính xác 1 bảng biểu")
+        tbl = tables[0]
+        self.assertEqual(tbl.num_cols, 5, "Bảng phải có đúng 5 cột")
+
+        # 2. Kiểm tra hàng Header: Ghép nối đúng các box bị tách trong cùng ô
+        header_row = tbl.grid[0]
+        self.assertEqual(header_row[0], "STT")
+        self.assertEqual(header_row[1], "Tiêu chí đánh giá")
+        self.assertEqual(header_row[2], "Điểm tối đa")
+        self.assertEqual(header_row[3], "Điểm tự chấm")
+        self.assertEqual(header_row[4], "Ghi chú")
+
+        # 3. Kiểm tra các hàng dữ liệu: Điểm số gắn liền với đúng tiêu chí
+        row1 = tbl.grid[1]
+        self.assertEqual(row1[0], "1")
+        self.assertEqual(row1[1], "Chấp hành thời gian, thời lượng sinh hoạt")
+        self.assertEqual(row1[2], "05")
+        self.assertEqual(row1[3], "05")
+
+        row3 = tbl.grid[3]
+        self.assertEqual(row3[0], "+")
+        self.assertEqual(row3[1], "Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút")
+        self.assertEqual(row3[2], "04")
+        self.assertEqual(row3[3], "")  # Ô trống
+
+        # 4. Kiểm tra tiêu đề ngoài bảng nằm trước bảng
+        line_texts = [" ".join(b.text for b in line) for line in lines]
+        self.assertIn("BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ", line_texts[0])
+        self.assertIn("THÁNG 10 NĂM 2026", line_texts[1])
+
+
+class TestSpellCheckDiacriticConfusionVdng(unittest.TestCase):
+    """Kiểm thử phát hiện lỗi dấu OCR nhầm lẫn (vđng -> vắng) và bảo toàn từ viết tắt."""
+
+    def test_vdng_detected_with_vang_suggestion(self) -> None:
+        from app.core.spell_corrector import check_text_spelling
+
+        # OCR nhầm 'vắng' thành 'vđng'
+        text = "Cuộc họp có 14 đồng chí, vđng 0 đồng chí."
+        errors = check_text_spelling(text)
+
+        vdng_err = next((e for e in errors if e.token == "vđng"), None)
+        self.assertIsNotNone(vdng_err, "Phải phát hiện token 'vđng' là nghi vấn chính tả")
+        self.assertIn("vắng", vdng_err.suggestions, "Gợi ý hàng đầu phải chứa 'vắng'")
+
+    def test_abbreviations_dc_and_stt_protected(self) -> None:
+        from app.core.spell_corrector import check_text_spelling
+
+        text = "STT 01: đ/c Lê Văn Điền chủ trì, Đ/c Nguyễn Văn Thắng làm thư ký."
+        errors = check_text_spelling(text)
+
+        err_tokens = [e.token for e in errors]
+        self.assertNotIn("STT", err_tokens)
+        self.assertNotIn("đ/c", err_tokens)
+        self.assertNotIn("Đ/c", err_tokens)
+
+    def test_capitalized_vdng_with_dash_and_plus_bullets(self) -> None:
+        from app.core.spell_corrector import check_text_spelling
+
+        # Case 1: Gạch đầu dòng - Vdng mặt: 0 đồng chí.
+        text1 = "- Vdng mặt: 0 đồng chí."
+        errors1 = check_text_spelling(text1)
+        self.assertEqual(len(errors1), 1, "Phải phát hiện chính xác 1 lỗi trong câu có gạch đầu dòng")
+        err1 = errors1[0]
+        self.assertEqual(err1.token, "Vdng")
+        self.assertEqual(err1.start_idx, 2)
+        self.assertEqual(err1.end_idx, 6)
+        self.assertEqual(text1[err1.start_idx:err1.end_idx], "Vdng")
+        self.assertIn("Vắng", err1.suggestions, "Gợi ý hàng đầu cho 'Vdng' phải là 'Vắng'")
+
+        # Case 2: Dấu cộng đầu dòng + Vdng mặt: 0 đồng chí.
+        text2 = "+ Vdng mặt: 0 đồng chí."
+        errors2 = check_text_spelling(text2)
+        self.assertEqual(len(errors2), 1)
+        err2 = errors2[0]
+        self.assertEqual(err2.token, "Vdng")
+        self.assertEqual(err2.start_idx, 2)
+        self.assertEqual(err2.end_idx, 6)
+        self.assertIn("Vắng", err2.suggestions)
+
+        # Case 3: Đầu câu không có bullet: Vdng mặt: 0 đồng chí.
+        text3 = "Vdng mặt: 0 đồng chí."
+        errors3 = check_text_spelling(text3)
+        self.assertEqual(len(errors3), 1)
+        err3 = errors3[0]
+        self.assertEqual(err3.token, "Vdng")
+        self.assertEqual(err3.start_idx, 0)
+        self.assertEqual(err3.end_idx, 4)
+        self.assertIn("Vắng", err3.suggestions)
+
+        # Case 4: Âm tính: Câu đúng 'Vắng mặt' không được báo lỗi
+        clean_cases = [
+            "Có mặt: 14 đồng chí; Vắng mặt: 0 đồng chí.",
+            "- Có mặt: 14 đồng chí.",
+            "- Vắng mặt: 0 đồng chí.",
+            "+ Vắng mặt: 0 đồng chí.",
+        ]
+        for clean_text in clean_cases:
+            self.assertEqual(
+                check_text_spelling(clean_text),
+                [],
+                f"Không được báo lỗi giả trên câu đúng: {clean_text!r}",
+            )
+
+
+class TestDocxExportWithTable(unittest.TestCase):
+    """Kiểm thử xuất tài liệu Word (.docx) bảo toàn cấu trúc bảng biểu."""
+
+    def test_export_docx_with_table(self) -> None:
+        import os
+        import tempfile
+        import docx
+        from app.core.ocr_engine import OCRBox, OCRResult, OCRTable, export_to_docx
+
+        # Tạo OCRResult giả lập có bảng
+        tbl = OCRTable(
+            grid=[
+                ["STT", "Tiêu chí đánh giá", "Điểm tối đa", "Điểm tự chấm", "Ghi chú"],
+                ["1", "Chấp hành thời gian", "05", "05", ""],
+                ["2", "Tỷ lệ đảng viên dự sinh hoạt", "05", "05", ""],
+            ],
+            bbox=[30, 100, 840, 250],
+            num_rows=3,
+            num_cols=5,
+        )
+
+        full_text = (
+            "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG\n"
+            "THÁNG 10 NĂM 2026\n"
+            "STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú\n"
+            "1 | Chấp hành thời gian | 05 | 05 | \n"
+            "2 | Tỷ lệ đảng viên dự sinh hoạt | 05 | 05 | \n"
+            "* Ghi chú dưới bảng biểu"
+        )
+
+        res = OCRResult(
+            boxes=[],
+            full_text=full_text,
+            language="vi",
+            tables=[tbl],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "test_output.docx")
+            success = export_to_docx(res, out_path)
+            self.assertTrue(success, "export_to_docx phải trả về True")
+            self.assertTrue(os.path.isfile(out_path), "File .docx phải tồn tại")
+
+            # Đọc lại file docx để kiểm tra cấu trúc
+            doc = docx.Document(out_path)
+            self.assertEqual(len(doc.tables), 1, "File Word phải chứa đúng 1 Table")
+            word_table = doc.tables[0]
+            self.assertEqual(len(word_table.rows), 3)
+            self.assertEqual(len(word_table.columns), 5)
+
+            # Kiểm tra text các cell trong Word table
+            self.assertEqual(word_table.cell(0, 0).text, "STT")
+            self.assertEqual(word_table.cell(0, 1).text, "Tiêu chí đánh giá")
+            self.assertEqual(word_table.cell(0, 2).text, "Điểm tối đa")
+            self.assertEqual(word_table.cell(1, 0).text, "1")
+            self.assertEqual(word_table.cell(1, 1).text, "Chấp hành thời gian")
+            self.assertEqual(word_table.cell(1, 2).text, "05")
+
+            # Kiểm tra các đoạn văn bản ngoài bảng
+            doc_paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+            self.assertIn("BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG", doc_paras)
+            self.assertIn("THÁNG 10 NĂM 2026", doc_paras)
+            self.assertIn("* Ghi chú dưới bảng biểu", doc_paras)
+
+
 if __name__ == "__main__":
     unittest.main()
+

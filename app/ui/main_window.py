@@ -83,6 +83,7 @@ from app.core.ocr_engine import (
     LANGUAGE_MAP,
     OCREngine,
     OCRResult,
+    export_to_docx,
     get_display_languages,
     get_lang_code,
 )
@@ -746,6 +747,13 @@ class MainWindow(QMainWindow):
         self.btn_export.clicked.connect(self._on_export_txt)
         btn_row.addWidget(self.btn_export)
 
+        self.btn_export_docx = QPushButton("📄  Xuất Word")
+        self.btn_export_docx.setObjectName("btnExportDocx")
+        self.btn_export_docx.setFixedHeight(42)
+        self.btn_export_docx.setToolTip("Xuất kết quả sang file Microsoft Word (.docx), giữ nguyên cấu trúc bảng biểu")
+        self.btn_export_docx.clicked.connect(self._on_export_docx)
+        btn_row.addWidget(self.btn_export_docx)
+
         right_layout.addLayout(btn_row)
         splitter.addWidget(right_panel)
 
@@ -1095,6 +1103,42 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.critical(
                 self, "Lỗi", f"Không thể lưu file:\n{exc}"
+            )
+
+    @pyqtSlot()
+    def _on_export_docx(self) -> None:
+        """Lưu kết quả ra file Microsoft Word (.docx)."""
+        text = self.text_result.toPlainText().strip()
+        if not text:
+            self._set_status("Chưa có kết quả để lưu")
+            return
+
+        default_name = "ocr_result.docx"
+        if self._image_path:
+            base = os.path.splitext(os.path.basename(self._image_path))[0]
+            default_name = f"{base}_ocr.docx"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Lưu kết quả OCR dạng Word",
+            default_name,
+            "Word Documents (*.docx);;All Files (*)",
+        )
+        if not path:
+            return
+
+        result_to_export = self._current_result
+        if result_to_export is None:
+            result_to_export = OCRResult(full_text=text)
+        else:
+            result_to_export.full_text = text
+
+        success = export_to_docx(result_to_export, path)
+        if success:
+            self._set_status(f"✅ Đã lưu Word: {os.path.basename(path)}")
+            logger.info(f"Result exported to DOCX: {path}")
+        else:
+            QMessageBox.critical(
+                self, "Lỗi", f"Không thể lưu file Word:\n{path}"
             )
 
     @pyqtSlot()
