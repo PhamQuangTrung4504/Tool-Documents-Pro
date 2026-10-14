@@ -184,6 +184,9 @@ TECH_LOAN_WORDS: Set[str] = {
     "postgresql", "sql", "nosql", "cache", "docker", "k8s", "devops",
     "git", "github", "gitlab", "hotline", "blog", "post", "review",
     "py", "js", "ts", "cpp", "html", "css", "yaml", "json",
+    # Từ viết tắt bảng biểu & tiền tệ
+    "stt", "tt", "đvt", "vnd", "usd", "eur", "khtn", "thpt", "thcs",
+    "ubnd", "hđnd", "bhxh", "bhyt", "cand", "qdnd", "tnhh", "vat",
 }
 
 # Whitelist phần mở rộng phổ biến theo đặc tả kỹ thuật:
@@ -207,7 +210,8 @@ COMMON_WORD_PRIORITY: Dict[str, float] = {
     "của": 4.0, "người": 4.0, "với": 3.8, "cho": 3.8, "năm": 4.0, "này": 3.5,
     "đã": 3.5, "khi": 3.5, "đáp": 3.5, "kiểm": 3.8, "soát": 3.8, "hoạch": 4.0,
     "thực": 4.0, "sư": 4.0, "nghiệp": 4.0, "hành": 3.8, "chính": 3.8,
-    "túc": 3.5, "tục": 3.5, "thức": 3.5,
+    "túc": 3.5, "tục": 3.5, "thức": 3.5, "án": 4.0, "quả": 4.0, "đơn": 4.0,
+    "cộng": 4.0, "phẩm": 4.0, "tập": 4.0,
 }
 
 # Tập từ chức năng, giới từ, liên từ, loại từ và từ vựng phổ thông cơ bản của tiếng Việt
@@ -234,9 +238,18 @@ PROTECTED_COMMON_WORDS: Set[str] = VIETNAMESE_STOPWORDS | {
     # Danh từ đơn vị / danh từ phổ thông cơ bản
     "số", "ngày", "tháng", "năm", "giờ", "phút", "giây", "lần", "câu", "từ",
     "người", "nhà", "nơi", "việc", "cái", "con", "chiếc", "bức", "tấm", "khối",
-    # Tính từ cơ bản phổ biến
+    # Giáo dục & học thuật
+    "học", "thi", "đề", "hỏi", "bài", "toán", "văn", "sử", "địa", "lý", "hóa",
+    "sinh", "điểm", "lớp", "trường", "khoa", "viện", "tiết", "môn",
+    # Doanh nghiệp, thương mại & tài chính
+    "giá", "phí", "thuế", "vốn", "lời", "lãi", "tiền", "quỹ", "sổ", "hàng",
+    "kho", "đơn", "vốn", "mục",
+    # Đơn vị đo lường phổ biến
+    "km", "cm", "mm", "ha", "lít", "ml", "đồng", "xu",
+    # Tính từ cơ bản phổ biến & màu sắc
     "đúng", "sai", "tốt", "xấu", "lớn", "nhỏ", "nhiều", "ít", "cao", "thấp",
     "xa", "gần", "nhanh", "chậm", "mới", "cũ", "sớm", "muộn", "rõ", "sâu", "sát",
+    "màu", "sắc", "xanh", "đỏ", "trắng", "đen", "vàng",
     # Động từ cơ bản phổ biến
     "đi", "làm", "ăn", "uống", "nói", "cười", "viết", "đọc", "xem", "nghe", "thấy",
     "biết", "hiểu", "nhớ", "quên", "mua", "bán", "trả", "nhận", "gửi", "lấy", "bỏ",
@@ -268,9 +281,14 @@ RE_WORD = re.compile(r"[a-zA-Z\u00C0-\u024F\u0300-\u036F\u1EA0-\u1EF9]+")
 
 
 def remove_diacritics(s: str) -> str:
-    """Loại bỏ dấu thanh và dấu mũ/râu, đưa về ký tự Latin cơ sở."""
+    """Loại bỏ dấu thanh và dấu mũ/râu, đưa về ký tự Latin cơ sở (bảo toàn chữ hoa/thường)."""
     s_nfc = unicodedata.normalize("NFC", s)
-    return "".join(BASE_MAP.get(c, c) for c in s_nfc)
+    res = []
+    for c in s_nfc:
+        c_low = c.lower()
+        base = BASE_MAP.get(c_low, c_low)
+        res.append(base.upper() if c.isupper() else base)
+    return "".join(res)
 
 
 def weighted_edit_distance(s1: str, s2: str) -> float:
@@ -669,8 +687,13 @@ class VietnameseSpellChecker:
                 continue
 
             # Bỏ qua từ viết tắt in hoa toàn bộ (UBND, HĐND, QĐ, CPU, VIP, TW, BCĐTW,...)
+            # Nhưng không bỏ qua các từ tiếng Việt thông thường được viết in hoa trong tiêu đề (CHI, BỐ, BẢNG, ĐIỂM,...)
             if len(raw_token) >= 2 and raw_token.isupper():
-                continue
+                has_vowel = any(c in "AEIOUY" for c in remove_diacritics(raw_token))
+                tok_lower = unicodedata.normalize("NFC", raw_token).lower()
+                is_known_acronym = raw_token in {"CPU", "VIP", "RAM", "ROM", "GPU", "PIN", "USB", "LAN", "WAN", "ID", "API", "SDK", "URL"}
+                if not has_vowel or is_known_acronym or (tok_lower not in self._valid_syllables):
+                    continue
 
             tokens_info.append((start_idx, end_idx, raw_token))
 
@@ -774,11 +797,109 @@ class VietnameseSpellChecker:
         prev_prev_lower = unicodedata.normalize("NFC", prev_prev_token.lower()) if prev_prev_token else ""
         next_next_lower = unicodedata.normalize("NFC", next_next_token.lower()) if next_next_token else ""
 
-        # 1. Bảo vệ từ chức năng, liên từ, giới từ, loại từ và từ vựng phổ thông cơ bản
+        # 1. Các cặp nhầm lẫn ngữ cảnh có bằng chứng rõ ràng (High-confidence OCR context confusion)
+        # Được xử lý TRƯỚC KHI lọc PROTECTED_COMMON_WORDS, kèm điều kiện loại trừ (negative whitelisting) nghiêm ngặt:
+
+        # 1.a. 'chỉ bộ' / 'chỉ ủy' / 'chỉ tiêu' -> 'chi', 'đồng chỉ' -> 'đồng chí'
+        if curr_lower == "chỉ":
+            if next_lower in {"bộ", "ủy", "tiêu"}:
+                sugg_fmt = "Chi" if curr_token and curr_token[0].isupper() else "chi"
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+            if prev_lower in {"đồng"}:
+                sugg_fmt = "chí" if curr_token.islower() else ("Chí" if curr_token[0].isupper() else "chí")
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.b. 'chi bố' -> 'chi bộ'
+        if curr_lower == "bố" and prev_lower in {"chi"}:
+            if next_lower not in {"mẹ", "con"} and prev_prev_lower not in {"ông", "bà"}:
+                if curr_token.isupper():
+                    sugg_fmt = "BỘ"
+                elif curr_token[0].isupper():
+                    sugg_fmt = "Bộ"
+                else:
+                    sugg_fmt = "bộ"
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.c. 'không cổ' -> 'không có'
+        if curr_lower == "cổ" and prev_lower in {"không", "chẳng", "chưa"}:
+            if next_lower not in {"áo", "xưa", "kính", "điển", "đại", "phần", "tích", "thụ", "loa", "hũ", "cò"}:
+                sugg_fmt = "Có" if curr_token and curr_token[0].isupper() else "có"
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.d. 'ngày ... thắng ...' -> 'tháng'
+        if curr_lower == "thắng":
+            is_date_context = (
+                next_lower.isdigit()
+                or prev_lower in {"ngày", "đầu", "cuối", "giữa"}
+                or (prev_token.isdigit() and prev_prev_lower == "ngày")
+                or next_next_lower in {"năm"}
+            )
+            is_valid_victory = prev_lower in {"chiến", "toàn", "quyết", "bách"} or next_lower in {"lợi", "cảnh", "trận"}
+            if is_date_context and not is_valid_victory:
+                sugg_fmt = "Tháng" if curr_token and curr_token[0].isupper() else "tháng"
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm ngày tháng (gợi ý: '{sugg_fmt}')"
+
+        # 1.e. 'đang viên' / 'đăng phí' -> 'đảng viên' / 'đảng phí'
+        if curr_lower in {"đang", "đăng"}:
+            if next_lower in {"viên", "phí", "bộ", "ủy"}:
+                is_valid_doing = (curr_lower == "đang" and next_lower in {"làm", "học", "ăn", "ở", "đi", "nói", "viết", "đọc"})
+                is_valid_reg = (curr_lower == "đăng" and next_lower in {"ký", "nhập", "tải", "báo", "cai", "quang"})
+                if not is_valid_doing and not is_valid_reg:
+                    sugg_fmt = "Đảng" if curr_token and curr_token[0].isupper() else "đảng"
+                    return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+
+        # 1.f. 'sinh hoạt đằng' -> 'đảng'
+        if curr_lower == "đằng" and prev_lower in {"hoạt", "sinh"}:
+            sugg_fmt = "Đảng" if curr_token and curr_token[0].isupper() else "đảng"
+            return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.g. 'it nhất' / 'it hơn' -> 'ít nhất' / 'ít hơn'
+        if curr_lower == "it" and next_lower in {"nhất", "hơn", "ỏi", "khi", "nhiều"}:
+            sugg_fmt = "Ít" if curr_token and curr_token[0].isupper() else "ít"
+            return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+
+        # 1.h. 'dàng viên' -> 'đảng viên'
+        if curr_lower == "dàng" and next_lower in {"viên"}:
+            sugg_fmt = "Đảng" if curr_token and curr_token[0].isupper() else "đảng"
+            return sugg_fmt, f"Nghi vấn nhầm phụ âm trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+
+        # 1.i. Giáo dục & thi cử: 'đáp an' -> 'đáp án'
+        if curr_lower == "an" and prev_lower in {"đáp", "trả"}:
+            sugg_fmt = "Án" if curr_token and curr_token[0].isupper() else "án"
+            return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.j. Giáo dục & khoa học: 'kết qua' -> 'kết quả'
+        if curr_lower == "qua" and prev_lower in {"kết"}:
+            sugg_fmt = "Quả" if curr_token and curr_token[0].isupper() else "quả"
+            return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.k. Thương mại & hóa đơn: 'hóa đon' -> 'hóa đơn'
+        if curr_lower == "đon" and prev_lower in {"hóa"}:
+            sugg_fmt = "Đơn" if curr_token and curr_token[0].isupper() else "đơn"
+            return sugg_fmt, f"Nghi vấn nhầm ký tự trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.l. Kế toán & bảng tính: 'tổng công' -> 'tổng cộng' (loại trừ tổng công ty, tổng công đoàn)
+        if curr_lower == "công" and prev_lower in {"tổng"}:
+            if next_lower not in {"ty", "đoàn", "giám", "cục", "hội"} and (next_lower in {"tiền", "số", "điểm", "chi", "thu", "thanh", "là"} or (next_token and next_token[0].isdigit()) or not next_lower):
+                sugg_fmt = "Cộng" if curr_token and curr_token[0].isupper() else "cộng"
+                return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.m. Doanh nghiệp & sản phẩm: 'sản phâm' -> 'sản phẩm'
+        if curr_lower == "phâm" and prev_lower in {"sản"}:
+            sugg_fmt = "Phẩm" if curr_token and curr_token[0].isupper() else "phẩm"
+            return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.n. Giáo dục & học tập: 'bài tạp' -> 'bài tập' (loại trừ bài tạp chí)
+        if curr_lower == "tạp" and prev_lower in {"bài"}:
+            if next_lower not in {"chí", "kỹ", "nham", "văn"}:
+                sugg_fmt = "Tập" if curr_token and curr_token[0].isupper() else "tập"
+                return sugg_fmt, f"Nghi vấn nhầm nguyên âm trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+
+        # 1.o. Bảo vệ từ chức năng, liên từ, giới từ, loại từ và từ vựng phổ thông cơ bản
         if curr_lower in PROTECTED_COMMON_WORDS:
             return None
 
-        # 1b. Phân biệt theo ngữ cảnh cho 'Ban' <-> 'Bạn'
+        # 1.j. Phân biệt theo ngữ cảnh cho 'Ban' <-> 'Bạn'
         if curr_lower == "ban":
             # Nếu đi cùng từ chỉ cơ quan, tổ chức, ban ngành, thời gian: 'ban hành', 'ban chỉ đạo', 'ban quản lý', 'ban ngày', 'ban đầu' -> HỢP LỆ
             if next_lower in {"hành", "ngày", "đêm", "đầu", "chỉ", "giám", "quản", "chấp", "tổ", "ngành", "bệ", "phát", "thường"}:
@@ -794,10 +915,13 @@ class VietnameseSpellChecker:
             return None
 
         # 2. Bảo vệ tên riêng (cả 2 từ liền nhau đều viết hoa)
+        # Chỉ áp dụng khi không phải từ ghép phổ biến trong văn bản hành chính (chi, ban, tổ, phòng, bộ, hội, đảng, đồng)
         if prev_token and curr_token and prev_token[0].isupper() and curr_token[0].isupper():
-            return None
+            if prev_lower not in {"chi", "ban", "tổ", "phòng", "bộ", "hội", "đảng", "đồng"}:
+                return None
         if next_token and curr_token and next_token[0].isupper() and curr_token[0].isupper():
-            return None
+            if curr_lower not in {"chi", "ban", "tổ", "phòng", "bộ", "hội", "đảng", "đồng"}:
+                return None
 
         # 3. Nếu cụm từ ghép hiện tại đã có trong từ điển thì hoàn toàn đúng ngữ cảnh
         if prev_lower and f"{prev_lower} {curr_lower}" in self._vietnamese_words:

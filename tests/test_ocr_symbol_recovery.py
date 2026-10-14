@@ -733,3 +733,140 @@ class TestPhase6DocxExportParallelHeader:
         assert "BIÊN BẢN" in body_paras_text
 
 
+class TestPhase7AdvancedVisionAndTableReconstruction:
+    """G. KIỂM THỬ KHÔI PHỤC NÂNG CAO CHO OCR & TÁI DỰNG BẢNG THỰC TẾ."""
+
+    @pytest.mark.parametrize(
+        "input_text,expected",
+        [
+            ("L NỘI DUNG, CHƯƠNG TRÌNH SINH HOẠT CHI BỘ", "I. NỘI DUNG, CHƯƠNG TRÌNH SINH HOẠT CHI BỘ"),
+            ("L. TIẾN HÀNH SINH HOẠT", "I. TIẾN HÀNH SINH HOẠT"),
+            ("L. KẾ HOẠCH NĂM 2026", "I. KẾ HOẠCH NĂM 2026"),
+        ],
+    )
+    def test_roman_i_from_l(self, input_text, expected):
+        """Khôi phục số La Mã I. từ chữ cái L hoặc L. khi đi cùng tiêu đề in hoa."""
+        rec, dec, _, rule = ContextSymbolRecovery.recover_roman_numeral_in_line(input_text)
+        assert rec == expected
+        assert dec == SymbolDecision.AUTO_CORRECT
+
+    @pytest.mark.parametrize(
+        "negative_l",
+        [
+            "Lãnh đạo đơn vị phát biểu",
+            "Lớp bồi dưỡng nghiệp vụ",
+            "Lê Văn Điền thông qua báo cáo",
+        ],
+    )
+    def test_roman_i_negative_l(self, negative_l):
+        """Bảo vệ tuyệt đối các từ tiếng Việt bắt đầu bằng L không bị đổi thành số La Mã."""
+        rec, dec, _, _ = ContextSymbolRecovery.recover_roman_numeral_in_line(negative_l)
+        assert rec == negative_l
+        assert dec == SymbolDecision.PRESERVE
+
+    @pytest.mark.parametrize(
+        "input_text,expected",
+        [
+            ("%Không có đảng viên vắng mặt", "+ Không có đảng viên vắng mặt"),
+            ("4 Chỉ bộ dưới 30 đảng viên", "+ Chỉ bộ dưới 30 đảng viên"),
+            ("7 Thời gian sinh hoạt chi bộ", "+ Thời gian sinh hoạt chi bộ"),
+            ("1 Trừ trường hợp được miễn công tác", "* Trừ trường hợp được miễn công tác"),
+            ("? Trừ trường hợp được miễn công tác", "* Trừ trường hợp được miễn công tác"),
+            ("- Trừ trường hợp được miễn công tác", "* Trừ trường hợp được miễn công tác"),
+        ],
+    )
+    def test_bullet_and_footnote_recovery(self, input_text, expected):
+        """Khôi phục chính xác bullet %, 4, 7 và footnote * cho các dòng tiêu chí."""
+        rec, dec, _ = ContextSymbolRecovery.recover_bullets_and_pluses(input_text)
+        assert rec == expected
+        assert dec == SymbolDecision.AUTO_CORRECT
+
+    @pytest.mark.parametrize(
+        "input_text,expected",
+        [
+            (
+                "Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định",
+                "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+            ),
+            (
+                "Thời gian sinh hoạt chỉ bộ dưới % so với quy định",
+                "Thời gian sinh hoạt chi bộ dưới ½ so với quy định",
+            ),
+            (
+                "ĐẰNG CỘNG SẢN VIỆT NAM",
+                "ĐẢNG CỘNG SẢN VIỆT NAM",
+            ),
+            (
+                "ngày 28 thắng 10 năm 2024",
+                "ngày 28 tháng 10 năm 2024",
+            ),
+            (
+                "Ghi chủ",
+                "Ghi chú",
+            ),
+            (
+                "it nhất 90 phút",
+                "ít nhất 90 phút",
+            ),
+            (
+                "Trừ trường hợp thực hiện nhiệm vụ đặc",
+                "Trừ trường hợp thực hiện nhiệm vụ đặc biệt",
+            ),
+            (
+                "sinh hoạt đằng",
+                "sinh hoạt đảng",
+            ),
+            (
+                "đảng viễn",
+                "đảng viên",
+            ),
+            (
+                "chi bố",
+                "chi bộ",
+            ),
+        ],
+    )
+    def test_post_processor_text_cleanups(self, input_text, expected):
+        """Chuẩn hóa phân số ½ và các thuật ngữ hành chính phổ biến."""
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(input_text)
+        assert cleaned == expected
+
+    def test_table_reconstruction_missing_stt_and_mutual_exclusivity(self):
+        """Kiểm tra khôi phục STT 1, 2 và tính phân hoạch độc quyền của bảng."""
+        boxes = [
+            # Header ngoài bảng
+            OCRBox("BẢNG ĐIỂM ĐÁNH GIÁ", 0.98, [[100, 30], [500, 30], [500, 55], [100, 55]]),
+            # Header bảng
+            OCRBox("STT", 0.95, [[30, 100], [70, 100], [70, 125], [30, 125]]),
+            OCRBox("Nội dung tiêu chí", 0.98, [[100, 100], [450, 100], [450, 125], [100, 125]]),
+            OCRBox("Điểm chuẩn", 0.95, [[600, 100], [700, 100], [700, 125], [600, 125]]),
+            # Hàng 1 (bị mất STT 1)
+            OCRBox("Chấp hành thời gian sinh hoạt", 0.98, [[100, 140], [500, 140], [500, 165], [100, 165]]),
+            OCRBox("10", 0.95, [[620, 140], [660, 140], [660, 165], [620, 165]]),
+            # Hàng 2 (tiêu chí con +)
+            OCRBox("+ Đúng giờ", 0.98, [[100, 180], [300, 180], [300, 205], [100, 205]]),
+            OCRBox("05", 0.95, [[620, 180], [660, 180], [660, 205], [620, 205]]),
+            # Hàng 3 (Hàng 2 chính, STT bị dính chữ '2 ANNASTRY')
+            OCRBox("2 ANNASTRY", 0.95, [[30, 220], [80, 220], [80, 245], [30, 245]]),
+            OCRBox("Tỷ lệ đảng viên dự sinh hoạt", 0.98, [[100, 220], [500, 220], [500, 245], [100, 245]]),
+            OCRBox("10", 0.95, [[620, 220], [660, 220], [660, 245], [620, 245]]),
+        ]
+
+        lines, tables = reconstruct_document_layout(boxes)
+        assert len(tables) == 1
+        tbl = tables[0]
+
+        # Kiểm tra STT hàng 1 được khôi phục thành '1'
+        assert tbl.grid[1][0] == "1"
+        assert tbl.grid[1][1] == "Chấp hành thời gian sinh hoạt"
+
+        # Kiểm tra hàng con không có STT số
+        assert tbl.grid[2][0] == ""
+        assert "+ Đúng giờ" in tbl.grid[2][1]
+
+        # Kiểm tra STT hàng 3 được chuẩn hóa thành '2'
+        assert tbl.grid[3][0] == "2"
+        assert tbl.grid[3][1] == "Tỷ lệ đảng viên dự sinh hoạt"
+
+
+

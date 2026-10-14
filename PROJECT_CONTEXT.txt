@@ -1,0 +1,265 @@
+================================================================================
+TOOL-DOCUMENTS-PRO — PROJECT CONTEXT & TECHNICAL REFERENCE
+================================================================================
+Tài liệu ngữ cảnh kỹ thuật tổng thể cho hệ thống Document Assistant OCR Desktop
+Thời gian cập nhật: 2026-10-14
+Môi trường hệ thống: Windows 10/11 64-bit | Python 3.13.2 | PyQt5 | PaddleOCR + VietOCR
+
+================================================================================
+1. TỔNG QUAN DỰ ÁN VÀ CẤU TRÚC THƯ MỤC
+================================================================================
+Tool-Documents-Pro là ứng dụng Desktop Windows chuyên dụng cho việc nhận dạng
+ký tự quang học (OCR) tài liệu, văn bản hành chính tiếng Việt và đa ngôn ngữ,
+phân tích bố cục hình học (Geometric Layout Analysis), khôi phục bảng biểu
+(Table Reconstruction), dò soát chính tả tiếng Việt tương tác theo ngữ cảnh
+(Context-Aware Spell Checking) và xuất kết quả sang Microsoft Word (.docx) / Text (.txt).
+
+Cấu trúc thư mục chi tiết trong workspace:
+Tool-Documents-Pro/
+├── requirements.txt            # Danh sách dependency và phiên bản thư viện
+├── README.md                   # Tài liệu hướng dẫn sử dụng và phím tắt
+├── pytest.ini                  # Cấu hình kiểm thử pytest (testpaths = tests)
+├── run.py                      # Entry point khởi chạy ứng dụng chính
+├── PROJECT_CONTEXT.txt         # Tài liệu ngữ cảnh kỹ thuật (file này)
+├── app/
+│   ├── __init__.py             # Package init
+│   ├── core/
+│   │   ├── __init__.py         # Export API: OCREngine, OCRResult, SpellError, check_text_spelling, get_suggestions
+│   │   ├── ocr_engine.py       # Module lõi OCR Hybrid, Image Preprocessing, Layout & Table Reconstruction, DOCX Export
+│   │   ├── spell_corrector.py  # Module kiểm tra chính tả tiếng Việt theo ngữ cảnh, gợi ý tương tác
+│   │   ├── vietnamese_syllables.txt # Từ điển 7.698 âm tiết tiếng Việt hợp lệ
+│   │   └── vietnamese_words.txt     # Từ điển 72.535 từ vựng, từ ghép, thuật ngữ tiếng Việt
+│   └── ui/
+│       ├── __init__.py         # UI package init
+│       └── main_window.py      # Giao diện PyQt5 Dark Theme, background threads, image preview, highlight
+├── tests/
+│   ├── test_ocr_symbol_recovery.py # Kiểm thử hồi quy OCR, số La Mã, bullet, phân số, bảng biểu, STT, DOCX
+│   ├── test_spell_corrector.py     # Kiểm thử kiểm tra chính tả, âm tiết, ngữ cảnh N-gram, negative whitelisting
+│   └── test_ui_spell_check.py      # Kiểm thử tích hợp giao diện PyQt5, phím tắt, highlight và menu ngữ cảnh
+├── training/
+│   ├── README.md               # Hướng dẫn fine-tune mô hình PaddleOCR
+│   ├── prepare_dataset.py      # Script chuẩn bị dữ liệu gán nhãn
+│   └── config_rec_v4.yml       # File cấu hình huấn luyện PP-OCRv4
+└── logs/
+    └── app_YYYY-MM-DD.log      # Nhật ký vận hành ứng dụng hàng ngày (xoay vòng 10MB, lưu 7 ngày)
+
+================================================================================
+2. CÔNG NGHỆ, FRAMEWORK, THƯ VIỆN VÀ PHIÊN BẢN THỰC TẾ
+================================================================================
+Hệ điều hành: Windows 10/11 (64-bit)
+Python Runtime: Python 3.13.2 (tags/v3.13.2:4f8bb39, Feb 4 2025, 15:23:48) [MSC v.1942 64 bit (AMD64)]
+
+Các thư viện chính xác nhận từ môi trường runtime:
+- GUI Framework: PyQt5 5.15.11 (PyQt5-sip 12.17.0)
+- Deep Learning & OCR Engine:
+  + paddlepaddle: 3.3.1 (Static runner tối ưu CPU trên Windows)
+  + paddleocr: 3.7.0 (Sử dụng model detection PP-OCRv3_mobile_det hoặc PP-OCRv4)
+  + vietocr: Architecture vgg_transformer (Seq2Seq Transformer Encoder-Decoder với BeamSearch)
+  + torch: 2.14.1+cpu
+  + torchvision: 0.15.0+ (hoặc bản build tương thích torch)
+  + einops: Thao tác tensor cho Transformer
+- Xử lý ảnh & Thị giác máy tính:
+  + opencv-python: 4.10.0 (Perspective Transform 4 điểm, CLAHE, Bilateral Filter, FastNlMeansDenoising)
+  + Pillow: 12.3.0 (Xử lý định dạng RGB cho VietOCR)
+  + numpy: 2.3.5 (Tính toán ma trận và phân tích tọa độ bounding box)
+- Xử lý ngôn ngữ tự nhiên & Xuất tài liệu:
+  + symspellpy: 6.7.7 (Từ điển 82.834 từ tiếng Anh/thuật ngữ kỹ thuật)
+  + python-docx: 1.2.0 (Xuất tài liệu Microsoft Word .docx có cấu trúc bảng biểu)
+  + pyperclip: 1.8.2 (Tương tác clipboard hệ điều hành)
+- Tiện ích & Logging:
+  + loguru: 0.7.3 (Ghi log đa luồng, hỗ trợ xoay vòng và định dạng màu console)
+
+================================================================================
+3. KIẾN TRÚC TỔNG THỂ VÀ LUỒNG XỬ LÝ (END-TO-END PIPELINE)
+================================================================================
+Luồng dữ liệu đi qua 11 bước xử lý liên tục:
+1. Input Acquisition (Thu nhận đầu vào):
+   - Mở file ảnh qua File Dialog (Ctrl+O).
+   - Dán trực tiếp từ Clipboard hệ điều hành (Ctrl+V).
+   - Kéo thả file ảnh vào cửa sổ ứng dụng (Drag & Drop).
+2. Image Preprocessing (Tiền xử lý ảnh):
+   - Upscale nếu cạnh nhỏ < 600px (INTER_CUBIC); Downscale nếu cạnh lớn > 2560px (INTER_AREA).
+   - Tăng cường tương phản cục bộ qua CLAHE (clipLimit=2.0, tileGridSize=8x8) trên kênh L không gian màu LAB.
+   - Khử nhiễu nhẹ qua FastNlMeansDenoisingColored hoặc BilateralFilter.
+3. Text Detection (Phát hiện vùng chữ):
+   - PaddleOCR DBNet (det_db_unclip_ratio=1.9, det_db_box_thresh=0.5, det_db_thresh=0.3) trích xuất polygon 4 điểm.
+4. Perspective Transform & Padding (Cắt và xoay nắn dòng chữ):
+   - Cắt xoay polygon thẳng hàng ngang cho từng dòng chữ.
+   - Thêm viền đệm an toàn: trên 6px (bảo vệ dấu mũ/sắc/hỏi/ngã), dưới 8px (bảo vệ dấu nặng), trái 6px, phải 12px (tránh cụt từ cuối dòng).
+5. Text Recognition (Nhận dạng ký tự):
+   - Ngôn ngữ tiếng Việt (vi): VietOCR vgg_transformer (beamsearch=True).
+   - Ngôn ngữ khác (en, ch, japan, korean...): Fallback về PaddleOCR Text Recognition.
+6. Border Noise Filtering (Lọc nhiễu mép cắt):
+   - filter_border_noise_boxes phân tích chiều cao so với median_h và vị trí sát mép ảnh (<= 3px) để loại bỏ nét cắt xén, bảo vệ số trang và mã công văn.
+7. Document Layout & Table Reconstruction (Tái dựng bố cục & Bảng biểu):
+   - detect_and_reconstruct_table: Gom cụm các cột hẹp (STT, Điểm tối đa, Điểm tự chấm), xác định ranh giới bảng và chia tách 3 tập box độc quyền (pre_table_boxes, table_boxes, post_table_boxes).
+   - detect_parallel_administrative_header: Phát hiện tiêu đề hành chính 2 cột song song (Cơ quan/Số hiệu bên trái vs Quốc hiệu/Ngày tháng bên phải).
+   - _group_boxes_sliding_window: Gom dòng đọc đa cột cho các phần văn bản còn lại.
+8. Text Synthesis (Tổng hợp văn bản):
+   - Nối ô bảng bằng ký tự phân cách ' | '. Theo dõi rendered_table_rows để ngăn chặn 100% hiện tượng trùng lặp hàng bảng.
+9. Context-Aware Symbol Recovery & Normalization (Khôi phục ký tự & Chuẩn hóa):
+   - ContextSymbolRecovery: Khôi phục số La Mã I. (từ |, |., l., 1., L, L.), II., III., IV.; khôi phục bullet + (từ %, 4 , 7 ); khôi phục footnote * (từ 1 , ? , - ).
+   - VietnameseTextPostProcessor: Chuẩn hóa Unicode NFC, xóa khoảng trắng trước dấu câu, khôi phục phân số ½ từ %, khôi phục từ bị cắt xén cuối trang (nhiệm vụ đặc biệt), sửa lỗi dấu thanh hành chính (ĐẢNG CỘNG SẢN, ngày... tháng..., chi bộ, đảng viên).
+10. Interactive Spell Checking (Dò soát chính tả tiếng Việt tương tác):
+    - Chạy nền qua SpellCheckWorker. Tra cứu âm tiết, phân tích ngữ cảnh Bigram/Trigram, tính khoảng cách chỉnh sửa trọng số weighted_edit_distance.
+    - Highlight trên UI qua ExtraSelections; menu ngữ cảnh chuột phải gợi ý tối đa 5 từ thay thế. Tuyệt đối không tự động sửa văn bản.
+11. Document Export (Xuất kết quả):
+    - Sao chép vào Clipboard.
+    - Xuất file Text (.txt) UTF-8.
+    - Xuất file Word (.docx) giữ nguyên cấu trúc Word Table thật và parallel header borderless 1 hàng 2 cột.
+
+================================================================================
+4. VAI TRÒ CỦA CÁC MODULE VÀ THÀNH PHẦN
+================================================================================
+A. app/core/ocr_engine.py:
+   - apply_paddlex_patches(): Vá xung đột DLL OpenMP / PyTorch / PaddlePaddle trên Windows và chặn eager init lỗi của PaddleX 3.x.
+   - get_global_detector(): Singleton thread-safe khởi tạo PaddleOCR Detector duy nhất 1 lần trong RAM.
+   - get_global_vietocr(): Singleton thread-safe khởi tạo VietOCR vgg_transformer duy nhất 1 lần trong RAM.
+   - get_rotate_crop_image(): Cắt và nắn thẳng bounding box 4 điểm có bù đệm viền (padding).
+   - filter_border_noise_boxes(): Loại bỏ nhiễu do quét tài liệu bị cắt ngang ở viền mép.
+   - detect_parallel_administrative_header(): Tách 2 cột tiêu đề hành chính độc lập trước tiêu đề chính.
+   - detect_and_reconstruct_table(): Nhận diện lưới bảng, phân hoạch box độc quyền (Mutual Exclusivity), gộp ô nhiều dòng (multi-line cell merge), loại bỏ cột ma (phantom columns) và gán số thứ tự STT tuần tự 1, 2, 3...
+   - _group_boxes_sliding_window(): Phân tích bố cục đa cột và gom dòng theo thứ tự đọc tự nhiên từ trên xuống dưới, từ trái sang phải.
+   - ContextSymbolRecovery: Khôi phục số La Mã, bullet và chú thích chân trang theo 3 trạng thái: AUTO_CORRECT, FLAG_UNCERTAIN, PRESERVE kèm audit trail.
+   - VietnameseTextPostProcessor: Làm sạch kỹ thuật, chuẩn hóa Unicode NFC, phân số ½ và bảo vệ ranh giới file path.
+   - export_to_docx(): Xuất tài liệu Microsoft Word (.docx) chuẩn khổ A4, giữ nguyên Word Table và tiêu đề 2 khối không viền.
+
+B. app/core/spell_corrector.py:
+   - VietnameseSpellChecker: Bộ kiểm tra chính tả tiếng Việt theo ngữ cảnh.
+   - remove_diacritics(): Khử dấu thanh và dấu mũ/râu đưa về ký tự Latin cơ sở, bảo toàn in hoa/thường để nhận dạng nguyên âm trong từ viết hoa.
+   - weighted_edit_distance(): Tính khoảng cách chỉnh sửa có trọng số phản ánh đúng quy luật nhầm lẫn OCR tiếng Việt (u/ư, o/ô, b/đ, dấu thanh).
+   - check_text_spelling(): Dò soát văn bản, bảo vệ từ viết tắt (acronym), file path, url, ngày tháng, mã công văn, trả về danh sách SpellError.
+   - _evaluate_context_confusion(): Bắt các lỗi nhầm dấu thanh theo ngữ cảnh cụm từ (chỉ bộ -> chi bộ, CHI BỐ -> CHI BỘ, không cổ -> không có, ngày... thắng... -> tháng, đang viên/đăng phí -> đảng, it nhất -> ít nhất, đồng chỉ -> đồng chí) đi kèm negative whitelisting nghiêm ngặt.
+   - get_suggestions(): Sinh tối đa 5 gợi ý xếp theo độ ưu tiên tổng hợp (khoảng cách weighted distance, ngữ cảnh từ ghép, tính hợp lệ âm tiết, tần suất).
+
+C. app/ui/main_window.py:
+   - MainWindow: Giao diện chính PyQt5, quản lý viewport ảnh BGR, hiển thị bounding box, text editor, status bar.
+   - OCRWorker(QThread): Luồng nền thực thi OCR engine không gây treo giao diện.
+   - SpellCheckWorker(QThread): Luồng nền thực thi dò soát chính tả.
+   - Hệ thống Context Menu: Bắt sự kiện chuột phải trên token bị highlight đỏ để hiển thị menu gợi ý sửa từ tương tác.
+
+================================================================================
+5. ĐỊNH DẠNG ĐẦU VÀO VÀ ĐẦU RA ĐƯỢC HỖ TRỢ
+================================================================================
+Định dạng đầu vào (Input):
+- File ảnh trên đĩa: .png, .jpg, .jpeg, .bmp, .tiff, .tif, .webp (nạp qua Open File dialog hoặc kéo thả).
+- Dữ liệu Clipboard: Ảnh chụp màn hình từ hệ điều hành (Ctrl+V hoặc nút Paste).
+* Lưu ý: Hiện tại ứng dụng chưa hỗ trợ mở trực tiếp file PDF trên giao diện UI (cần trích xuất ảnh PNG/JPG từ PDF trước khi đưa vào app).
+
+Định dạng đầu ra (Output):
+- Giao diện màn hình: Văn bản có thể chỉnh sửa trực tiếp, hỗ trợ highlight lỗi chính tả.
+- Clipboard: Sao chép văn bản thuần hoặc văn bản có format vào clipboard hệ thống.
+- File Text (.txt): Lưu văn bản thuần UTF-8 (Ctrl+S).
+- File Microsoft Word (.docx): Xuất file Word giữ nguyên cấu trúc bảng biểu Word Table thật và tiêu đề 2 cột không viền (nút Xuất Word).
+
+================================================================================
+6. CHỨC NĂNG ĐÃ HOÀN THÀNH, TRẠNG THÁI KIỂM THỬ VÀ GIỚI HẠN ĐÃ BIẾT
+================================================================================
+Chức năng đã hoàn thành và kiểm chứng:
+[x] OCR Hybrid đa ngôn ngữ với trọng tâm tiếng Việt chất lượng cao (PaddleOCR + VietOCR Transformer).
+[x] Tiền xử lý ảnh thích ứng (tự động scale, CLAHE tăng tương phản, khử nhiễu).
+[x] Cắt xoay thẳng polygon 4 điểm kèm viền đệm padding bảo vệ dấu thanh tiếng Việt.
+[x] Lọc nhiễu xén mép trang tài liệu.
+[x] Phân tích thứ tự đọc đa cột (Sliding Window Reading Order).
+[x] Nhận diện và tái tạo Tiêu đề hành chính 2 cột song song (Parallel Header).
+[x] Nhận diện và tái tạo Bảng biểu (Table Reconstruction): gộp dòng ô mồ côi, khử cột ma, khôi phục STT tuần tự 1, 2, 3...
+[x] Khử triệt để lỗi trùng lặp hàng bảng trong văn bản đầu ra.
+[x] Khôi phục ký tự theo ngữ cảnh (Số La Mã I. từ L/1., bullet +, footnote *, phân số ½).
+[x] Kiểm tra chính tả tiếng Việt theo ngữ cảnh N-gram và sinh gợi ý tương tác chuột phải.
+[x] Xuất tài liệu Microsoft Word (.docx) và Text (.txt).
+
+Trạng thái kiểm thử (Test Baseline):
+- Toàn bộ 140/140 tests đậu 100% khi chạy `pytest tests/ -v`.
+- Bao gồm đầy đủ các bộ kiểm thử:
+  + test_ocr_symbol_recovery.py: 67 tests (Số La Mã, Bullet, Bảng, Phân số, STT, Tiêu đề 2 cột, Word export).
+  + test_spell_corrector.py: 66 tests (Âm tiết, Từ ghép, Ngữ cảnh OCR, Phản ví dụ Negative Whitelisting).
+  + test_ui_spell_check.py: 7 tests (Khởi tạo UI, Worker threads, Highlight ExtraSelections, Undo/Redo).
+
+Giới hạn kỹ thuật đã biết:
+- Chữ số viết tay hoặc chữ số in ma trận mờ nằm đơn lẻ trong các ô tự chấm điểm (như số 9 bị nhận thành g, 5 thành s): Do VietOCR là textline model tối ưu cho chữ tiếng Việt, các chữ số đơn lẻ cần có module phân loại chữ số chuyên dụng (Digit Classifier) để đạt độ chính xác 100%.
+- Tốc độ xử lý trên CPU: ~1.0 - 1.5 giây / dòng chữ khi dùng VietOCR BeamSearch trên CPU. Chưa tích hợp tăng tốc GPU TensorRT/DirectML.
+- Chưa hỗ trợ mở file PDF nhiều trang trực tiếp trên UI.
+
+================================================================================
+7. CÁC FILE QUAN TRỌNG CẦN ĐỌC TRƯỚC KHI CHỈNH SỬA
+================================================================================
+1. app/core/ocr_engine.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\ocr_engine.py
+   - Vai trò: Chứa toàn bộ logic nhận dạng OCR, xử lý hình học ảnh, gom dòng, nhận diện bảng biểu, khôi phục ký tự và xuất DOCX.
+2. app/core/spell_corrector.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\spell_corrector.py
+   - Vai trò: Chứa từ điển âm tiết/từ ghép, thuật toán tính khoảng cách weighted edit distance, bộ quy tắc ngữ cảnh nhầm dấu thanh và sinh gợi ý.
+3. app/ui/main_window.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\ui\main_window.py
+   - Vai trò: Quản lý cửa sổ chính PyQt5, background worker threads, vẽ bounding box và xử lý sự kiện tương tác chuột/bàn phím.
+4. run.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\run.py
+   - Vai trò: Điểm khởi động ứng dụng, nạp biến môi trường bản vá Windows OpenMP/PaddleX, cấu hình loguru.
+5. tests/test_ocr_symbol_recovery.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\tests\test_ocr_symbol_recovery.py
+   - Vai trò: Bộ kiểm thử hồi quy cho OCR, hình học tài liệu, khôi phục symbol và xuất DOCX.
+6. tests/test_spell_corrector.py
+   - Đường dẫn: c:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\tests\test_spell_corrector.py
+   - Vai trò: Bộ kiểm thử chính tả, thẩm định âm tiết, negative whitelisting và ngữ cảnh từ ghép.
+
+================================================================================
+8. CÁCH CÀI ĐẶT, CHẠY ỨNG DỤNG VÀ CHẠY TEST
+================================================================================
+Cài đặt môi trường:
+```powershell
+# 1. Tạo và kích hoạt môi trường ảo Python
+python -m venv venv
+.\venv\Scripts\activate
+
+# 2. Cài đặt các thư viện phụ thuộc
+pip install -r requirements.txt
+```
+
+Khởi chạy ứng dụng Desktop:
+```powershell
+python run.py
+```
+
+Chạy toàn bộ kiểm thử hồi quy (140 tests):
+```powershell
+pytest tests/ -v
+```
+
+Chạy kiểm thử riêng từng module:
+```powershell
+# Kiểm thử OCR, ký tự và bảng biểu:
+pytest tests/test_ocr_symbol_recovery.py -v
+
+# Kiểm thử bộ kiểm tra chính tả:
+pytest tests/test_spell_corrector.py -v
+
+# Kiểm thử tích hợp giao diện PyQt5:
+pytest tests/test_ui_spell_check.py -v
+```
+
+================================================================================
+9. CÁC QUY TẮC KIẾN TRÚC, API VÀ KHU VỰC CẤM THAY ĐỔI TÙY TIỆN
+================================================================================
+1. Khởi tạo Singleton Models:
+   - TUYỆT ĐỐI KHÔNG khởi tạo trực tiếp instance mới của `PaddleOCR()` hoặc nạp lại trọng số VietOCR trong từng hàm xử lý. Bắt buộc truy cập thông qua `get_global_detector()` và `get_global_vietocr()`.
+   - Giữ nguyên hàm `apply_paddlex_patches()` tại đầu `ocr_engine.py` và `run.py`. Thiếu bản vá này sẽ gây crash `c10.dll` và lỗi `PDX has already been initialized` trên Windows.
+2. Nguyên tắc Bất biến Văn bản trong Spell Checker:
+   - Module `spell_corrector.py` TUYỆT ĐỐI KHÔNG được tự động thay đổi, viết lại hoặc sửa văn bản OCR của người dùng. Mọi thao tác sửa đổi chỉ được diễn ra khi người dùng chủ động nhấp chuột phải và chấp nhận gợi ý.
+   - Giữ nguyên tính kế thừa `SpellError(tuple)` để đảm bảo tương thích 100% với việc unpack dạng `(start, end, token)` trong các bài test cũ.
+3. Bảo toàn dấu câu và đường dẫn file:
+   - TUYỆT ĐỐI KHÔNG tự động chèn khoảng trắng sau dấu chấm hoặc dấu gạch chéo làm hỏng đường dẫn file, extension hoặc mã hiệu công văn (ví dụ: `170-KL/TW`, `image.png`, `config.yml`).
+4. Phân hoạch Độc quyền trong Table Reconstruction:
+   - Trong `detect_and_reconstruct_table()`, tập `table_boxes`, `pre_table_boxes` và `post_table_boxes` bắt buộc phải được phân hoạch độc quyền theo ID của `OCRBox`. Không được nới lỏng điều kiện làm cho một box vừa thuộc vùng trước bảng vừa thuộc bảng, vì sẽ gây lỗi lặp hàng.
+5. Theo dõi `rendered_table_rows`:
+   - Trong hàm `recognize()` của `ocr_engine.py`, bắt buộc duy trì tập hợp `rendered_table_rows` khi chuyển đổi dòng sang text để chống in trùng lặp hàng bảng.
+
+================================================================================
+10. CÁC LỖI OCR ĐÃ BIẾT VÀ VẤN ĐỀ CẦN XÁC MINH THÊM
+================================================================================
+1. Chữ số viết tay / mờ trong ô điểm:
+   - Cần bổ sung thêm một module nhận dạng số chuyên dụng (Digit Classifier) nếu cần bóc tách các điểm số viết tay hoặc mờ trong các ô hẹp.
+2. Hỗ trợ file PDF trực tiếp trên UI:
+   - Hiện tại người dùng phải convert PDF thành ảnh trước khi đưa vào app. Cần tích hợp `PyMuPDF` (pymupdf) vào `main_window.py` để mở trực tiếp file PDF và chuyển đổi trang tự động.
+3. Tăng tốc phần cứng (Hardware Acceleration):
+   - Cần kiểm tra cấu hình tương thích `paddlepaddle-gpu` CUDA 11.8/12.x và PyTorch CUDA trên Windows để chuyển đổi từ CPU sang GPU khi máy người dùng có card đồ họa rời.
+================================================================================

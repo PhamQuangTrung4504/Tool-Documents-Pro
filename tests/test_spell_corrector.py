@@ -915,6 +915,87 @@ class TestDocxExportWithTable(unittest.TestCase):
             self.assertIn("* Ghi chú dưới bảng biểu", doc_paras)
 
 
+class TestContextualSpellCheckingNew(unittest.TestCase):
+    """Kiểm thử dò soát lỗi chính tả theo ngữ cảnh (Context Confusion) & Phản ví dụ (Negative Cases)."""
+
+    def test_chi_bo_and_dong_chi(self) -> None:
+        """Kiểm tra phát hiện lỗi 'chỉ bộ' -> 'chi bộ', 'đồng chỉ' -> 'đồng chí'."""
+        text1 = "Nội dung sinh hoạt chỉ bộ định kỳ."
+        errs1 = check_text_spelling(text1)
+        tokens1 = [err.token for err in errs1]
+        self.assertIn("chỉ", tokens1, "'chỉ' trong 'chỉ bộ' phải bị đánh dấu")
+        err_chi = next(e for e in errs1 if e.token == "chỉ")
+        self.assertIn("chi", err_chi.suggestions, "Gợi ý phải có 'chi'")
+
+        text2 = "Kính gửi đồng chỉ Bí thư."
+        errs2 = check_text_spelling(text2)
+        tokens2 = [err.token for err in errs2]
+        self.assertIn("chỉ", tokens2, "'chỉ' trong 'đồng chỉ' phải bị đánh dấu")
+        err_dc = next(e for e in errs2 if e.token == "chỉ")
+        self.assertIn("chí", err_dc.suggestions, "Gợi ý phải có 'chí'")
+
+    def test_chi_bo_all_caps(self) -> None:
+        """Kiểm tra phát hiện 'CHI BỐ' -> 'CHI BỘ' trong tiêu đề in hoa."""
+        text = "SINH HOẠT CHI BỐ"
+        errs = check_text_spelling(text)
+        tokens = [err.token for err in errs]
+        self.assertIn("BỐ", tokens, "'BỐ' trong 'CHI BỐ' phải bị đánh dấu")
+        err_bo = next(e for e in errs if e.token == "BỐ")
+        self.assertIn("BỘ", err_bo.suggestions, "Gợi ý phải có 'BỘ'")
+
+    def test_khong_co_and_thang_date(self) -> None:
+        """Kiểm tra phát hiện 'không cổ' -> 'không có', 'thắng 10' -> 'tháng 10'."""
+        text1 = "Chi bộ không cổ đảng viên vi phạm."
+        errs1 = check_text_spelling(text1)
+        tokens1 = [err.token for err in errs1]
+        self.assertIn("cổ", tokens1, "'cổ' trong 'không cổ' phải bị đánh dấu")
+        err_co = next(e for e in errs1 if e.token == "cổ")
+        self.assertIn("có", err_co.suggestions, "Gợi ý phải có 'có'")
+
+        text2 = "Biên bản họp ngày 28 thắng 10 năm 2024."
+        errs2 = check_text_spelling(text2)
+        tokens2 = [err.token for err in errs2]
+        self.assertIn("thắng", tokens2, "'thắng' trong 'ngày ... thắng ...' phải bị đánh dấu")
+        err_thang = next(e for e in errs2 if e.token == "thắng")
+        self.assertIn("tháng", err_thang.suggestions, "Gợi ý phải có 'tháng'")
+
+    def test_dang_vien_dang_phi_it_nhat(self) -> None:
+        """Kiểm tra phát hiện 'đang viên', 'đăng phí', 'it nhất'."""
+        text1 = "Toàn thể đang viên có mặt đầy đủ để nộp đăng phí."
+        errs1 = check_text_spelling(text1)
+        tokens1 = [err.token for err in errs1]
+        self.assertIn("đang", tokens1, "'đang' trong 'đang viên' phải bị đánh dấu")
+        self.assertIn("đăng", tokens1, "'đăng' trong 'đăng phí' phải bị đánh dấu")
+
+        text2 = "Thời gian sinh hoạt it nhất 90 phút."
+        errs2 = check_text_spelling(text2)
+        tokens2 = [err.token for err in errs2]
+        self.assertIn("it", tokens2, "'it' trong 'it nhất' phải bị đánh dấu")
+        err_it = next(e for e in errs2 if e.token == "it")
+        self.assertIn("ít", err_it.suggestions, "Gợi ý phải có 'ít'")
+
+    def test_negative_whitelisting_clean(self) -> None:
+        """Bảo vệ tuyệt đối các cụm từ tiếng Việt đúng không bị báo lỗi sai (Negative Cases)."""
+        clean_samples = [
+            "Đồng chí Bí thư chỉ tay về phía hội trường.",
+            "Ban chỉ đạo đại hội nhiệm kỳ 2025 - 2030.",
+            "Hôm nay chỉ có 14 đồng chí tham dự họp.",
+            "Gia đình gồm có bố mẹ và các con.",
+            "Chiếc áo sơ mi có cổ áo màu trắng.",
+            "Quân dân ta đã giành chiến thắng vẻ vang.",
+            "Các đồng chí đang làm việc tại văn phòng.",
+            "Đảng viên thực hiện đăng ký tham gia sinh hoạt.",
+        ]
+        for sample in clean_samples:
+            errs = check_text_spelling(sample)
+            self.assertEqual(
+                errs,
+                [],
+                f"Văn bản hợp lệ không được bị báo lỗi sai: {sample} -> {errs}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

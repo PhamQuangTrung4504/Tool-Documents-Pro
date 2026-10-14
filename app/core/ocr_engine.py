@@ -310,6 +310,93 @@ def get_rotate_crop_image(
         return None
 
 
+def estimate_and_correct_skew(
+    image: np.ndarray,
+    max_angle: float = 15.0,
+    min_angle: float = 0.5,
+) -> Tuple[np.ndarray, float]:
+    """
+    Phát hiện góc nghiêng và nắn thẳng ảnh tài liệu (Deskew):
+    - Chuyển ảnh sang thang độ xám và nhị phân hóa cục bộ.
+    - Dùng phép biến đổi hình thái học (morphological dilation) theo chiều ngang
+      để liên kết các ký tự thành các dải dòng chữ liên tục.
+    - Tìm góc nghiêng của các dải dòng bằng minAreaRect.
+    - Nếu góc nghiêng nằm trong khoảng [min_angle, max_angle] hoặc [-max_angle, -min_angle]:
+      xoay ảnh ngược lại đúng góc nghiêng để nắn thẳng văn bản nằm ngang chuẩn.
+    - Nếu góc nghiêng < min_angle: giữ nguyên ảnh để tránh mất nét do phép nội suy không cần thiết.
+    Trả về: (deskewed_image, detected_angle)
+    """
+    if image is None or image.size == 0:
+        return image, 0.0
+
+    try:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+
+        h, w = gray.shape[:2]
+        if h < 50 or w < 50:
+            return image, 0.0
+
+        # Nhị phân hóa Otsu
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        # Morphological dilation theo chiều ngang để nối các chữ thành dòng
+        kernel_w = max(25, int(w / 35))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 3))
+        dilated = cv2.dilate(thresh, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        angles = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 150:
+                continue
+            rect = cv2.minAreaRect(cnt)
+            (cx, cy), (rw, rh), angle = rect
+
+            # Chuẩn hóa để rw luôn là cạnh dài theo phương dòng chữ, rh là chiều cao dòng
+            if rw < rh:
+                rw, rh = rh, rw
+                angle = angle - 90.0
+
+            if rw < 60 or rh < 6:
+                continue
+
+            if angle > 45.0:
+                angle -= 90.0
+            elif angle < -45.0:
+                angle += 90.0
+
+            if abs(angle) <= max_angle and (rw / max(1.0, rh)) >= 2.5:
+                angles.append(angle)
+
+        if len(angles) < 2:
+            return image, 0.0
+
+        median_angle = float(np.median(angles))
+        if abs(median_angle) < min_angle or abs(median_angle) > max_angle:
+            return image, 0.0
+
+        center = (w / 2.0, h / 2.0)
+        rot_mat = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        border_val = (255, 255, 255) if len(image.shape) == 3 else 255
+        deskewed = cv2.warpAffine(
+            image,
+            rot_mat,
+            (w, h),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=border_val,
+        )
+        logger.debug(f"Deskew applied: angle={median_angle:.2f} deg")
+        return deskewed, median_angle
+    except Exception as exc:
+        logger.debug(f"estimate_and_correct_skew exception: {exc}")
+        return image, 0.0
+
+
 def filter_border_noise_boxes(
     boxes: List[OCRBox],
     image_width: int = 0,
@@ -403,7 +490,11 @@ def _group_single_column_lines(sub_boxes: List[dict], median_h: float, gutter_th
     """Gom nhóm các box trong 1 cột hoặc 1 khối đơn thành từng dòng."""
     if not sub_boxes:
         return []
-    sub_boxes_sorted = sorted(sub_boxes, key=lambda it: (it["cy"], it["left"]))
+    # Sắp xếp xác định có tie-breaking (Deterministic tie-breaking)
+    sub_boxes_sorted = sorted(
+        sub_boxes,
+        key=lambda it: (round(it["cy"], 2), round(it["left"], 2), it["text"])
+    )
     y_thresh = max(6.0, median_h * 0.45)
     lines: List[List[dict]] = []
     curr_line = [sub_boxes_sorted[0]]
@@ -433,7 +524,7 @@ def _group_single_column_lines(sub_boxes: List[dict], median_h: float, gutter_th
 
     result: List[List[OCRBox]] = []
     for line in lines:
-        line.sort(key=lambda it: it["left"])
+        line.sort(key=lambda it: (round(it["left"], 2), it["text"]))
         if len(line) >= 2:
             first = line[0]
             if first["w"] <= 35 and first["h"] <= 35 and first["box"].text.strip() in [
@@ -455,17 +546,33 @@ def _group_boxes_sliding_window(
     if not box_info:
         return []
 
-    box_info_sorted = sorted(box_info, key=lambda it: it["cy"])
+    # Sắp xếp xác định có tie-breaking (Deterministic tie-breaking)
+    box_info_sorted = sorted(
+        box_info,
+        key=lambda it: (round(it["cy"], 2), round(it["left"], 2), it["text"])
+    )
     result_lines: List[List[OCRBox]] = []
     i = 0
     n = len(box_info_sorted)
 
     while i < n:
+        # Xử lý tiêu đề / banner trải rộng toàn trang (spanning title across columns):
+        # nếu box có độ rộng >= 0.62 chiều rộng trang, phát thành dòng độc lập ngay
+        curr_box = box_info_sorted[i]
+        if curr_box["w"] >= 0.62 * page_w:
+            result_lines.append([curr_box["box"]])
+            i += 1
+            continue
+
         best_2col_end = None
         best_split_x = None
 
         for j in range(i + 2, n + 1):
             window = box_info_sorted[i:j]
+            # Ngắt window nếu gặp box trải rộng toàn trang tiếp theo
+            if any(b["w"] >= 0.62 * page_w for b in window[1:]):
+                break
+
             found_split = None
             for split_ratio in np.linspace(0.28, 0.65, 38):
                 sx = page_min_x + split_ratio * page_w
@@ -516,7 +623,7 @@ def _group_boxes_sliding_window(
                 else:
                     break
 
-            single_line_boxes.sort(key=lambda it: it["left"])
+            single_line_boxes.sort(key=lambda it: (round(it["left"], 2), it["text"]))
             if len(single_line_boxes) >= 2:
                 first = single_line_boxes[0]
                 if first["w"] <= 35 and first["h"] <= 35 and first["box"].text.strip() in [
@@ -629,7 +736,7 @@ def detect_and_reconstruct_table(
     Phát hiện và tái dựng cấu trúc bảng biểu dựa trên các cột anchor và ranh giới cột.
     Trả về: (table_obj, pre_table_boxes, table_rows_boxes, post_table_boxes)
     """
-    narrow_boxes = [b for b in box_info if b["w"] < 0.25 * page_w]
+    narrow_boxes = [b for b in box_info if b["w"] < 0.38 * page_w]
     if len(narrow_boxes) < 4:
         return None, box_info, [], []
 
@@ -692,15 +799,31 @@ def detect_and_reconstruct_table(
 
     # Phạm vi bảng: Hàng đầu tiên chứa các anchor (STT, Điểm tối đa,...)
     all_anchor_boxes = [b for cl in table_col_anchors for b in cl]
-    anchor_min_top = min(b["top"] for b in all_anchor_boxes)
+    if stt_header_box is not None:
+        anchor_min_top = min(stt_header_box["top"], min(b["top"] for b in all_anchor_boxes))
+    else:
+        anchor_min_top = min(b["top"] for b in all_anchor_boxes)
     anchor_max_bottom = max(b["bottom"] for b in all_anchor_boxes)
+
+    table_top_bound = anchor_min_top - 5
+    table_bot_bound = anchor_max_bottom + 5
 
     table_boxes = [
         b for b in box_info
-        if b["bottom"] > anchor_min_top - 5 and b["top"] < anchor_max_bottom + 5 and b["cy"] >= anchor_min_top - 5
+        if b["bottom"] > table_top_bound and b["top"] < table_bot_bound
     ]
-    pre_table_boxes = [b for b in box_info if b["bottom"] <= anchor_min_top]
-    post_table_boxes = [b for b in box_info if b["top"] >= anchor_max_bottom]
+    table_box_ids = {id(b["box"]) for b in table_boxes}
+
+    # BẢO ĐẢM NGUYÊN TẮC PHÂN HOẠCH ĐỘC QUYỀN (MUTUAL EXCLUSIVITY):
+    # Một box đã thuộc về table_boxes KHÔNG BAO GIỜ được xuất hiện trong pre_table_boxes hoặc post_table_boxes
+    pre_table_boxes = [
+        b for b in box_info
+        if id(b["box"]) not in table_box_ids and b["bottom"] <= anchor_min_top
+    ]
+    post_table_boxes = [
+        b for b in box_info
+        if id(b["box"]) not in table_box_ids and b["top"] >= anchor_max_bottom
+    ]
 
     if not table_boxes:
         return None, box_info, [], []
@@ -879,19 +1002,35 @@ def detect_and_reconstruct_table(
                     elif val.lower() in ICON_NOISE_TOKENS or (len(val) <= 3 and not any(ch in "0123456789" for ch in val) and not any(ord(ch) > 127 for ch in val)):
                         row[c_idx] = "[Icon]"
 
-    # Khôi phục số thứ tự STT '1' cho hàng tiêu chí đầu tiên nếu bị thiếu hoặc nhận nhầm thành '|' / 'l'
+    # Khôi phục số thứ tự STT (1, 2, 3...) cho các hàng tiêu chí chính trong bảng nếu bị thiếu hoặc nhận nhầm
     if table_grid and len(table_grid) >= 2:
         header_row = table_grid[0]
         if header_row and re.match(r"^(?:STT|TT|SỐ\s*TT)$", header_row[0].strip().upper()):
-            row_with_2_idx = -1
+            expected_stt = 1
             for r_idx in range(1, len(table_grid)):
-                if table_grid[r_idx][0].strip() == "2":
-                    row_with_2_idx = r_idx
-                    break
-            if row_with_2_idx > 1:
-                first_stt_val = table_grid[1][0].strip()
-                if first_stt_val in {"", "|", "l", "I", "!"} or not first_stt_val.isdigit():
-                    table_grid[1][0] = "1"
+                row = table_grid[r_idx]
+                c0_text = row[0].strip() if len(row) > 0 else ""
+                c1_text = row[1].strip() if len(row) > 1 else ""
+                c2_text = row[2].strip() if len(row) > 2 else ""
+                main_text = c1_text or c2_text
+                is_sub_bullet = bool(
+                    c0_text in {"+", "-", "*", "•", "%", "~", "—", "–"}
+                    or re.match(r"^([+\-*•%~—–]|\d+%)", main_text)
+                )
+
+                if main_text and not is_sub_bullet:
+                    curr_stt = row[0].strip()
+                    m_num = re.match(r"^(\d+)", curr_stt)
+                    if m_num:
+                        row[0] = m_num.group(1)
+                        expected_stt = int(m_num.group(1)) + 1
+                    else:
+                        row[0] = str(expected_stt)
+                        expected_stt += 1
+                elif is_sub_bullet:
+                    # Nếu ô STT đã có ký tự bullet (+, -...) thì giữ nguyên, nếu không thì để rỗng
+                    if c0_text not in {"+", "-", "*", "•", "%", "~", "—", "–"}:
+                        row[0] = ""
 
     bbox = [
         int(min(b["left"] for b in table_boxes)),
@@ -1006,10 +1145,20 @@ class SymbolDecision(str, Enum):
 
 
 ROMAN_HEADING_KEYWORDS = {
+    # Hành chính & pháp lý
     "NỘI DUNG", "TIẾN HÀNH", "KẾT LUẬN", "TỔ CHỨC", "MỤC ĐÍCH", "YÊU CẦU",
     "KẾ HOẠCH", "PHƯƠNG HƯỚNG", "NHIỆM VỤ", "ĐÁNH GIÁ", "CHƯƠNG TRÌNH",
     "THỰC HIỆN", "KẾT QUẢ", "THỜI GIAN", "ĐỊA ĐIỂM", "THÀNH PHẦN",
-    "KIỂM ĐIỂM", "THẢO LUẬN", "NGHỊ QUYẾT", "BÁO CÁO",
+    "KIỂM ĐIỂM", "THẢO LUẬN", "NGHỊ QUYẾT", "BÁO CÁO", "ĐIỀU KHOẢN",
+    "QUYỀN VÀ NGHĨA VỤ", "PHẠM VI", "HIỆU LỰC", "CHẤM DỨT",
+    # Học thuật, giáo dục & khoa học
+    "MỞ ĐẦU", "TỔNG QUAN", "CƠ SỞ LÝ THUYẾT", "PHƯƠNG PHÁP", "BÀN LUẬN",
+    "KIẾN NGHỊ", "TÀI LIỆU THAM KHẢO", "PHỤ LỤC", "GIỚI THIỆU", "ĐẶC ĐIỂM",
+    "KHÁI NIỆM", "NGUYÊN LÝ", "CẤU TẠO", "ỨNG DỤNG", "PHÂN TÍCH",
+    "GIẢI PHÁP", "KẾ HOẠCH BÀI DẠY", "MỤC TIÊU BÀI HỌC",
+    # Doanh nghiệp, thương mại & tài chính
+    "TÌNH HÌNH HOẠT ĐỘNG", "DOANH THU", "LỢI NHUẬN", "ĐỊNH HƯỚNG",
+    "MỤC TIÊU", "TỔ CHỨC BỘ MÁY", "QUY CHẾ", "QUY TRÌNH", "BẢO HÀNH",
 }
 
 
@@ -1032,7 +1181,7 @@ class ContextSymbolRecovery:
 
     @staticmethod
     def has_heading_keyword(text: str) -> bool:
-        """Kiểm tra văn bản có chứa từ khóa đề mục văn bản hành chính hay không."""
+        """Kiểm tra văn bản có chứa từ khóa đề mục hay không."""
         text_upper = text.upper()
         return any(kw in text_upper for kw in ROMAN_HEADING_KEYWORDS)
 
@@ -1041,7 +1190,7 @@ class ContextSymbolRecovery:
         cls, line: str, prev_roman: str = ""
     ) -> Tuple[str, SymbolDecision, str, str]:
         """
-        Khôi phục số La Mã đầu mục (I., II., III., IV., V.) dựa trên ngữ cảnh.
+        Khôi phục số La Mã đầu mục (I. đến X.) dựa trên ngữ cảnh.
         Trả về: (new_line, decision, current_roman, rule_name)
         """
         stripped = line.strip()
@@ -1049,7 +1198,7 @@ class ContextSymbolRecovery:
             return line, SymbolDecision.PRESERVE, prev_roman, ""
 
         # 1. Mẫu số II: TI., TI, ll., 11., Tl., lI., Il.
-        m_ii = re.match(r"^([ \t]*)(TI|ll|11|Tl|lI|Il)\.?\s+([A-ZÀ-ỸĐ\s,;:/-]+)$", line)
+        m_ii = re.match(r"^([ \t]*)(TI|ll|11|Tl|lI|Il)\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
         if m_ii:
             indent = m_ii.group(1)
             prefix = m_ii.group(2)
@@ -1060,7 +1209,7 @@ class ContextSymbolRecovery:
                 return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_II_{prefix}"
 
         # 2. Mẫu số III: lll., 111., TII., TIl., llI., lll, 111
-        m_iii = re.match(r"^([ \t]*)(lll|111|TII|TIl|llI)\.?\s+([A-ZÀ-ỸĐ\s,;:/-]+)$", line)
+        m_iii = re.match(r"^([ \t]*)(lll|111|TII|TIl|llI)\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
         if m_iii:
             indent = m_iii.group(1)
             prefix = m_iii.group(2)
@@ -1071,7 +1220,7 @@ class ContextSymbolRecovery:
                 return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_III_{prefix}"
 
         # 3. Mẫu số IV: lV., 1V., TV., lV, 1V
-        m_iv = re.match(r"^([ \t]*)(lV|1V|TV)\.?\s+([A-ZÀ-ỸĐ\s,;:/-]+)$", line)
+        m_iv = re.match(r"^([ \t]*)(lV|1V|TV)\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
         if m_iv:
             indent = m_iv.group(1)
             prefix = m_iv.group(2)
@@ -1081,16 +1230,60 @@ class ContextSymbolRecovery:
             else:
                 return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_IV_{prefix}"
 
-        # 4. Mẫu số I: |, |., l., 1.
+        # Mẫu số VI: Vl., V1., V|.
+        m_vi = re.match(r"^([ \t]*)(V[l1|])\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
+        if m_vi:
+            indent = m_vi.group(1)
+            prefix = m_vi.group(2)
+            rest = m_vi.group(3).strip()
+            if cls.is_all_uppercase_heading(rest) or cls.has_heading_keyword(rest):
+                return f"{indent}VI. {rest}", SymbolDecision.AUTO_CORRECT, "VI", f"ROMAN_VI_FROM_{prefix}"
+            else:
+                return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_VI_{prefix}"
+
+        # Mẫu số VII: Vll., V11., VlI., VIl., VTl.
+        m_vii = re.match(r"^([ \t]*)(V(?:ll|11|lI|Il|Tl))\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
+        if m_vii:
+            indent = m_vii.group(1)
+            prefix = m_vii.group(2)
+            rest = m_vii.group(3).strip()
+            if cls.is_all_uppercase_heading(rest) or cls.has_heading_keyword(rest):
+                return f"{indent}VII. {rest}", SymbolDecision.AUTO_CORRECT, "VII", f"ROMAN_VII_FROM_{prefix}"
+            else:
+                return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_VII_{prefix}"
+
+        # Mẫu số VIII: Vlll., V111.
+        m_viii = re.match(r"^([ \t]*)(V(?:lll|111))\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
+        if m_viii:
+            indent = m_viii.group(1)
+            prefix = m_viii.group(2)
+            rest = m_viii.group(3).strip()
+            if cls.is_all_uppercase_heading(rest) or cls.has_heading_keyword(rest):
+                return f"{indent}VIII. {rest}", SymbolDecision.AUTO_CORRECT, "VIII", f"ROMAN_VIII_FROM_{prefix}"
+            else:
+                return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_VIII_{prefix}"
+
+        # Mẫu số IX: lX., 1X., |X.
+        m_ix = re.match(r"^([ \t]*)([l1|]X)\.?\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
+        if m_ix:
+            indent = m_ix.group(1)
+            prefix = m_ix.group(2)
+            rest = m_ix.group(3).strip()
+            if cls.is_all_uppercase_heading(rest) or cls.has_heading_keyword(rest):
+                return f"{indent}IX. {rest}", SymbolDecision.AUTO_CORRECT, "IX", f"ROMAN_IX_FROM_{prefix}"
+            else:
+                return line, SymbolDecision.FLAG_UNCERTAIN, prev_roman, f"UNCERTAIN_ROMAN_IX_{prefix}"
+
+        # 4. Mẫu số I: |, |., l., 1., L, L.
         # ĐIỀU KIỆN ÂM TÍNH NGHIÊM NGẶT:
         # Không đổi 1. thành I. nếu theo sau là chữ thường (ví dụ: 1. Tuyên bố lý do...)
         # và không đổi số thứ tự hợp lệ như 1. NỘP HỒ SƠ
-        m_i = re.match(r"^([ \t]*)(\|\.?|l\.|1\.)\s+([A-ZÀ-ỸĐ\s,;:/-]+)$", line)
+        m_i = re.match(r"^([ \t]*)(\|\.?|l\.|1\.|L\.?)\s+([A-ZÀ-ỸĐ0-9\s,;:/-]+)$", line)
         if m_i:
             indent = m_i.group(1)
             prefix = m_i.group(2).strip()
             rest = m_i.group(3).strip()
-            is_strong_symbol = prefix in ["|", "|.", "l."]
+            is_strong_symbol = prefix in ["|", "|.", "l.", "L", "L."]
             is_strong_heading = cls.has_heading_keyword(rest) and cls.is_all_uppercase_heading(rest)
 
             if is_strong_symbol and (cls.is_all_uppercase_heading(rest) or cls.has_heading_keyword(rest)):
@@ -1098,8 +1291,8 @@ class ContextSymbolRecovery:
             elif prefix == "1." and is_strong_heading and ("NỘI DUNG" in rest.upper() or "CHƯƠNG TRÌNH" in rest.upper()):
                 return f"{indent}I. {rest}", SymbolDecision.AUTO_CORRECT, "I", "ROMAN_I_FROM_1_DOT"
 
-        # 5. Nếu đã là số La Mã chuẩn I., II., III., IV., V., VI.
-        m_valid = re.match(r"^[ \t]*(I{1,3}|IV|V|VI)\.\s+", line)
+        # 5. Nếu đã là số La Mã chuẩn I., II., III., IV., V., VI., VII., VIII., IX., X.
+        m_valid = re.match(r"^[ \t]*(I{1,3}|IV|V|VI{1,3}|IX|X)\.\s+", line)
         if m_valid:
             return line, SymbolDecision.PRESERVE, m_valid.group(1), "VALID_ROMAN"
 
@@ -1127,7 +1320,7 @@ class ContextSymbolRecovery:
             return f"{indent}+ {content}", SymbolDecision.AUTO_CORRECT, "PLUS_FROM_PIPE_BULLET_PREFIX"
 
         # 2. Ký tự '%' hoặc '*' ở đầu dòng theo sau là chữ cái tiếng Việt (ví dụ: '% Chi bộ...', '* Chi bộ...', '% Từ 90%...')
-        m_pct = re.match(r"^([ \t]*)([%*])\s+([A-Za-zÀ-ỹĐđ].*)$", line)
+        m_pct = re.match(r"^([ \t]*)([%*])\s*([A-Za-zÀ-ỹĐđ].*)$", line)
         if m_pct:
             indent = m_pct.group(1)
             sym = m_pct.group(2)
@@ -1137,7 +1330,25 @@ class ContextSymbolRecovery:
                 return line, SymbolDecision.PRESERVE, ""
             return f"{indent}+ {content}", SymbolDecision.AUTO_CORRECT, "PLUS_FROM_PERCENT_PREFIX"
 
-        # 3. Ký tự '|' ở đầu dòng trong văn bản thông thường (không phải hàng bảng nhiều cột ' | ')
+        # 3. Ký tự '4' hoặc '7' ở đầu dòng trong tiêu chí bảng bị nhận nhầm từ '+' (ví dụ: '4 Chi bộ...', '7 Thời gian...')
+        m_num_bullet = re.match(r"^([ \t]*)([47])\s+([A-Za-zÀ-ỹĐđ].*)$", line)
+        if m_num_bullet:
+            indent = m_num_bullet.group(1)
+            content = m_num_bullet.group(3)
+            c_lower = content.lower()
+            if any(c_lower.startswith(kw) for kw in [
+                "chỉ bộ", "chi bộ", "thời gian", "tỷ lệ", "không có", "đã có", "được", "dưới", "từ "
+            ]):
+                return f"{indent}+ {content}", SymbolDecision.AUTO_CORRECT, "PLUS_FROM_NUMERIC_NOISE"
+
+        # 4. Ký tự chân trang bị nhận thành 1, - hoặc ? (ví dụ: '1 Trừ trường hợp...', '? Trừ trường hợp...')
+        m_footnote = re.match(r"^([ \t]*)[1?*\-]\s+(Trừ\s+trường\s+hợp.*)$", line, re.IGNORECASE)
+        if m_footnote:
+            indent = m_footnote.group(1)
+            content = m_footnote.group(2)
+            return f"{indent}* {content}", SymbolDecision.AUTO_CORRECT, "FOOTNOTE_FROM_DIGIT"
+
+        # 5. Ký tự '|' ở đầu dòng trong văn bản thông thường (không phải hàng bảng nhiều cột ' | ')
         if line.count(" | ") < 2:
             m_pipe = re.match(r"^([ \t]*)\|\s+([A-Za-zÀ-ỹĐđ\+].*)$", line)
             if m_pipe:
@@ -1236,9 +1447,50 @@ class VietnameseTextPostProcessor:
         text = re.sub(r"\.\s*/\s*\.", "./.", text)
 
         # 4. Khôi phục từ bị cắt xén ở cuối bảng/trang dựa trên ngữ cảnh hành chính đã xác minh
-        text = re.sub(r"\b(nhiệm\s+vụ\s+đặc)\s+b\b", r"\1 biệt", text)
+        text = re.sub(r"\b(nhiệm\s+vụ\s+đặc)(?:\s+b\b|\b(?!\s*biệt))", r"\1 biệt", text)
 
-        # 5. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
+        # 5. Khôi phục phân số ½ bị OCR nhận thành % (ví dụ: 'chỉ bằng % so với quy định')
+        text = re.sub(r"\b(chỉ\s+bằng|bằng|dưới|quá)\s*%\s*(so\s+với\s+quy\s+định)\b", r"\1 ½ \2", text, flags=re.IGNORECASE)
+
+        # 6. Chuẩn hóa các cụm từ hành chính phổ biến bị nhận sai dấu thanh
+        text = re.sub(r"\bĐẰNG\s+CỘNG\s+SẢN\b", "ĐẢNG CỘNG SẢN", text)
+        text = re.sub(r"\b(ngày\s+\d+\s+)thắng(\s+\d+)", r"\1tháng\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bGhi\s+chủ\b", "Ghi chú", text)
+        text = re.sub(r"\bit\s+nhất\b", "ít nhất", text)
+        text = re.sub(r"\b(sinh\s+hoạt\s+)đằng\b", r"\1đảng", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bđảng\s+viễn\b", "đảng viên", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(chỉ|chi)\s+bố\b", "chi bộ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bchỉ\s+bộ\b", "chi bộ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bdàng\s+viên\b", "đảng viên", text, flags=re.IGNORECASE)
+
+        # 7. Khôi phục chữ số nhầm ký tự chữ cái trong ngữ cảnh số liệu / ngày tháng / phần trăm:
+        # 7.a. 'O' nhầm '0' trong ngày tháng: 'ngày O5', 'tháng O8', '05/O9/2024'
+        text = re.sub(r"\b(ngày\s+)O(\d)\b", r"\g<1>0\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(tháng\s+)O(\d)\b", r"\g<1>0\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(\d{1,2}[/-])O(\d[/-]\d{4})\b", r"\g<1>0\2", text)
+        # 7.b. 'O' nhầm '0' trong phần trăm và số tiền: '9O%', '5O%', '1OO%', '5O.000.000', '1OO đơn vị'
+        text = re.sub(r"\b(\d+)O%", r"\g<1>0%", text)
+        text = re.sub(r"\b1OO%", "100%", text)
+        text = re.sub(r"\b(\d+)O([.,]\d{3})", r"\g<1>0\2", text)
+        text = re.sub(r"\b1OO\b", "100", text)
+        # 7.c. 'l' hoặc 'I' nhầm '1' trong ngày tháng / phần trăm:
+        text = re.sub(r"\b(ngày\s+)l(\d)\b", r"\g<1>1\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(tháng\s+)l([012])\b", r"\g<1>1\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bl00%", "100%", text)
+        text = re.sub(r"\bl(\d)%", r"1\1%", text)
+        text = re.sub(r"\b(\d+)l%", r"\g<1>1%", text)
+        # 7.d. 'S' nhầm '5' trong phần trăm: 'S0%' -> '50%', '2S%' -> '25%'
+        text = re.sub(r"\bS(\d)%", r"5\1%", text)
+        text = re.sub(r"\b(\d+)S%", r"\g<1>5%", text)
+        # 7.e. 'B' nhầm '8' trong phần trăm: 'B0%' -> '80%', 'B5%' -> '85%'
+        text = re.sub(r"\bB(\d)%", r"8\1%", text)
+        text = re.sub(r"\b(\d+)B%", r"\g<1>8%", text)
+
+        # 8. Chuẩn hóa tiêu đề câu hỏi đề thi giáo dục: 'Cầu 1:' -> 'Câu 1:', 'Bải 1:' -> 'Bài 1:'
+        text = re.sub(r"\b(Cầu|Cậu|Cấu)\s+(\d+[:.])", r"Câu \2", text)
+        text = re.sub(r"\b(Bải|Bại)\s+(\d+[:.])", r"Bài \2", text)
+
+        # 9. Chuẩn hóa lần cuối về Unicode NFC dựng sẵn
         return unicodedata.normalize("NFC", text)
 
 
@@ -1713,6 +1965,7 @@ class OCREngine:
                     box_id_set = frozenset(id(b) for b in r_boxes)
                     table_row_map[box_id_set] = (tbl, tbl.grid[r_idx])
 
+        rendered_table_rows = set()
         text_lines = []
         for line in grouped_lines:
             if not line:
@@ -1721,11 +1974,19 @@ class OCREngine:
             line_box_ids = frozenset(id(b) for b in line)
             matched_tbl_row = None
             if line_box_ids in table_row_map:
-                matched_tbl_row = table_row_map[line_box_ids]
+                candidate_tuple = table_row_map[line_box_ids]
+                r_key = (id(candidate_tuple[0]), tuple(candidate_tuple[1]))
+                if r_key not in rendered_table_rows:
+                    matched_tbl_row = candidate_tuple
+                    rendered_table_rows.add(r_key)
             else:
                 for r_box_ids, tbl_row_tuple in table_row_map.items():
-                    if line_box_ids.issubset(r_box_ids) or (line_box_ids & r_box_ids):
-                        matched_tbl_row = tbl_row_tuple
+                    common = line_box_ids & r_box_ids
+                    if common and (len(common) / len(line_box_ids) >= 0.7 or line_box_ids.issubset(r_box_ids)):
+                        r_key = (id(tbl_row_tuple[0]), tuple(tbl_row_tuple[1]))
+                        if r_key not in rendered_table_rows:
+                            matched_tbl_row = tbl_row_tuple
+                            rendered_table_rows.add(r_key)
                         break
 
             if matched_tbl_row is not None:
@@ -1745,19 +2006,27 @@ class OCREngine:
                     for row_data in tbl.grid:
                         row_joined = " ".join(c.strip() for c in row_data if c.strip())
                         if row_joined and (row_joined == line_joined or line_joined in row_joined):
-                            is_fallback_table_row = True
-                            if not row_data[0].strip():
-                                non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
-                                formatted_row = " | ".join(non_empty_cells)
+                            r_key = (id(tbl), tuple(row_data))
+                            if r_key not in rendered_table_rows:
+                                is_fallback_table_row = True
+                                rendered_table_rows.add(r_key)
+                                if not row_data[0].strip():
+                                    non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
+                                    formatted_row = " | ".join(non_empty_cells)
+                                else:
+                                    formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
+                                formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+                                text_lines.append(formatted_row)
                             else:
-                                formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
-                            formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
-                            text_lines.append(formatted_row)
+                                is_fallback_table_row = True
                             break
                     if is_fallback_table_row:
                         break
 
                 if not is_fallback_table_row:
+                    cleaned_line = line_joined.strip()
+                    if len(cleaned_line) == 1 and cleaned_line in {"N", "n", "\\", "|", "/", "~", "`"}:
+                        continue
                     text_lines.append(line_joined)
 
         raw_full_text = "\n".join(text_lines)
@@ -1971,9 +2240,37 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                         doc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
                         doc_table.style = "Table Grid"
 
+                        # Tính độ rộng cột tỷ lệ (Proportional column widths)
+                        total_width_inches = 6.5
+                        col_max_lens = [
+                            max((len(tbl.grid[r][c].strip()) for r in range(len(tbl.grid))), default=5)
+                            for c in range(tbl.num_cols)
+                        ]
+                        total_len = max(1, sum(col_max_lens))
+                        col_widths_inches = []
+                        for c_len in col_max_lens:
+                            w_inch = max(0.6, min(4.0, (c_len / total_len) * total_width_inches))
+                            col_widths_inches.append(w_inch)
+
+                        sum_w = sum(col_widths_inches)
+                        if sum_w > 0:
+                            col_widths_inches = [(w / sum_w) * total_width_inches for w in col_widths_inches]
+
+                        # Lặp tiêu đề bảng ở mỗi trang Word nếu bảng dài (tblHeader)
+                        if len(tbl.grid) > 0:
+                            try:
+                                from docx.oxml import parse_xml
+                                from docx.oxml.ns import nsdecls
+                                header_tr = doc_table.rows[0]._tr.get_or_add_trPr()
+                                header_tr.append(parse_xml(r'<w:tblHeader %s/>' % nsdecls("w")))
+                            except Exception:
+                                pass
+
                         for r_i, row_data in enumerate(tbl.grid):
                             for c_i in range(min(len(row_data), tbl.num_cols)):
                                 cell = doc_table.cell(r_i, c_i)
+                                if c_i < len(col_widths_inches):
+                                    cell.width = Inches(col_widths_inches[c_i])
                                 cell_text = row_data[c_i].strip()
                                 cell.text = cell_text
 
@@ -2001,7 +2298,11 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             is_centered_title = any(kw in line_str.upper() for kw in [
                 "BIÊN BẢN", "QUYẾT ĐỊNH", "THÔNG TƯ", "NGHỊ ĐỊNH", "BÁO CÁO",
                 "KẾ HOẠCH", "BẢNG ĐIỂM", "ĐẢNG CỘNG SẢN VIỆT NAM",
-                "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "ĐỘC LẬP - TỰ DO - HẠNH PHÚC"
+                "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "ĐỘC LẬP - TỰ DO - HẠNH PHÚC",
+                "HỢP ĐỒNG", "HÓA ĐƠN", "PHIẾU THU", "PHIẾU CHI", "BÁO GIÁ",
+                "BẢNG KÊ", "GIẤY XÁC NHẬN", "GIẤY CHỨNG NHẬN", "CHƯƠNG",
+                "BÀI HỌC", "GIÁO TRÌNH", "ĐỀ THI", "ĐÁP ÁN", "TỔNG KẾT",
+                "PHIẾU KHÁM", "KẾT QUẢ XÉT NGHIỆM"
             ])
             if is_centered_title:
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
