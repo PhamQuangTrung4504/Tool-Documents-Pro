@@ -1,0 +1,2442 @@
+{
+  "version": "Phase C3 Multi-Engine Table Bake-Off",
+  "engines": {
+    "V1_Baseline": {
+      "summary": {
+        "num_samples": 5,
+        "average_metrics": {
+          "table_detected_exact": 1.0,
+          "row_count_accuracy": 1.0,
+          "col_count_accuracy": 1.0,
+          "cell_exact_match_rate": 1.0,
+          "cell_content_f1": 1.0
+        },
+        "failure_mode_frequencies": {},
+        "sample_summaries": [
+          {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 7.4
+          },
+          {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.64
+          },
+          {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 2.16
+          },
+          {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.7
+          },
+          {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 0.71
+          }
+        ]
+      },
+      "traces": [
+        {
+          "sample_id": "sample_01_bordered_admin",
+          "category": "bordered",
+          "elapsed_ms": 7.4,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "expected_grid": [
+              [
+                "STT",
+                "Tiêu chí đánh giá",
+                "Điểm tối đa",
+                "Điểm tự chấm",
+                "Ghi chú"
+              ],
+              [
+                "1",
+                "Chấp hành thời gian, thời lượng sinh hoạt",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                "05",
+                "",
+                ""
+              ],
+              [
+                "",
+                "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                "02",
+                "",
+                ""
+              ],
+              [
+                "2",
+                "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Từ 90% trở lên",
+                "04",
+                "04",
+                ""
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ",
+              "THÁNG 10 NĂM 2026"
+            ],
+            "metadata": {
+              "total_rows": 6,
+              "total_cols": 5,
+              "description": "Admin score table with empty sub-criteria cells"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 6,
+              "num_cols": 5,
+              "bbox": [
+                60,
+                115,
+                740,
+                335
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Tiêu chí đánh giá",
+                  "Điểm tối đa",
+                  "Điểm tự chấm",
+                  "Ghi chú"
+                ],
+                [
+                  "1",
+                  "Chấp hành thời gian, thời lượng sinh hoạt",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                  "05",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                  "02",
+                  "",
+                  ""
+                ],
+                [
+                  "2",
+                  "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Từ 90% trở lên",
+                  "04",
+                  "04",
+                  ""
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 8,
+          "input_boxes_count": 22
+        },
+        {
+          "sample_id": "sample_02_borderless_financial",
+          "category": "borderless",
+          "elapsed_ms": 1.64,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "expected_grid": [
+              [
+                "Tên hàng hóa",
+                "Số lượng",
+                "Đơn giá",
+                "Thành tiền"
+              ],
+              [
+                "Giấy in A4 Double A",
+                "10",
+                "85.000",
+                "850.000"
+              ],
+              [
+                "Bút bi Thiên Long",
+                "50",
+                "5.000",
+                "250.000"
+              ],
+              [
+                "Bìa còng 7cm",
+                "15",
+                "32.000",
+                "480.000"
+              ],
+              [
+                "Tổng cộng",
+                "",
+                "",
+                "1.580.000"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "HÓA ĐƠN BÁN HÀNG",
+              "Số: 00124/HĐ-2026"
+            ],
+            "metadata": {
+              "total_rows": 5,
+              "total_cols": 4,
+              "description": "Borderless financial invoice without grid lines"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 5,
+              "num_cols": 4,
+              "bbox": [
+                60,
+                120,
+                710,
+                300
+              ],
+              "grid": [
+                [
+                  "Tên hàng hóa",
+                  "Số lượng",
+                  "Đơn giá",
+                  "Thành tiền"
+                ],
+                [
+                  "Giấy in A4 Double A",
+                  "10",
+                  "85.000",
+                  "850.000"
+                ],
+                [
+                  "Bút bi Thiên Long",
+                  "50",
+                  "5.000",
+                  "250.000"
+                ],
+                [
+                  "Bìa còng 7cm",
+                  "15",
+                  "32.000",
+                  "480.000"
+                ],
+                [
+                  "Tổng cộng",
+                  "",
+                  "",
+                  "1.580.000"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 7,
+          "input_boxes_count": 20
+        },
+        {
+          "sample_id": "sample_03_merged_cells_header",
+          "category": "merged_cells",
+          "elapsed_ms": 2.16,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "expected_grid": [
+              [
+                "STT",
+                "Hạng mục công việc",
+                "Kế hoạch",
+                "Thực tế",
+                "Đánh giá"
+              ],
+              [
+                "1",
+                "Triển khai hệ thống OCR",
+                "100%",
+                "95%",
+                "Đạt"
+              ],
+              [
+                "2",
+                "Đào tạo nhân sự và chuyển giao công nghệ",
+                "50",
+                "48",
+                "Tốt"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BÁO CÁO TIẾN ĐỘ THỰC HIỆN DỰ ÁN"
+            ],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 5,
+              "description": "Table with multi-level header and multi-line cell"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 5,
+              "bbox": [
+                65,
+                125,
+                760,
+                295
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Hạng mục công việc",
+                  "Kế hoạch",
+                  "Thực tế",
+                  "Đánh giá"
+                ],
+                [
+                  "1",
+                  "Triển khai hệ thống OCR",
+                  "100%",
+                  "95%",
+                  "Đạt"
+                ],
+                [
+                  "2",
+                  "Đào tạo nhân sự và chuyển giao công nghệ",
+                  "50",
+                  "48",
+                  "Tốt"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 4,
+          "input_boxes_count": 17
+        },
+        {
+          "sample_id": "sample_04_dense_7cols",
+          "category": "multi_column_dense",
+          "elapsed_ms": 1.7,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "expected_grid": [
+              [
+                "TT",
+                "Họ và tên",
+                "Năm sinh",
+                "Chức vụ",
+                "Hệ số lương",
+                "Phụ cấp",
+                "Ký nhận"
+              ],
+              [
+                "1",
+                "Nguyễn Văn An",
+                "1985",
+                "Trưởng phòng",
+                "4.40",
+                "0.5",
+                "An"
+              ],
+              [
+                "2",
+                "Trần Thị Bình",
+                "1990",
+                "Phó phòng",
+                "3.66",
+                "0.3",
+                "Bình"
+              ],
+              [
+                "3",
+                "Lê Văn Cường",
+                "1992",
+                "Chuyên viên",
+                "3.00",
+                "0.2",
+                "Cường"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "DANH SÁCH CÁN BỘ CÔNG NHÂN VIÊN"
+            ],
+            "metadata": {
+              "total_rows": 4,
+              "total_cols": 7,
+              "description": "7-column dense table with narrow gutters"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 4,
+              "num_cols": 7,
+              "bbox": [
+                50,
+                92,
+                865,
+                245
+              ],
+              "grid": [
+                [
+                  "TT",
+                  "Họ và tên",
+                  "Năm sinh",
+                  "Chức vụ",
+                  "Hệ số lương",
+                  "Phụ cấp",
+                  "Ký nhận"
+                ],
+                [
+                  "1",
+                  "Nguyễn Văn An",
+                  "1985",
+                  "Trưởng phòng",
+                  "4.40",
+                  "0.5",
+                  "An"
+                ],
+                [
+                  "2",
+                  "Trần Thị Bình",
+                  "1990",
+                  "Phó phòng",
+                  "3.66",
+                  "0.3",
+                  "Bình"
+                ],
+                [
+                  "3",
+                  "Lê Văn Cường",
+                  "1992",
+                  "Chuyên viên",
+                  "3.00",
+                  "0.2",
+                  "Cường"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 5,
+          "input_boxes_count": 29
+        },
+        {
+          "sample_id": "sample_05_noisy_broken_grid",
+          "category": "noisy_scan",
+          "elapsed_ms": 0.71,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "expected_grid": [
+              [
+                "Mã số",
+                "Họ tên",
+                "Ghi chú"
+              ],
+              [
+                "NV01",
+                "Phạm Quang Trung",
+                "Chính thức"
+              ],
+              [
+                "NV02",
+                "Đỗ Minh Tuấn",
+                "Thử việc"
+              ]
+            ],
+            "expected_non_table_lines": [],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 3,
+              "description": "Noisy broken grid with vertical jitter and border noise"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 3,
+              "bbox": [
+                70,
+                88,
+                560,
+                238
+              ],
+              "grid": [
+                [
+                  "Mã số",
+                  "Họ tên",
+                  "Ghi chú"
+                ],
+                [
+                  "NV01",
+                  "Phạm Quang Trung",
+                  "Chính thức"
+                ],
+                [
+                  "NV02",
+                  "Đỗ Minh Tuấn",
+                  "Thử việc"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 3,
+          "input_boxes_count": 11
+        }
+      ]
+    },
+    "MorphologicalGrid": {
+      "summary": {
+        "num_samples": 5,
+        "average_metrics": {
+          "table_detected_exact": 1.0,
+          "row_count_accuracy": 1.0,
+          "col_count_accuracy": 1.0,
+          "cell_exact_match_rate": 1.0,
+          "cell_content_f1": 1.0
+        },
+        "failure_mode_frequencies": {},
+        "sample_summaries": [
+          {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 20.81
+          },
+          {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 3.25
+          },
+          {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 3.84
+          },
+          {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 3.24
+          },
+          {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 2.94
+          }
+        ]
+      },
+      "traces": [
+        {
+          "sample_id": "sample_01_bordered_admin",
+          "category": "bordered",
+          "elapsed_ms": 20.81,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "expected_grid": [
+              [
+                "STT",
+                "Tiêu chí đánh giá",
+                "Điểm tối đa",
+                "Điểm tự chấm",
+                "Ghi chú"
+              ],
+              [
+                "1",
+                "Chấp hành thời gian, thời lượng sinh hoạt",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                "05",
+                "",
+                ""
+              ],
+              [
+                "",
+                "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                "02",
+                "",
+                ""
+              ],
+              [
+                "2",
+                "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Từ 90% trở lên",
+                "04",
+                "04",
+                ""
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ",
+              "THÁNG 10 NĂM 2026"
+            ],
+            "metadata": {
+              "total_rows": 6,
+              "total_cols": 5,
+              "description": "Admin score table with empty sub-criteria cells"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 6,
+              "num_cols": 5,
+              "bbox": [
+                60,
+                115,
+                740,
+                335
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Tiêu chí đánh giá",
+                  "Điểm tối đa",
+                  "Điểm tự chấm",
+                  "Ghi chú"
+                ],
+                [
+                  "1",
+                  "Chấp hành thời gian, thời lượng sinh hoạt",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                  "05",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                  "02",
+                  "",
+                  ""
+                ],
+                [
+                  "2",
+                  "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Từ 90% trở lên",
+                  "04",
+                  "04",
+                  ""
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 8,
+          "input_boxes_count": 22
+        },
+        {
+          "sample_id": "sample_02_borderless_financial",
+          "category": "borderless",
+          "elapsed_ms": 3.25,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "expected_grid": [
+              [
+                "Tên hàng hóa",
+                "Số lượng",
+                "Đơn giá",
+                "Thành tiền"
+              ],
+              [
+                "Giấy in A4 Double A",
+                "10",
+                "85.000",
+                "850.000"
+              ],
+              [
+                "Bút bi Thiên Long",
+                "50",
+                "5.000",
+                "250.000"
+              ],
+              [
+                "Bìa còng 7cm",
+                "15",
+                "32.000",
+                "480.000"
+              ],
+              [
+                "Tổng cộng",
+                "",
+                "",
+                "1.580.000"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "HÓA ĐƠN BÁN HÀNG",
+              "Số: 00124/HĐ-2026"
+            ],
+            "metadata": {
+              "total_rows": 5,
+              "total_cols": 4,
+              "description": "Borderless financial invoice without grid lines"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 5,
+              "num_cols": 4,
+              "bbox": [
+                60,
+                120,
+                710,
+                300
+              ],
+              "grid": [
+                [
+                  "Tên hàng hóa",
+                  "Số lượng",
+                  "Đơn giá",
+                  "Thành tiền"
+                ],
+                [
+                  "Giấy in A4 Double A",
+                  "10",
+                  "85.000",
+                  "850.000"
+                ],
+                [
+                  "Bút bi Thiên Long",
+                  "50",
+                  "5.000",
+                  "250.000"
+                ],
+                [
+                  "Bìa còng 7cm",
+                  "15",
+                  "32.000",
+                  "480.000"
+                ],
+                [
+                  "Tổng cộng",
+                  "",
+                  "",
+                  "1.580.000"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 7,
+          "input_boxes_count": 20
+        },
+        {
+          "sample_id": "sample_03_merged_cells_header",
+          "category": "merged_cells",
+          "elapsed_ms": 3.84,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "expected_grid": [
+              [
+                "STT",
+                "Hạng mục công việc",
+                "Kế hoạch",
+                "Thực tế",
+                "Đánh giá"
+              ],
+              [
+                "1",
+                "Triển khai hệ thống OCR",
+                "100%",
+                "95%",
+                "Đạt"
+              ],
+              [
+                "2",
+                "Đào tạo nhân sự và chuyển giao công nghệ",
+                "50",
+                "48",
+                "Tốt"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BÁO CÁO TIẾN ĐỘ THỰC HIỆN DỰ ÁN"
+            ],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 5,
+              "description": "Table with multi-level header and multi-line cell"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 5,
+              "bbox": [
+                65,
+                125,
+                760,
+                295
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Hạng mục công việc",
+                  "Kế hoạch",
+                  "Thực tế",
+                  "Đánh giá"
+                ],
+                [
+                  "1",
+                  "Triển khai hệ thống OCR",
+                  "100%",
+                  "95%",
+                  "Đạt"
+                ],
+                [
+                  "2",
+                  "Đào tạo nhân sự và chuyển giao công nghệ",
+                  "50",
+                  "48",
+                  "Tốt"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 4,
+          "input_boxes_count": 17
+        },
+        {
+          "sample_id": "sample_04_dense_7cols",
+          "category": "multi_column_dense",
+          "elapsed_ms": 3.24,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "expected_grid": [
+              [
+                "TT",
+                "Họ và tên",
+                "Năm sinh",
+                "Chức vụ",
+                "Hệ số lương",
+                "Phụ cấp",
+                "Ký nhận"
+              ],
+              [
+                "1",
+                "Nguyễn Văn An",
+                "1985",
+                "Trưởng phòng",
+                "4.40",
+                "0.5",
+                "An"
+              ],
+              [
+                "2",
+                "Trần Thị Bình",
+                "1990",
+                "Phó phòng",
+                "3.66",
+                "0.3",
+                "Bình"
+              ],
+              [
+                "3",
+                "Lê Văn Cường",
+                "1992",
+                "Chuyên viên",
+                "3.00",
+                "0.2",
+                "Cường"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "DANH SÁCH CÁN BỘ CÔNG NHÂN VIÊN"
+            ],
+            "metadata": {
+              "total_rows": 4,
+              "total_cols": 7,
+              "description": "7-column dense table with narrow gutters"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 4,
+              "num_cols": 7,
+              "bbox": [
+                50,
+                92,
+                865,
+                245
+              ],
+              "grid": [
+                [
+                  "TT",
+                  "Họ và tên",
+                  "Năm sinh",
+                  "Chức vụ",
+                  "Hệ số lương",
+                  "Phụ cấp",
+                  "Ký nhận"
+                ],
+                [
+                  "1",
+                  "Nguyễn Văn An",
+                  "1985",
+                  "Trưởng phòng",
+                  "4.40",
+                  "0.5",
+                  "An"
+                ],
+                [
+                  "2",
+                  "Trần Thị Bình",
+                  "1990",
+                  "Phó phòng",
+                  "3.66",
+                  "0.3",
+                  "Bình"
+                ],
+                [
+                  "3",
+                  "Lê Văn Cường",
+                  "1992",
+                  "Chuyên viên",
+                  "3.00",
+                  "0.2",
+                  "Cường"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 5,
+          "input_boxes_count": 29
+        },
+        {
+          "sample_id": "sample_05_noisy_broken_grid",
+          "category": "noisy_scan",
+          "elapsed_ms": 2.94,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "expected_grid": [
+              [
+                "Mã số",
+                "Họ tên",
+                "Ghi chú"
+              ],
+              [
+                "NV01",
+                "Phạm Quang Trung",
+                "Chính thức"
+              ],
+              [
+                "NV02",
+                "Đỗ Minh Tuấn",
+                "Thử việc"
+              ]
+            ],
+            "expected_non_table_lines": [],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 3,
+              "description": "Noisy broken grid with vertical jitter and border noise"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 3,
+              "bbox": [
+                70,
+                88,
+                560,
+                238
+              ],
+              "grid": [
+                [
+                  "Mã số",
+                  "Họ tên",
+                  "Ghi chú"
+                ],
+                [
+                  "NV01",
+                  "Phạm Quang Trung",
+                  "Chính thức"
+                ],
+                [
+                  "NV02",
+                  "Đỗ Minh Tuấn",
+                  "Thử việc"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 3,
+          "input_boxes_count": 11
+        }
+      ]
+    },
+    "SpatialProjectionGraph": {
+      "summary": {
+        "num_samples": 5,
+        "average_metrics": {
+          "table_detected_exact": 1.0,
+          "row_count_accuracy": 1.0,
+          "col_count_accuracy": 1.0,
+          "cell_exact_match_rate": 1.0,
+          "cell_content_f1": 1.0
+        },
+        "failure_mode_frequencies": {},
+        "sample_summaries": [
+          {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.63
+          },
+          {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.18
+          },
+          {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 0.85
+          },
+          {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.55
+          },
+          {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 0.42
+          }
+        ]
+      },
+      "traces": [
+        {
+          "sample_id": "sample_01_bordered_admin",
+          "category": "bordered",
+          "elapsed_ms": 1.63,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "expected_grid": [
+              [
+                "STT",
+                "Tiêu chí đánh giá",
+                "Điểm tối đa",
+                "Điểm tự chấm",
+                "Ghi chú"
+              ],
+              [
+                "1",
+                "Chấp hành thời gian, thời lượng sinh hoạt",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                "05",
+                "",
+                ""
+              ],
+              [
+                "",
+                "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                "02",
+                "",
+                ""
+              ],
+              [
+                "2",
+                "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Từ 90% trở lên",
+                "04",
+                "04",
+                ""
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ",
+              "THÁNG 10 NĂM 2026"
+            ],
+            "metadata": {
+              "total_rows": 6,
+              "total_cols": 5,
+              "description": "Admin score table with empty sub-criteria cells"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 6,
+              "num_cols": 5,
+              "bbox": [
+                60,
+                115,
+                740,
+                335
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Tiêu chí đánh giá",
+                  "Điểm tối đa",
+                  "Điểm tự chấm",
+                  "Ghi chú"
+                ],
+                [
+                  "1",
+                  "Chấp hành thời gian, thời lượng sinh hoạt",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                  "05",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                  "02",
+                  "",
+                  ""
+                ],
+                [
+                  "2",
+                  "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Từ 90% trở lên",
+                  "04",
+                  "04",
+                  ""
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 8,
+          "input_boxes_count": 22
+        },
+        {
+          "sample_id": "sample_02_borderless_financial",
+          "category": "borderless",
+          "elapsed_ms": 1.18,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "expected_grid": [
+              [
+                "Tên hàng hóa",
+                "Số lượng",
+                "Đơn giá",
+                "Thành tiền"
+              ],
+              [
+                "Giấy in A4 Double A",
+                "10",
+                "85.000",
+                "850.000"
+              ],
+              [
+                "Bút bi Thiên Long",
+                "50",
+                "5.000",
+                "250.000"
+              ],
+              [
+                "Bìa còng 7cm",
+                "15",
+                "32.000",
+                "480.000"
+              ],
+              [
+                "Tổng cộng",
+                "",
+                "",
+                "1.580.000"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "HÓA ĐƠN BÁN HÀNG",
+              "Số: 00124/HĐ-2026"
+            ],
+            "metadata": {
+              "total_rows": 5,
+              "total_cols": 4,
+              "description": "Borderless financial invoice without grid lines"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 5,
+              "num_cols": 4,
+              "bbox": [
+                60,
+                120,
+                710,
+                300
+              ],
+              "grid": [
+                [
+                  "Tên hàng hóa",
+                  "Số lượng",
+                  "Đơn giá",
+                  "Thành tiền"
+                ],
+                [
+                  "Giấy in A4 Double A",
+                  "10",
+                  "85.000",
+                  "850.000"
+                ],
+                [
+                  "Bút bi Thiên Long",
+                  "50",
+                  "5.000",
+                  "250.000"
+                ],
+                [
+                  "Bìa còng 7cm",
+                  "15",
+                  "32.000",
+                  "480.000"
+                ],
+                [
+                  "Tổng cộng",
+                  "",
+                  "",
+                  "1.580.000"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 7,
+          "input_boxes_count": 20
+        },
+        {
+          "sample_id": "sample_03_merged_cells_header",
+          "category": "merged_cells",
+          "elapsed_ms": 0.85,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "expected_grid": [
+              [
+                "STT",
+                "Hạng mục công việc",
+                "Kế hoạch",
+                "Thực tế",
+                "Đánh giá"
+              ],
+              [
+                "1",
+                "Triển khai hệ thống OCR",
+                "100%",
+                "95%",
+                "Đạt"
+              ],
+              [
+                "2",
+                "Đào tạo nhân sự và chuyển giao công nghệ",
+                "50",
+                "48",
+                "Tốt"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BÁO CÁO TIẾN ĐỘ THỰC HIỆN DỰ ÁN"
+            ],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 5,
+              "description": "Table with multi-level header and multi-line cell"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 5,
+              "bbox": [
+                65,
+                125,
+                760,
+                295
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Hạng mục công việc",
+                  "Kế hoạch",
+                  "Thực tế",
+                  "Đánh giá"
+                ],
+                [
+                  "1",
+                  "Triển khai hệ thống OCR",
+                  "100%",
+                  "95%",
+                  "Đạt"
+                ],
+                [
+                  "2",
+                  "Đào tạo nhân sự và chuyển giao công nghệ",
+                  "50",
+                  "48",
+                  "Tốt"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 4,
+          "input_boxes_count": 17
+        },
+        {
+          "sample_id": "sample_04_dense_7cols",
+          "category": "multi_column_dense",
+          "elapsed_ms": 1.55,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "expected_grid": [
+              [
+                "TT",
+                "Họ và tên",
+                "Năm sinh",
+                "Chức vụ",
+                "Hệ số lương",
+                "Phụ cấp",
+                "Ký nhận"
+              ],
+              [
+                "1",
+                "Nguyễn Văn An",
+                "1985",
+                "Trưởng phòng",
+                "4.40",
+                "0.5",
+                "An"
+              ],
+              [
+                "2",
+                "Trần Thị Bình",
+                "1990",
+                "Phó phòng",
+                "3.66",
+                "0.3",
+                "Bình"
+              ],
+              [
+                "3",
+                "Lê Văn Cường",
+                "1992",
+                "Chuyên viên",
+                "3.00",
+                "0.2",
+                "Cường"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "DANH SÁCH CÁN BỘ CÔNG NHÂN VIÊN"
+            ],
+            "metadata": {
+              "total_rows": 4,
+              "total_cols": 7,
+              "description": "7-column dense table with narrow gutters"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 4,
+              "num_cols": 7,
+              "bbox": [
+                50,
+                92,
+                865,
+                245
+              ],
+              "grid": [
+                [
+                  "TT",
+                  "Họ và tên",
+                  "Năm sinh",
+                  "Chức vụ",
+                  "Hệ số lương",
+                  "Phụ cấp",
+                  "Ký nhận"
+                ],
+                [
+                  "1",
+                  "Nguyễn Văn An",
+                  "1985",
+                  "Trưởng phòng",
+                  "4.40",
+                  "0.5",
+                  "An"
+                ],
+                [
+                  "2",
+                  "Trần Thị Bình",
+                  "1990",
+                  "Phó phòng",
+                  "3.66",
+                  "0.3",
+                  "Bình"
+                ],
+                [
+                  "3",
+                  "Lê Văn Cường",
+                  "1992",
+                  "Chuyên viên",
+                  "3.00",
+                  "0.2",
+                  "Cường"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 5,
+          "input_boxes_count": 29
+        },
+        {
+          "sample_id": "sample_05_noisy_broken_grid",
+          "category": "noisy_scan",
+          "elapsed_ms": 0.42,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "expected_grid": [
+              [
+                "Mã số",
+                "Họ tên",
+                "Ghi chú"
+              ],
+              [
+                "NV01",
+                "Phạm Quang Trung",
+                "Chính thức"
+              ],
+              [
+                "NV02",
+                "Đỗ Minh Tuấn",
+                "Thử việc"
+              ]
+            ],
+            "expected_non_table_lines": [],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 3,
+              "description": "Noisy broken grid with vertical jitter and border noise"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 3,
+              "bbox": [
+                70,
+                88,
+                560,
+                238
+              ],
+              "grid": [
+                [
+                  "Mã số",
+                  "Họ tên",
+                  "Ghi chú"
+                ],
+                [
+                  "NV01",
+                  "Phạm Quang Trung",
+                  "Chính thức"
+                ],
+                [
+                  "NV02",
+                  "Đỗ Minh Tuấn",
+                  "Thử việc"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 3,
+          "input_boxes_count": 11
+        }
+      ]
+    },
+    "UnifiedHybrid": {
+      "summary": {
+        "num_samples": 5,
+        "average_metrics": {
+          "table_detected_exact": 1.0,
+          "row_count_accuracy": 1.0,
+          "col_count_accuracy": 1.0,
+          "cell_exact_match_rate": 1.0,
+          "cell_content_f1": 1.0
+        },
+        "failure_mode_frequencies": {},
+        "sample_summaries": [
+          {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.45
+          },
+          {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.29
+          },
+          {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 0.85
+          },
+          {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 1.48
+          },
+          {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "metrics": {
+              "table_detected_exact": 1.0,
+              "row_count_accuracy": 1.0,
+              "col_count_accuracy": 1.0,
+              "cell_exact_match_rate": 1.0,
+              "cell_content_f1": 1.0
+            },
+            "error_count": 0,
+            "failure_modes": [],
+            "elapsed_ms": 0.45
+          }
+        ]
+      },
+      "traces": [
+        {
+          "sample_id": "sample_01_bordered_admin",
+          "category": "bordered",
+          "elapsed_ms": 1.45,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_01_bordered_admin",
+            "category": "bordered",
+            "expected_grid": [
+              [
+                "STT",
+                "Tiêu chí đánh giá",
+                "Điểm tối đa",
+                "Điểm tự chấm",
+                "Ghi chú"
+              ],
+              [
+                "1",
+                "Chấp hành thời gian, thời lượng sinh hoạt",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                "05",
+                "",
+                ""
+              ],
+              [
+                "",
+                "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                "02",
+                "",
+                ""
+              ],
+              [
+                "2",
+                "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                "05",
+                "05",
+                ""
+              ],
+              [
+                "",
+                "Từ 90% trở lên",
+                "04",
+                "04",
+                ""
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ",
+              "THÁNG 10 NĂM 2026"
+            ],
+            "metadata": {
+              "total_rows": 6,
+              "total_cols": 5,
+              "description": "Admin score table with empty sub-criteria cells"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 6,
+              "num_cols": 5,
+              "bbox": [
+                60,
+                115,
+                740,
+                335
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Tiêu chí đánh giá",
+                  "Điểm tối đa",
+                  "Điểm tự chấm",
+                  "Ghi chú"
+                ],
+                [
+                  "1",
+                  "Chấp hành thời gian, thời lượng sinh hoạt",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+                  "05",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
+                  "02",
+                  "",
+                  ""
+                ],
+                [
+                  "2",
+                  "Tỷ lệ đảng viên dự sinh hoạt chi bộ",
+                  "05",
+                  "05",
+                  ""
+                ],
+                [
+                  "",
+                  "Từ 90% trở lên",
+                  "04",
+                  "04",
+                  ""
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 8,
+          "input_boxes_count": 22
+        },
+        {
+          "sample_id": "sample_02_borderless_financial",
+          "category": "borderless",
+          "elapsed_ms": 1.29,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_02_borderless_financial",
+            "category": "borderless",
+            "expected_grid": [
+              [
+                "Tên hàng hóa",
+                "Số lượng",
+                "Đơn giá",
+                "Thành tiền"
+              ],
+              [
+                "Giấy in A4 Double A",
+                "10",
+                "85.000",
+                "850.000"
+              ],
+              [
+                "Bút bi Thiên Long",
+                "50",
+                "5.000",
+                "250.000"
+              ],
+              [
+                "Bìa còng 7cm",
+                "15",
+                "32.000",
+                "480.000"
+              ],
+              [
+                "Tổng cộng",
+                "",
+                "",
+                "1.580.000"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "HÓA ĐƠN BÁN HÀNG",
+              "Số: 00124/HĐ-2026"
+            ],
+            "metadata": {
+              "total_rows": 5,
+              "total_cols": 4,
+              "description": "Borderless financial invoice without grid lines"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 5,
+              "num_cols": 4,
+              "bbox": [
+                60,
+                120,
+                710,
+                300
+              ],
+              "grid": [
+                [
+                  "Tên hàng hóa",
+                  "Số lượng",
+                  "Đơn giá",
+                  "Thành tiền"
+                ],
+                [
+                  "Giấy in A4 Double A",
+                  "10",
+                  "85.000",
+                  "850.000"
+                ],
+                [
+                  "Bút bi Thiên Long",
+                  "50",
+                  "5.000",
+                  "250.000"
+                ],
+                [
+                  "Bìa còng 7cm",
+                  "15",
+                  "32.000",
+                  "480.000"
+                ],
+                [
+                  "Tổng cộng",
+                  "",
+                  "",
+                  "1.580.000"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 7,
+          "input_boxes_count": 20
+        },
+        {
+          "sample_id": "sample_03_merged_cells_header",
+          "category": "merged_cells",
+          "elapsed_ms": 0.85,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_03_merged_cells_header",
+            "category": "merged_cells",
+            "expected_grid": [
+              [
+                "STT",
+                "Hạng mục công việc",
+                "Kế hoạch",
+                "Thực tế",
+                "Đánh giá"
+              ],
+              [
+                "1",
+                "Triển khai hệ thống OCR",
+                "100%",
+                "95%",
+                "Đạt"
+              ],
+              [
+                "2",
+                "Đào tạo nhân sự và chuyển giao công nghệ",
+                "50",
+                "48",
+                "Tốt"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "BÁO CÁO TIẾN ĐỘ THỰC HIỆN DỰ ÁN"
+            ],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 5,
+              "description": "Table with multi-level header and multi-line cell"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 5,
+              "bbox": [
+                65,
+                125,
+                760,
+                295
+              ],
+              "grid": [
+                [
+                  "STT",
+                  "Hạng mục công việc",
+                  "Kế hoạch",
+                  "Thực tế",
+                  "Đánh giá"
+                ],
+                [
+                  "1",
+                  "Triển khai hệ thống OCR",
+                  "100%",
+                  "95%",
+                  "Đạt"
+                ],
+                [
+                  "2",
+                  "Đào tạo nhân sự và chuyển giao công nghệ",
+                  "50",
+                  "48",
+                  "Tốt"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 4,
+          "input_boxes_count": 17
+        },
+        {
+          "sample_id": "sample_04_dense_7cols",
+          "category": "multi_column_dense",
+          "elapsed_ms": 1.48,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_04_dense_7cols",
+            "category": "multi_column_dense",
+            "expected_grid": [
+              [
+                "TT",
+                "Họ và tên",
+                "Năm sinh",
+                "Chức vụ",
+                "Hệ số lương",
+                "Phụ cấp",
+                "Ký nhận"
+              ],
+              [
+                "1",
+                "Nguyễn Văn An",
+                "1985",
+                "Trưởng phòng",
+                "4.40",
+                "0.5",
+                "An"
+              ],
+              [
+                "2",
+                "Trần Thị Bình",
+                "1990",
+                "Phó phòng",
+                "3.66",
+                "0.3",
+                "Bình"
+              ],
+              [
+                "3",
+                "Lê Văn Cường",
+                "1992",
+                "Chuyên viên",
+                "3.00",
+                "0.2",
+                "Cường"
+              ]
+            ],
+            "expected_non_table_lines": [
+              "DANH SÁCH CÁN BỘ CÔNG NHÂN VIÊN"
+            ],
+            "metadata": {
+              "total_rows": 4,
+              "total_cols": 7,
+              "description": "7-column dense table with narrow gutters"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 4,
+              "num_cols": 7,
+              "bbox": [
+                50,
+                92,
+                865,
+                245
+              ],
+              "grid": [
+                [
+                  "TT",
+                  "Họ và tên",
+                  "Năm sinh",
+                  "Chức vụ",
+                  "Hệ số lương",
+                  "Phụ cấp",
+                  "Ký nhận"
+                ],
+                [
+                  "1",
+                  "Nguyễn Văn An",
+                  "1985",
+                  "Trưởng phòng",
+                  "4.40",
+                  "0.5",
+                  "An"
+                ],
+                [
+                  "2",
+                  "Trần Thị Bình",
+                  "1990",
+                  "Phó phòng",
+                  "3.66",
+                  "0.3",
+                  "Bình"
+                ],
+                [
+                  "3",
+                  "Lê Văn Cường",
+                  "1992",
+                  "Chuyên viên",
+                  "3.00",
+                  "0.2",
+                  "Cường"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 5,
+          "input_boxes_count": 29
+        },
+        {
+          "sample_id": "sample_05_noisy_broken_grid",
+          "category": "noisy_scan",
+          "elapsed_ms": 0.45,
+          "metrics": {
+            "table_detected_exact": 1.0,
+            "row_count_accuracy": 1.0,
+            "col_count_accuracy": 1.0,
+            "cell_exact_match_rate": 1.0,
+            "cell_content_f1": 1.0
+          },
+          "diagnostics": [],
+          "ground_truth": {
+            "sample_id": "sample_05_noisy_broken_grid",
+            "category": "noisy_scan",
+            "expected_grid": [
+              [
+                "Mã số",
+                "Họ tên",
+                "Ghi chú"
+              ],
+              [
+                "NV01",
+                "Phạm Quang Trung",
+                "Chính thức"
+              ],
+              [
+                "NV02",
+                "Đỗ Minh Tuấn",
+                "Thử việc"
+              ]
+            ],
+            "expected_non_table_lines": [],
+            "metadata": {
+              "total_rows": 3,
+              "total_cols": 3,
+              "description": "Noisy broken grid with vertical jitter and border noise"
+            }
+          },
+          "predicted_tables": [
+            {
+              "num_rows": 3,
+              "num_cols": 3,
+              "bbox": [
+                70,
+                88,
+                560,
+                238
+              ],
+              "grid": [
+                [
+                  "Mã số",
+                  "Họ tên",
+                  "Ghi chú"
+                ],
+                [
+                  "NV01",
+                  "Phạm Quang Trung",
+                  "Chính thức"
+                ],
+                [
+                  "NV02",
+                  "Đỗ Minh Tuấn",
+                  "Thử việc"
+                ]
+              ]
+            }
+          ],
+          "predicted_lines_count": 3,
+          "input_boxes_count": 11
+        }
+      ]
+    }
+  },
+  "comparison_table": [
+    {
+      "sample_id": "sample_01_bordered_admin",
+      "V1_Baseline_exact_match": 1.0,
+      "V1_Baseline_f1": 1.0,
+      "V1_Baseline_errors": 0,
+      "MorphologicalGrid_exact_match": 1.0,
+      "MorphologicalGrid_f1": 1.0,
+      "MorphologicalGrid_errors": 0,
+      "SpatialProjectionGraph_exact_match": 1.0,
+      "SpatialProjectionGraph_f1": 1.0,
+      "SpatialProjectionGraph_errors": 0,
+      "UnifiedHybrid_exact_match": 1.0,
+      "UnifiedHybrid_f1": 1.0,
+      "UnifiedHybrid_errors": 0
+    },
+    {
+      "sample_id": "sample_02_borderless_financial",
+      "V1_Baseline_exact_match": 1.0,
+      "V1_Baseline_f1": 1.0,
+      "V1_Baseline_errors": 0,
+      "MorphologicalGrid_exact_match": 1.0,
+      "MorphologicalGrid_f1": 1.0,
+      "MorphologicalGrid_errors": 0,
+      "SpatialProjectionGraph_exact_match": 1.0,
+      "SpatialProjectionGraph_f1": 1.0,
+      "SpatialProjectionGraph_errors": 0,
+      "UnifiedHybrid_exact_match": 1.0,
+      "UnifiedHybrid_f1": 1.0,
+      "UnifiedHybrid_errors": 0
+    },
+    {
+      "sample_id": "sample_03_merged_cells_header",
+      "V1_Baseline_exact_match": 1.0,
+      "V1_Baseline_f1": 1.0,
+      "V1_Baseline_errors": 0,
+      "MorphologicalGrid_exact_match": 1.0,
+      "MorphologicalGrid_f1": 1.0,
+      "MorphologicalGrid_errors": 0,
+      "SpatialProjectionGraph_exact_match": 1.0,
+      "SpatialProjectionGraph_f1": 1.0,
+      "SpatialProjectionGraph_errors": 0,
+      "UnifiedHybrid_exact_match": 1.0,
+      "UnifiedHybrid_f1": 1.0,
+      "UnifiedHybrid_errors": 0
+    },
+    {
+      "sample_id": "sample_04_dense_7cols",
+      "V1_Baseline_exact_match": 1.0,
+      "V1_Baseline_f1": 1.0,
+      "V1_Baseline_errors": 0,
+      "MorphologicalGrid_exact_match": 1.0,
+      "MorphologicalGrid_f1": 1.0,
+      "MorphologicalGrid_errors": 0,
+      "SpatialProjectionGraph_exact_match": 1.0,
+      "SpatialProjectionGraph_f1": 1.0,
+      "SpatialProjectionGraph_errors": 0,
+      "UnifiedHybrid_exact_match": 1.0,
+      "UnifiedHybrid_f1": 1.0,
+      "UnifiedHybrid_errors": 0
+    },
+    {
+      "sample_id": "sample_05_noisy_broken_grid",
+      "V1_Baseline_exact_match": 1.0,
+      "V1_Baseline_f1": 1.0,
+      "V1_Baseline_errors": 0,
+      "MorphologicalGrid_exact_match": 1.0,
+      "MorphologicalGrid_f1": 1.0,
+      "MorphologicalGrid_errors": 0,
+      "SpatialProjectionGraph_exact_match": 1.0,
+      "SpatialProjectionGraph_f1": 1.0,
+      "SpatialProjectionGraph_errors": 0,
+      "UnifiedHybrid_exact_match": 1.0,
+      "UnifiedHybrid_f1": 1.0,
+      "UnifiedHybrid_errors": 0
+    }
+  ]
+}

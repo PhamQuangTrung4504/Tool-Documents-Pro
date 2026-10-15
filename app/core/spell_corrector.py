@@ -52,6 +52,12 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
+from app.core.ngram_language_model import (
+    VietnameseNgramLanguageModel,
+    get_default_ngram_model,
+    visual_ocr_distance,
+)
+
 # ---------------------------------------------------------------------------
 # Cấu Trúc Dữ Liệu Kết Quả Kiểm Tra
 # ---------------------------------------------------------------------------
@@ -386,6 +392,8 @@ class VietnameseSpellChecker:
         self._syllables_file = syllables_file or os.path.join(base_dir, "vietnamese_syllables.txt")
         self._words_file = words_file or os.path.join(base_dir, "vietnamese_words.txt")
 
+        self._ngram_lm = get_default_ngram_model()
+
         self._load_datasets()
 
     def _load_datasets(self) -> None:
@@ -651,12 +659,26 @@ class VietnameseSpellChecker:
         if not candidates:
             return []
 
+        # Đánh giá qua Noisy Channel N-gram Model
+        ngram_top: Optional[str] = None
+        ngram_eval = self._ngram_lm.evaluate_token_in_context("", prev_norm, w_norm, next_norm, "")
+        if ngram_eval is not None and ngram_eval.suggested_token:
+            ngram_top = ngram_eval.suggested_token
+            candidates.add(ngram_top)
+
         # Xếp hạng ứng viên theo điểm tổng hợp
         scored: List[Tuple[float, str]] = []
         for c in candidates:
-            dist = weighted_edit_distance(w_norm, c)
-            # Điểm khoảng cách (càng nhỏ điểm càng cao)
-            score = -dist * 2.5
+            voc_dist = visual_ocr_distance(w_norm, c)
+            w_dist = weighted_edit_distance(w_norm, c)
+            combined_dist = min(voc_dist, w_dist)
+
+            # Điểm khoảng cách thị giác (càng nhỏ điểm càng cao)
+            score = -combined_dist * 3.0
+
+            # Ưu tiên số 1 cho ứng viên được Noisy Channel chọn
+            if ngram_top and c == ngram_top:
+                score += 15.0
 
             # Điểm khớp ngữ cảnh N-gram
             if prev_norm and f"{prev_norm} {c}" in self._vietnamese_words:
@@ -1186,14 +1208,30 @@ class VietnameseSpellChecker:
         if prev_is_bound or prev_lower in PROTECTED_COMMON_WORDS or not prev_lower:
             return None
 
-        # 5. So khớp với tiền tố liền trước (chỉ khi prev_token có từ ghép với candidate)
-        # Chặn đứng bôi đỏ nhầm: nếu curr_lower thuộc PROTECTED_COMMON_WORDS hoặc là từ đơn thông dụng hợp lệ -> BỎ QUA NGAY
+        # 5. Đánh giá xác suất N-gram kết hợp Ma trận Nhầm lẫn Thị giác OCR (Noisy Channel Model)
         SAFE_COMMON_SINGLE_WORDS = {
             "họp", "đủ", "có", "mặt", "vắng", "đúng", "phù", "hợp", "cùng",
             "ngày", "giờ", "phút", "năm", "tháng", "kế", "thể", "luật", "hoạt"
         }
         if curr_lower in PROTECTED_COMMON_WORDS or curr_lower in SAFE_COMMON_SINGLE_WORDS:
             return None
+
+        ngram_eval = self._ngram_lm.evaluate_token_in_context(
+            prev_prev_lower,
+            prev_lower,
+            curr_lower,
+            next_lower,
+            next_next_lower,
+        )
+        if ngram_eval is not None:
+            cand = ngram_eval.suggested_token
+            if curr_token.isupper():
+                sugg_fmt = cand.upper()
+            elif curr_token and curr_token[0].isupper():
+                sugg_fmt = cand.capitalize()
+            else:
+                sugg_fmt = cand
+            return sugg_fmt, ngram_eval.reason
 
         if prev_lower in self._compound_prefixes:
             best_cand = None
