@@ -20,7 +20,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
@@ -84,6 +84,7 @@ from app.core.ocr_engine import (
     OCREngine,
     OCRResult,
     export_to_docx,
+    final_document_cleanup,
     get_display_languages,
     get_lang_code,
 )
@@ -163,6 +164,7 @@ class OCRWorker(QThread):
             result = self._engine.recognize(
                 self._image, preprocess=True, denoise=True,
             )
+            result.full_text = final_document_cleanup(result.full_text)
             self.finished.emit(result)
 
         except Exception as exc:
@@ -1023,7 +1025,9 @@ class MainWindow(QMainWindow):
         self._current_result = result
 
         # Hiển thị kết quả text
-        self.text_result.setPlainText(result.full_text)
+        cleaned_text = final_document_cleanup(result.full_text)
+        result.full_text = cleaned_text
+        self.text_result.setPlainText(cleaned_text)
 
         # Vẽ bounding box lên ảnh
         if self._current_image is not None and result.boxes:

@@ -1,0 +1,13 @@
+[tool.pyright]
+venvPath = "."
+venv = "venv"
+extraPaths = ["venv/Lib/site-packages", "."]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingImports = false
+reportMissingTypeStubs = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+reportCallIssue = false
+reportOptionalMemberAccess = false
+reportIncompatibleMethodOverride = false

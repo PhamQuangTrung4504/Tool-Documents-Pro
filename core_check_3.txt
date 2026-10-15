@@ -1,0 +1,443 @@
+=== [1] CAC VI TRI DINH NGHIA & GOI HAM ===
+Line  843: def format_progress_table_row(row_str: str) -> str:
+Line 2278: def final_document_cleanup(text: str) -> str:
+Line 2503:     def clean_and_restore(cls, text: str) -> str:
+Line 3305:             text = VietnameseTextPostProcessor.clean_and_restore(text)
+Line 3398:         raw_full_text = VietnameseTextPostProcessor.clean_and_restore(raw_full_text)
+Line 3406:         full_text = VietnameseTextPostProcessor.clean_and_restore(full_text)
+Line 3430:         full_text = final_document_cleanup(full_text)
+Line 3434:             b.text = final_document_cleanup(b.text)
+Line 3447:                     row_cells[c_idx] = final_document_cleanup(cell_val)
+
+=== [2] NOI DUNG DONG 2250 DEN 2680 CUA ocr_engine.py ===
+2250:     return "\n".join(cleaned_lines)
+2251: 
+2252: 
+2253: def clean_orphaned_brackets(text: str) -> str:
+2254:     """
+2255:     Xóa dấu ngoặc vuông '[' hoặc ký tự gạch đứng '|' mồ côi ở đầu dòng:
+2256:     Nếu dòng bắt đầu bằng '[' hoặc '|' ngay trước chữ/số/ký tự văn bản mà trên dòng đó
+2257:     không có dấu đóng ngoặc ']' tương ứng (ví dụ: '[3. Thư ký...', '[Chủ trì...', '[Ưng...').
+2258:     Đồng thời xóa dấu '[' mồ côi đứng trước từ ngữ trong dòng (ví dụ: 'THIÊN [Ưng' -> 'THIÊN Ưng').
+2259:     """
+2260:     if not text:
+2261:         return text
+2262:     lines = text.split("\n")
+2263:     cleaned_lines = []
+2264:     for line in lines:
+2265:         m = re.match(r"^(\s*)[\[\|]\s*([^\s].*)$", line)
+2266:         if m:
+2267:             c = m.group(2)
+2268:             if "]" not in c:
+2269:                 line = f"{m.group(1)}{c}"
+2270:         # Xóa dấu '[' mồ côi đứng trước từ trong dòng khi không có ']' đóng
+2271:         if "]" not in line and "[" in line:
+2272:             line = re.sub(r"(?<=\s)\[([A-Za-zÀ-ỹĐđ]+)", r"\1", line)
+2273:             line = re.sub(r"^\[([A-Za-zÀ-ỹĐđ]+)", r"\1", line)
+2274:         cleaned_lines.append(line)
+2275:     return "\n".join(cleaned_lines)
+2276: 
+2277: 
+2278: def final_document_cleanup(text: str) -> str:
+2279:     """
+2280:     Khóa chốt hậu xử lý văn bản cuối cùng (Final Document Cleanup):
+2281:     1. Chuẩn hóa lỗi nhầm dấu cố hữu của VietOCR (bảo toàn chữ HOA/thường):
+2282:        - CHI BỐ, CHỈ BỘ, CHI BỒ, CHỈ BỒ -> CHI BỘ | Chi bố, Chỉ bộ, Chi bồ, Chỉ bồ -> Chi bộ.
+2283:        - r'\\bsinh\\s+hoatchi\\b' -> 'sinh hoạt chi'.
+2284:        - r'\\b(\\d+)\\s+đồng\\s+ch\\b(?![a-zà-ỹđ])' -> r'\\1 đồng chí'.
+2285:        - r'(Giới\\s+thiệu\\s+đại\\s+biểu\\s*:\\s*không)\\s+c\\b' -> r'\\1 có.'.
+2286:        - r'\\b(Số\\s*:?\\s*\\d+)\\s+([A-ZĐ]{1,5}/[A-ZĐ0-9\\-]+)\\b' -> r'\\1-\\2' (Số 01 BB/CB -> Số 01-BB/CB).
+2287:        - (Tiêu chí đánh giá | đa | Điểm tự chấm) -> (Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm).
+2288:     2. Chuẩn hóa số, phân số & ký hiệu bảng:
+2289:        - r'\\b0[sS]\\b' -> '05'.
+2290:        - r'(chỉ\\s+bằng|bằng|dưới|trên|quá)\\s*[%％]\\s*(so\\s+với\\s+quy\\s+định)' -> r'\\1 ½ \\2'.
+2291:        - r'(?m)^([ \\t]*)\\*\\s*(Trừ\\s+trường\\s+hợp)' -> r'\\1* \\2' (sửa '*Trừ trường hợp' -> '* Trừ trường hợp').
+2292:        - Xóa dấu '[' mồ côi đầu dòng khi dòng đó không có dấu ']'.
+2293:        - Khôi phục dấu '- ' đầu dòng cho các mục liệt kê biên bản:
+2294:          (?m)^([ \\t]*)(Lý\\s+do|Giới\\s+thiệu\\s+đại\\s+biểu|Miễn\\s+sinh\\s+hoạt|Có\\s+mặt|Vắng\\s+mặt)\\s*: -> \\1- \\2:
+2295:        - Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (có cột điểm | 01, | 02,...).
+2296:     """
+2297:     if not text:
+2298:         return ""
+2299:     text = text.replace("\r\n", "\n").replace("\r", "\n")
+2300:     text = unicodedata.normalize("NFC", text)
+2301: 
+2302:     # 1.a. Chuẩn hóa chi bộ / CHI BỘ / Chi bộ (bảo toàn chữ HOA/thường)
+2303:     # Xử lý tất cả các biến thể: chi bộ, chỉ bộ, chi bồ, chỉ bồ, chi bố, chỉ bố,...
+2304:     def _fix_chi_bo(m: re.Match) -> str:
+2305:         s = m.group(0)
+2306:         if s.isupper():
+2307:             return "CHI BỘ"
+2308:         elif s[0].isupper():
+2309:             return "Chi bộ"
+2310:         else:
+2311:             return "chi bộ"
+2312: 
+2313:     text = re.sub(r"\bch[iỉ]\s+b[ôồốổỗộ]\b", _fix_chi_bo, text, flags=re.IGNORECASE)
+2314: 
+2315:     # 1.b. sinh hoatchi -> sinh hoạt chi
+2316:     def _fix_sinh_hoatchi(m: re.Match) -> str:
+2317:         s = m.group(0)
+2318:         if s.isupper():
+2319:             return "SINH HOẠT CHI"
+2320:         elif s[0].isupper():
+2321:             return "Sinh hoạt chi"
+2322:         else:
+2323:             return "sinh hoạt chi"
+2324: 
+2325:     text = re.sub(r"\bsinh\s+hoatchi\b", _fix_sinh_hoatchi, text, flags=re.IGNORECASE)
+2326: 
+2327:     # 1.c. (\d+) đồng ch -> \1 đồng chí
+2328:     text = re.sub(r"\b(\d+)\s+đồng\s+ch\b(?![a-zà-ỹđ])", r"\1 đồng chí", text, flags=re.IGNORECASE)
+2329: 
+2330:     # 1.d. Giới thiệu đại biểu: không c -> không có.
+2331:     text = re.sub(
+2332:         r"((?:[-\–—]\s*)?Giới\s+thiệu\s+đại\s+biểu\s*:\s*không)\s+c\.?(?![a-zà-ỹđ])",
+2333:         r"\1 có.",
+2334:         text,
+2335:         flags=re.IGNORECASE,
+2336:     )
+2337: 
+2338:     # 1.e. Số 01 BB/CB -> Số 01-BB/CB (khôi phục dấu gạch nối trong số hiệu văn bản)
+2339:     text = re.sub(
+2340:         r"\b(Số\s*:?\s*\d+)\s+([A-ZĐ]{1,5}/[A-ZĐ0-9\-]+)\b",
+2341:         r"\1-\2",
+2342:         text,
+2343:     )
+2344: 
+2345:     # 1.f. Tiêu đề cột đa -> Điểm tối đa & chấm -> Điểm tự chấm
+2346:     text = re.sub(
+2347:         r"(\|\s*Tiêu\s+chí\s+đánh\s+giá\s*\|\s*)(?:tối\s+)?đa(?=\s*\|)",
+2348:         r"\1Điểm tối đa",
+2349:         text,
+2350:         flags=re.IGNORECASE,
+2351:     )
+2352:     text = re.sub(
+2353:         r"(\|\s*Điểm\s+tối\s+đa\s*\|\s*)(?:tự\s+)?chấm(\s*\|\s*Ghi\s+chú)",
+2354:         r"\1Điểm tự chấm\2",
+2355:         text,
+2356:         flags=re.IGNORECASE,
+2357:     )
+2358:     text = re.sub(
+2359:         r"(\|\s*(?:Điểm\s+)?tối\s+đa\s*\|\s*)(?:tự\s+)?chấm(?=\s*\||\s*$)",
+2360:         r"\1Điểm tự chấm",
+2361:         text,
+2362:         flags=re.IGNORECASE,
+2363:     )
+2364:     text = text.replace("| chấm |", "| Điểm tự chấm |")
+2365:     text = text.replace("| tự chấm |", "| Điểm tự chấm |")
+2366:     text = text.replace("| Tự chấm |", "| Điểm tự chấm |")
+2367: 
+2368:     # 2.a. 0s / 0S -> 05
+2369:     text = re.sub(r"\b0[sS]\b", "05", text)
+2370: 
+2371:     # 2.b. chỉ bằng % / ％ so với quy định -> chỉ bằng ½ so với quy định (thay thế trực diện)
+2372:     for prefix in ("chỉ bằng", "Chỉ bằng", "dưới", "Dưới", "bằng", "Bằng", "ít hơn", "Ít hơn", "quá", "trên", "hơn", "gấp"):
+2373:         text = text.replace(f"{prefix} % so với", f"{prefix} ½ so với")
+2374:         text = text.replace(f"{prefix} ％ so với", f"{prefix} ½ so với")
+2375:         text = text.replace(f"{prefix}% so với", f"{prefix} ½ so với")
+2376:         text = text.replace(f"{prefix} %", f"{prefix} ½")
+2377:         text = text.replace(f"{prefix} ％", f"{prefix} ½")
+2378:         text = text.replace(f"{prefix}%", f"{prefix} ½")
+2379: 
+2380:     text = re.sub(
+2381:         r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*[%％]+(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
+2382:         r"\1 ½",
+2383:         text,
+2384:         flags=re.IGNORECASE,
+2385:     )
+2386: 
+2387:     # 2.c. /Trừ trường hợp... / *Trừ trường hợp -> * Trừ trường hợp...
+2388:     text = text.replace("*Trừ trường hợp", "* Trừ trường hợp")
+2389:     text = text.replace("/Trừ trường hợp", "* Trừ trường hợp")
+2390:     text = text.replace("-Trừ trường hợp", "* Trừ trường hợp")
+2391:     text = re.sub(
+2392:         r"(?m)^([ \t]*)[1?*/\\|\-–—]+\s*\*?\s*(Trừ\s+trường\s+hợp.*)$",
+2393:         r"\1* \2",
+2394:         text,
+2395:         flags=re.IGNORECASE,
+2396:     )
+2397:     text = re.sub(
+2398:         r"(?m)^([ \t]*)[1?*/\\|\-–—]*\s*\*+\s*(Trừ\s+trường\s+hợp.*)$",
+2399:         r"\1* \2",
+2400:         text,
+2401:         flags=re.IGNORECASE,
+2402:     )
+2403:     text = re.sub(r"(?m)^([ \t]*)\*([^\s*])", r"\1* \2", text)
+2404: 
+2405:     # 2.d. Xóa dấu ngoặc '[' mồ côi đầu dòng khi không có ']'
+2406:     text = clean_orphaned_brackets(text)
+2407: 
+2408:     # 2.d2. Xóa ký tự rác đứng trước dấu gạch đầu dòng: '/ -Ghi nhận' -> '- Ghi nhận'
+2409:     text = re.sub(r"(?m)^([ \t]*)[/\\|]\s*([-\–—]\s*)", r"\1- ", text)
+2410:     text = re.sub(r"(?m)^([ \t]*)[-\–—](?=[A-Za-zÀ-ỹĐđ])", r"\1- ", text)
+2411: 
+2412:     # 2.e. Khôi phục dấu '- ' đầu dòng cho các mục liệt kê biên bản
+2413:     text = re.sub(
+2414:         r"(?m)^([ \t]*)(Lý\s+do|Giới\s+thiệu\s+đại\s+biểu|Miễn\s+sinh\s+hoạt|Có\s+mặt|Vắng\s+mặt)\s*:",
+2415:         r"\1- \2:",
+2416:         text,
+2417:     )
+2418: 
+2419:     # 2.f. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (có cột điểm | 01, | 02,...)
+2420:     lines_out = []
+2421:     for ln in text.splitlines():
+2422:         ln_strip = ln.lstrip()
+2423:         if ln_strip.startswith(("- ", "– ", "— ", "-")) and re.search(r"\|\s*0[1-9]\b", ln_strip):
+2424:             indent = ln[:len(ln) - len(ln_strip)]
+2425:             body = ln_strip[1:].lstrip() if not ln_strip.startswith(("- ", "– ", "— ")) else ln_strip[2:].lstrip()
+2426:             ln = indent + "+ " + body
+2427:         lines_out.append(ln)
+2428:     text = "\n".join(lines_out)
+2429: 
+2430:     # 2.g. Sửa lỗi 'III. Nội dung cuộc họp' / 'IL. Nội dung cuộc họp' -> 'II. Nội dung cuộc họp'
+2431:     text = re.sub(
+2432:         r"(?mi)^([ \t]*)(?:III|IL|Il|1L|1l|IIL|IIl|11L|lll|111)\.?\s+(Nội\s+dung\s+cuộc\s+họp\b.*)$",
+2433:         r"\1II. \2",
+2434:         text,
+2435:     )
+2436: 
+2437:     # 2.h. Khôi phục cấu trúc văn bản hành chính & biên bản cuộc họp:
+2438:     # 1. Khôi phục tiêu đề 'BIÊN BẢN' phía trên dòng 'Lấy ý kiến tập thể lao động...' nếu bị thiếu
+2439:     if re.search(r"(?i)Lấy\s+ý\s+kiến\s+(?:tập|toàn)\s+thể\s+lao\s+động", text):
+2440:         if not re.search(r"(?mi)^[ \t]*BIÊN\s+BẢN\b", text):
+2441:             text = re.sub(
+2442:                 r"(?mi)^([ \t]*)(Lấy\s+ý\s+kiến\s+(?:tập|toàn)\s+thể\s+lao\s+động.*)$",
+2443:                 r"\1BIÊN BẢN\n\1\2",
+2444:                 text,
+2445:                 count=1,
+2446:             )
+2447: 
+2448:     # 1.b. Khôi phục dòng tiêu đề phụ bị thiếu dưới BIÊN BẢN (nhảy thẳng xuống Hôm nay, vào lúc...)
+2449:     if re.search(r"(?mi)^[ \t]*BIÊN\s+BẢN[ \t]*$", text) and re.search(r"(?i)Nội\s+quy\s+lao\s+động", text):
+2450:         if not re.search(r"(?i)Lấy\s+ý\s+kiến\s+(?:tập|toàn)\s+thể\s+lao\s+động", text):
+2451:             text = re.sub(
+2452:                 r"(?mi)^([ \t]*BIÊN\s+BẢN[ \t]*)\n+(?=[ \t]*Hôm\s+nay)",
+2453:                 r"\1\nLấy ý kiến tập thể lao động về nội dung Nội quy lao động\n",
+2454:                 text,
+2455:                 count=1,
+2456:             )
+2457: 
+2458:     # 2. Sửa trực tiếp dòng bị đọc nhầm 'Thà Thành phần tham dự' -> 'I. Thành phần tham dự'
+2459:     text = re.sub(
+2460:         r"(?mi)^([ \t]*)(?:Thà|Tha|Thờ|Th|I|l|1|L|II|IL)[\.:]?\s+(Thành\s+phần\s+tham\s+dự\b.*)$",
+2461:         r"\1I. \2",
+2462:         text,
+2463:     )
+2464:     # Khử trùng lặp nếu có 2 dòng 'Thành phần tham dự' liên tiếp
+2465:     text = re.sub(
+2466:         r"(?mi)^([ \t]*I\.\s+Thành\s+phần\s+tham\s+dự[^\n]*)\n+[ \t]*(?:I\.\s+)?Thành\s+phần\s+tham\s+dự[^\n]*$",
+2467:         r"\1",
+2468:         text,
+2469:     )
+2470: 
+2471:     # 3. Khôi phục đề mục 'I. Thành phần tham dự' phía trên '1. Đại diện Công ty:' nếu bị thiếu
+2472:     if re.search(r"(?i)1\.\s+Đại\s+diện\s+(?:Công\s+ty|Doanh\s+nghiệp)", text) and re.search(r"(?i)(?:II|2)\.\s+Nội\s+dung\s+cuộc\s+họp", text):
+2473:         if not re.search(r"(?mi)^[ \t]*I\.\s+Thành\s+phần\s+tham\s+dự", text):
+2474:             text = re.sub(
+2475:                 r"(?mi)^([ \t]*)(1\.\s+Đại\s+diện\s+(?:Công\s+ty|Doanh\s+nghiệp).*)$",
+2476:                 r"\1I. Thành phần tham dự\n\1\2",
+2477:                 text,
+2478:                 count=1,
+2479:             )
+2480: 
+2481:     # 2.i. Chuẩn hóa 'Cuộc hơp' -> 'Cuộc họp' (VietOCR thiếu dấu nặng thành ơ)
+2482:     text = re.sub(r"\b(Cuộc|cuộc)\s+h[ơo]p\b", r"\1 họp", text)
+2483:     text = text.replace("Cuộc hơp", "Cuộc họp")
+2484:     text = text.replace("cuộc hơp", "cuộc họp")
+2485: 
+2486:     # 2.j. Khôi phục năm 2026 bị cắt cụt số cuối thành 'năm 202'
+2487:     text = re.sub(r"\b(tháng\s+\d{1,2}\s+năm\s+202)\.?(?![0-9])", r"\g<1>6.", text)
+2488: 
+2489:     return text
+2490: 
+2491: 
+2492: class VietnameseTextPostProcessor:
+2493:     """
+2494:     Module chuẩn hóa và làm sạch kỹ thuật văn bản OCR:
+2495:     - Chuẩn hóa Unicode dựng sẵn (NFC).
+2496:     - Chuẩn hóa khoảng trắng quanh dấu câu: loại bỏ khoảng trắng thừa trước dấu.
+2497:     - TUYỆT ĐỐI KHÔNG tự động sửa nội dung từ vựng (chỉ bộ, chi bố, dư sinh hoạt)
+2498:       để nhường quyền kiểm tra, bôi đỏ và hiển thị gợi ý cho spell_corrector.py.
+2499:     - Bảo toàn 100% kiểu chữ hoa, chữ thường của văn bản gốc (Zero Casing Destruction).
+2500:     """
+2501: 
+2502:     @classmethod
+2503:     def clean_and_restore(cls, text: str) -> str:
+2504:         if not text:
+2505:             return ""
+2506: 
+2507:         # 1. Chuẩn hóa Unicode NFC
+2508:         text = unicodedata.normalize("NFC", text).strip()
+2509: 
+2510:         # 2. Loại bỏ khoảng trắng thừa ngay trước dấu câu
+2511:         text = re.sub(r"[ \t]+([,.:;?!])", r"\1", text)
+2512: 
+2513:         # 3. Ký hiệu kết thúc văn bản hành chính ./.
+2514:         text = re.sub(r"\.\s*/\s*\.", "./.", text)
+2515: 
+2516:         # 3.b. Xóa nhiễu đường kẻ trang trí dưới Tiêu ngữ (144444444, 44444, *******)
+2517:         # và đảm bảo ngắt dòng trước Địa danh, ngày... tháng... năm...
+2518:         text = re.sub(
+2519:             r"(Độc\s+lập\s*[-–—]\s*Tự\s+do\s*[-–—]\s*Hạnh\s+phúc)[ \t]*(?:1?4{3,}|[1lI|!*=\-—_~]{3,}|\*{3,})*[ \t]*(?:\r?\n)?[ \t]*([A-ZÀ-ỸĐ][a-zA-ZÀ-ỹĐđ\s,/-]+,\s*ngày\s+\d+)",
+2520:             r"\1\n\2",
+2521:             text,
+2522:             flags=re.IGNORECASE,
+2523:         )
+2524:         text = re.sub(r"(?m)^[ \t]*(?:1?4{3,}|[1lI|!*=\-—_~]{4,}|\*{3,})[ \t]*\r?\n?", "", text)
+2525:         text = re.sub(r"[ \t]*\|\s*KHIÊN\s+ƯNG\s+KẾ\s+TOÁN\b", "", text, flags=re.IGNORECASE)
+2526: 
+2527:         # 3.c. Tách từ bị dính chữ phổ biến 'hoạtchi bộ' -> 'hoạt chi bộ'
+2528:         text = re.sub(r"\b(sinh\s+hoạt|hoạt)(chi\s+bộ|chi\s+ủy)\b", r"\1 \2", text, flags=re.IGNORECASE)
+2529: 
+2530:         # 4. Khôi phục từ bị cắt xén ở cuối bảng/trang dựa trên ngữ cảnh hành chính đã xác minh
+2531:         text = re.sub(r"\b(nhiệm\s+vụ\s+đặc)(?:\s+b\b|\b(?!\s*biệt))", r"\1 biệt", text)
+2532: 
+2533:         # 5. Khôi phục phân số ½ bị OCR nhận thành % (ví dụ: 'chỉ bằng % so với quy định')
+2534:         # Tuyệt đối không thay đổi phần trăm hợp lệ đi kèm chữ số như 50%, 60%, 75%, 90%, 100%
+2535:         for prefix in ("chỉ bằng", "Chỉ bằng", "dưới", "Dưới", "bằng", "Bằng", "ít hơn", "Ít hơn", "quá", "trên", "hơn", "gấp"):
+2536:             text = text.replace(f"{prefix} % so với", f"{prefix} ½ so với")
+2537:             text = text.replace(f"{prefix} ％ so với", f"{prefix} ½ so với")
+2538:             text = text.replace(f"{prefix}% so với", f"{prefix} ½ so với")
+2539:             text = text.replace(f"{prefix} %", f"{prefix} ½")
+2540:             text = text.replace(f"{prefix} ％", f"{prefix} ½")
+2541:             text = text.replace(f"{prefix}%", f"{prefix} ½")
+2542: 
+2543:         text = re.sub(
+2544:             r"\b(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp)\s+(?<!\d)%\s*(so\s+với|quy\s+định|mức|tổng)\b",
+2545:             r"\1 ½ \2",
+2546:             text,
+2547:             flags=re.IGNORECASE,
+2548:         )
+2549:         text = re.sub(
+2550:             r"\b(chỉ\s+bằng|bằng|dưới|quá)\s*%\s*(so\s+với\s+quy\s+định)",
+2551:             r"\1 ½ \2",
+2552:             text,
+2553:             flags=re.IGNORECASE,
+2554:         )
+2555:         # Sửa '0s' / '0S' thành '05' trong bảng điểm đánh giá
+2556:         text = re.sub(r"\b0[sS]\b", "05", text)
+2557: 
+2558:         # 5.b. Chuẩn hóa số mũ diện tích & thể tích (m2, m?, m', m3 -> m², m³)
+2559:         text = re.sub(
+2560:             r"\b(\d+(?:[.,]\d+)?\s*(?:mm|cm|dm|m|km|ha))(?:2|²|\?|\'|7)(?!\w)",
+2561:             r"\1²",
+2562:             text,
+2563:         )
+2564:         text = re.sub(
+2565:             r"\b(\d+(?:[.,]\d+)?\s*(?:mm|cm|dm|m|km))(?:3|³)(?!\w)",
+2566:             r"\1³",
+2567:             text,
+2568:         )
+2569: 
+2570:         # 5.c. Chuẩn hóa nhiệt độ (°C)
+2571:         text = re.sub(r"\b(\d+(?:[.,]\d+)?)\s*[oO0]\s*C\b", r"\1°C", text)
+2572: 
+2573:         # 5.d. Chuẩn hóa khoảng trắng sau dấu câu bị dính chữ (13/04/2021.Nơi cấp, số:473/)
+2574:         text = re.sub(r"(\d{2}/\d{2}/\d{4})\.([A-Za-zÀ-ỹĐđ])", r"\1. \2", text)
+2575:         text = re.sub(r"\b(số|Số):(\d+)", r"\1: \2", text)
+2576: 
+2577:         # 5.e. Khôi phục nối dòng nhãn ngắn bị ngắt xuống dòng: Sinh năm:\n1978...
+2578:         text = re.sub(
+2579:             r"(?m)^([ \t]*(?:Sinh\s+năm|Họ\s+và\s+tên|Ngày\s+sinh|Nơi\s+sinh|Địa\s+chỉ|Hộ\s+khẩu|Quê\s+quán):)[ \t]*\r?\n[ \t]*([0-9A-Za-zÀ-ỹĐđ])",
+2580:             r"\1 \2",
+2581:             text,
+2582:             flags=re.IGNORECASE,
+2583:         )
+2584: 
+2585:         # 6. Chuẩn hóa dấu chú thích chân trang: '/Trừ trường hợp...', '?Trừ trường hợp...' -> '* Trừ trường hợp...'
+2586:         text = re.sub(
+2587:             r"(?m)^([ \t]*)[1?*/\-]+\s*(Trừ\s+trường\s+hợp.*)$",
+2588:             r"\1* \2",
+2589:             text,
+2590:             flags=re.IGNORECASE,
+2591:         )
+2592: 
+2593:         # 7. Chuẩn hóa các cụm từ hành chính phổ biến bị nhận sai dấu thanh và BẢO TOÀN CASING:
+2594:         # TUYỆT ĐỐI KHÔNG tự động sửa ngầm lỗi từ vựng như 'chỉ bộ', 'chi bố', 'dư sinh hoạt'
+2595:         # để nhường quyền kiểm tra, bôi đỏ và hiển thị gợi ý cho spell_corrector.py
+2596:         text = re.sub(
+2597:             r"\b(đằng)\s+(cộng\s+sản)\b",
+2598:             lambda m: f"{preserve_casing(m.group(1), 'đảng')} {preserve_casing(m.group(2), m.group(2))}",
+2599:             text,
+2600:             flags=re.IGNORECASE,
+2601:         )
+2602:         text = re.sub(
+2603:             r"\b(ngày\s+\d+\s+)(thắng)(\s+\d+)",
+2604:             lambda m: f"{m.group(1)}{preserve_casing(m.group(2), 'tháng')}{m.group(3)}",
+2605:             text,
+2606:             flags=re.IGNORECASE,
+2607:         )
+2608:         text = re.sub(
+2609:             r"\b(ghi)\s+(chủ)\b",
+2610:             lambda m: f"{preserve_casing(m.group(1), 'ghi')} {preserve_casing(m.group(2), 'chú')}",
+2611:             text,
+2612:             flags=re.IGNORECASE,
+2613:         )
+2614:         text = re.sub(
+2615:             r"\b(it)\s+(nhất)\b",
+2616:             lambda m: f"{preserve_casing(m.group(1), 'ít')} {preserve_casing(m.group(2), 'nhất')}",
+2617:             text,
+2618:             flags=re.IGNORECASE,
+2619:         )
+2620:         text = re.sub(
+2621:             r"\b(sinh\s+hoạt\s+)(đằng)\b",
+2622:             lambda m: f"{m.group(1)}{preserve_casing(m.group(2), 'đảng')}",
+2623:             text,
+2624:             flags=re.IGNORECASE,
+2625:         )
+2626:         text = re.sub(
+2627:             r"\b(đảng)\s+(viễn)\b",
+2628:             lambda m: f"{preserve_casing(m.group(1), 'đảng')} {preserve_casing(m.group(2), 'viên')}",
+2629:             text,
+2630:             flags=re.IGNORECASE,
+2631:         )
+2632:         text = re.sub(
+2633:             r"\b(dàng)\s+(viên)\b",
+2634:             lambda m: f"{preserve_casing(m.group(1), 'đảng')} {preserve_casing(m.group(2), 'viên')}",
+2635:             text,
+2636:             flags=re.IGNORECASE,
+2637:         )
+2638: 
+2639:         # 7.b. Gom đúng hàng ngang biểu mẫu có chấm lửng
+2640:         text = re.sub(
+2641:             r"(\+\s*Ông\s*\(bà\):?)\s*(?:\.{2,}|…+|_|-)*\s*(\(ghi\s+tên[^)]+\))",
+2642:             r"\1 ...... \2",
+2643:             text,
+2644:             flags=re.IGNORECASE,
+2645:         )
+2646:         text = re.sub(
+2647:             r"(Chức\s+danh:?)\s*(?:\.{2,}|…+|_|-)*\s*(Chủ\s+trì\s+cuộc\s+họp)",
+2648:             r"\1 ...... \2",
+2649:             text,
+2650:             flags=re.IGNORECASE,
+2651:         )
+2652: 
+2653:         # 8. Xử lý ký tự số mũ chú thích bị nhận diện thành ']' rác (ví dụ: 'trong năm]')
+2654:         text = clean_unmatched_closing_brackets(text)
+2655: 
+2656:         # 8.a. Xóa ký tự ngoặc '[' hoặc '|' mồ côi ở đầu dòng: '[3. Thư ký...' -> '3. Thư ký...'
+2657:         text = clean_orphaned_brackets(text)
+2658: 
+2659:         # 8.b. Khôi phục dấu ngoặc đơn mở '(' bị thiếu ở đầu dòng kết thúc bằng ')'
+2660:         # ví dụ: 'Đánh dấu X vào nội dung được chọn)' -> '(Đánh dấu X vào nội dung được chọn)'
+2661:         def _restore_missing_open_paren(match: re.Match) -> str:
+2662:             indent = match.group(1)
+2663:             content = match.group(2)
+2664:             if "(" not in content and len(content.strip()) >= 5:
+2665:                 return f"{indent}({content}"
+2666:             return match.group(0)
+2667: 
+2668:         text = re.sub(
+2669:             r"(?m)^([ \t]*)([A-ZÀ-ỸĐ][^\n]*\))$",
+2670:             _restore_missing_open_paren,
+2671:             text,
+2672:         )
+2673: 
+2674:         # 9. Tách đề mục số bị dính vào cuối dòng thông tin trước đó:
+2675:         # ví dụ: 'Công nghệ phần mềm 5. Tiến độ và nội dung thực tập:' -> 'Công nghệ phần mềm\n5. Tiến độ và nội dung thực tập:'
+2676:         text = re.sub(
+2677:             r"([^\n]+?)[ \t]+([1-9]\d{0,1}\.\s+[A-ZÀ-ỸĐ][a-zA-ZÀ-ỹĐđ\s,/-]+:)",
+2678:             r"\1\n\2",
+2679:             text,
+2680:         )

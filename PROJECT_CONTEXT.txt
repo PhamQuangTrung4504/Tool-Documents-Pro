@@ -98,11 +98,14 @@ Luồng dữ liệu đi qua 11 bước xử lý liên tục:
 8. Text Synthesis (Tổng hợp văn bản):
    - Nối ô bảng bằng ký tự phân cách ' | '. Theo dõi rendered_table_rows để ngăn chặn 100% hiện tượng trùng lặp hàng bảng.
 9. Context-Aware Symbol Recovery & Normalization (Khôi phục ký tự & Chuẩn hóa):
-   - ContextSymbolRecovery: Khôi phục số La Mã I. (từ |, |., l., 1., L, L.), II., III., IV.; khôi phục bullet + (từ %, 4 , 7 ); khôi phục footnote * (từ 1 , ? , - ).
-   - VietnameseTextPostProcessor: Chuẩn hóa Unicode NFC, xóa khoảng trắng trước dấu câu, khôi phục phân số ½ từ %, khôi phục từ bị cắt xén cuối trang (nhiệm vụ đặc biệt), sửa lỗi dấu thanh hành chính (ĐẢNG CỘNG SẢN, ngày... tháng..., chi bộ, đảng viên).
-10. Interactive Spell Checking (Dò soát chính tả tiếng Việt tương tác):
+   - ContextSymbolRecovery: Khôi phục số La Mã tổng quát I., II., III., IV. (từ |, |., l., 1., L, L., T., TT., TI., IL, IIL, 11L) kèm bảo vệ các đề mục số thường (1., 2.); khôi phục bullet + (từ %, 4 , 7 ); khôi phục footnote * (từ 1 , ? , - ).
+   - VietnameseTextPostProcessor: Chuẩn hóa Unicode NFC, chuẩn hóa số mũ diện tích & thể tích (m², m³), nhiệt độ (°C), khoảng trắng sau dấu câu, khôi phục phân số ½ từ %, khôi phục nối dòng nhãn ngắn bị ngắt dòng (Sinh năm: 1978...), khôi phục từ bị cắt xén cuối trang (nhiệm vụ đặc biệt), sửa lỗi dấu thanh hành chính (ĐẢNG CỘNG SẢN, ngày... tháng..., chi bộ, đảng viên) bảo toàn 100% casing.
+10. Interactive Spell Checking (Dò soát chính tả tiếng Việt tương tác 3 tầng):
     - Chạy nền qua SpellCheckWorker. Tra cứu âm tiết, phân tích ngữ cảnh Bigram/Trigram, tính khoảng cách chỉnh sửa trọng số weighted_edit_distance.
-    - Highlight trên UI qua ExtraSelections; menu ngữ cảnh chuột phải gợi ý tối đa 5 từ thay thế. Tuyệt đối không tự động sửa văn bản.
+    - Golden Rule #1 (Zero False Positives): Bỏ qua mọi cặp từ đúng trong từ điển tiếng Việt đa lĩnh vực (hành chính, đất đai, tài chính, pháp luật, giáo dục).
+    - Tier 1: Kiểm tra cấu trúc âm tiết cho từ thường, TitleCase (Vdng) và IN HOA có dấu (NGHIÊP, BỐ), bảo vệ từ viết tắt không nguyên âm.
+    - Tier 2: Dò lỗi lệch dấu thanh theo ngữ cảnh cụm từ (chỉ bộ -> chi, CHI BỐ -> BỘ, dư sinh hoạt -> dự, thành toán -> thanh, ngần hàng -> ngân, kể toán -> kế) bảo toàn casing.
+    - Tier 3: Xác minh đồng bộ tuyệt đối chỉ số ký tự (start_idx, end_idx) trên UI; loại bỏ gợi ý trùng từ gốc; hiển thị qua ExtraSelections (gạch lượn sóng) và menu ngữ cảnh chuột phải gợi ý tối đa 5 từ thay thế. Tuyệt đối không tự động ghi đè văn bản.
 11. Document Export (Xuất kết quả):
     - Sao chép vào Clipboard.
     - Xuất file Text (.txt) UTF-8.
@@ -118,18 +121,18 @@ A. app/core/ocr_engine.py:
    - get_rotate_crop_image(): Cắt và nắn thẳng bounding box 4 điểm có bù đệm viền (padding).
    - filter_border_noise_boxes(): Loại bỏ nhiễu do quét tài liệu bị cắt ngang ở viền mép.
    - detect_parallel_administrative_header(): Tách 2 cột tiêu đề hành chính độc lập trước tiêu đề chính.
-   - detect_and_reconstruct_table(): Nhận diện lưới bảng, phân hoạch box độc quyền (Mutual Exclusivity), gộp ô nhiều dòng (multi-line cell merge), loại bỏ cột ma (phantom columns) và gán số thứ tự STT tuần tự 1, 2, 3...
+   - detect_and_reconstruct_table(): Nhận diện lưới bảng, phân hoạch box độc quyền (Mutual Exclusivity), gộp ô nhiều dòng (multi-line cell merge), cô lập header bảng nhiều dòng theo hình học, phân biệt hàng chính và hàng con (sub-row) qua độ thụt dòng min_x và cú pháp (+, -, *, •, condition) để không gán STT nhầm và không tăng expected_stt, loại bỏ cột ma (phantom columns) và gán số thứ tự STT tuần tự 1, 2, 3...
    - _group_boxes_sliding_window(): Phân tích bố cục đa cột và gom dòng theo thứ tự đọc tự nhiên từ trên xuống dưới, từ trái sang phải.
-   - ContextSymbolRecovery: Khôi phục số La Mã, bullet và chú thích chân trang theo 3 trạng thái: AUTO_CORRECT, FLAG_UNCERTAIN, PRESERVE kèm audit trail.
-   - VietnameseTextPostProcessor: Làm sạch kỹ thuật, chuẩn hóa Unicode NFC, phân số ½ và bảo vệ ranh giới file path.
+   - ContextSymbolRecovery: Khôi phục số La Mã tổng quát, bullet và chú thích chân trang theo 3 trạng thái: AUTO_CORRECT, FLAG_UNCERTAIN, PRESERVE kèm audit trail.
+   - VietnameseTextPostProcessor: Làm sạch kỹ thuật, chuẩn hóa Unicode NFC, số mũ (m², m³), nhiệt độ (°C), phân số ½, nối dòng nhãn ngắn và bảo vệ ranh giới file path.
    - export_to_docx(): Xuất tài liệu Microsoft Word (.docx) chuẩn khổ A4, giữ nguyên Word Table và tiêu đề 2 khối không viền.
 
 B. app/core/spell_corrector.py:
-   - VietnameseSpellChecker: Bộ kiểm tra chính tả tiếng Việt theo ngữ cảnh.
+   - VietnameseSpellChecker: Bộ kiểm tra chính tả tiếng Việt 3 tầng tổng quát theo ngữ cảnh (General-Purpose & Multi-Domain).
    - remove_diacritics(): Khử dấu thanh và dấu mũ/râu đưa về ký tự Latin cơ sở, bảo toàn in hoa/thường để nhận dạng nguyên âm trong từ viết hoa.
    - weighted_edit_distance(): Tính khoảng cách chỉnh sửa có trọng số phản ánh đúng quy luật nhầm lẫn OCR tiếng Việt (u/ư, o/ô, b/đ, dấu thanh).
-   - check_text_spelling(): Dò soát văn bản, bảo vệ từ viết tắt (acronym), file path, url, ngày tháng, mã công văn, trả về danh sách SpellError.
-   - _evaluate_context_confusion(): Bắt các lỗi nhầm dấu thanh theo ngữ cảnh cụm từ (chỉ bộ -> chi bộ, CHI BỐ -> CHI BỘ, không cổ -> không có, ngày... thắng... -> tháng, đang viên/đăng phí -> đảng, it nhất -> ít nhất, đồng chỉ -> đồng chí) đi kèm negative whitelisting nghiêm ngặt.
+   - check_text_spelling(): Dò soát văn bản, bảo vệ từ viết tắt (acronym), file path, url, ngày tháng, mã công văn, kiểm tra từ viết hoa có dấu, trả về danh sách SpellError đã đồng bộ offset ký tự 100%.
+   - _evaluate_context_confusion(): Bắt các lỗi nhầm dấu thanh theo ngữ cảnh cụm từ (chỉ bộ -> chi bộ, CHI BỐ -> CHI BỘ, không cổ -> không có, ngày... thắng... -> tháng, đang viên/đăng phí -> đảng, it nhất -> ít nhất, đồng chỉ -> đồng chí, dư sinh hoạt -> dự sinh hoạt, thành toán -> thanh toán, ngần hàng -> ngân hàng, kể toán -> kế toán) đi kèm Golden Rule #1 chống dương tính giả.
    - get_suggestions(): Sinh tối đa 5 gợi ý xếp theo độ ưu tiên tổng hợp (khoảng cách weighted distance, ngữ cảnh từ ghép, tính hợp lệ âm tiết, tần suất).
 
 C. app/ui/main_window.py:
@@ -220,17 +223,17 @@ Khởi chạy ứng dụng Desktop:
 python run.py
 ```
 
-Chạy toàn bộ kiểm thử hồi quy (140 tests):
+Chạy toàn bộ kiểm thử hồi quy (223 tests):
 ```powershell
 pytest tests/ -v
 ```
 
 Chạy kiểm thử riêng từng module:
 ```powershell
-# Kiểm thử OCR, ký tự và bảng biểu:
+# Kiểm thử OCR, ký tự, pipeline runtime, số La Mã và bảng biểu (bao gồm TestRuntimePipelineAndDottedForm):
 pytest tests/test_ocr_symbol_recovery.py -v
 
-# Kiểm thử bộ kiểm tra chính tả:
+# Kiểm thử bộ kiểm tra chính tả (bao gồm test_master_prompt_false_positives_and_confusion):
 pytest tests/test_spell_corrector.py -v
 
 # Kiểm thử tích hợp giao diện PyQt5:

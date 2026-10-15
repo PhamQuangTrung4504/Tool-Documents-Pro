@@ -1,0 +1,943 @@
+================================================================================
+FILE: app/core/ocr_engine.py (Total lines: 3644)
+================================================================================
+--- [1] DANH SACH CLASS & HAM ---
+Line   50: def apply_paddlex_patches() -> None:
+Line   73:         def safe_init(*args, **kwargs):
+Line  106: class OCRBox:
+Line  114:     def __post_init__(self):
+Line  119:     def top_left(self) -> Tuple[int, int]:
+Line  123:     def bottom_right(self) -> Tuple[int, int]:
+Line  126:     def __repr__(self) -> str:
+Line  135: class OCRTable:
+Line  146: class ParallelHeader:
+Line  155: class HeaderDetectionResult(tuple):
+Line  162:     def __new__(cls, grouped_lines, remaining, parallel_header=None):
+Line  165:     def __init__(self, grouped_lines, remaining, parallel_header=None):
+Line  169: class LayoutResult(tuple):
+Line  176:     def __new__(cls, grouped_lines, tables, parallel_header=None):
+Line  179:     def __init__(self, grouped_lines, tables, parallel_header=None):
+Line  184: class OCRResult:
+Line  199:     def text(self) -> str:
+Line  203:     def lines(self) -> List[str]:
+Line  207:     def num_lines(self) -> int:
+Line  211:     def average_confidence(self) -> float:
+Line  239: def get_display_languages() -> List[str]:
+Line  244: def get_lang_code(display_name: str) -> str:
+Line  254: def get_rotate_crop_image(
+Line  321: def clean_crop_borders(crop_bgr: np.ndarray) -> np.ndarray:
+Line  375: def pad_small_crop_for_vietocr(crop_bgr: np.ndarray) -> np.ndarray:
+Line  416: def is_decorative_pattern_crop(crop_bgr: np.ndarray) -> bool:
+Line  463: def is_decorative_or_hallucinated(text: str, crop_bgr: Optional[np.ndarray] = None) -> bool:
+Line  481: def is_hallucinated_or_noise_line(text: str) -> bool:
+Line  533: def split_dotted_line_crop(crop_bgr: np.ndarray) -> List[np.ndarray]:
+Line  621: def estimate_and_correct_skew(
+Line  708: def filter_border_noise_boxes(
+Line  782: def recover_emails_and_urls(text: str) -> str:
+Line  836: def format_progress_table_row(row_str: str) -> str:
+Line  863: def _box_info_list(boxes: List[OCRBox]) -> List[dict]:
+Line  889: def _group_single_column_lines(sub_boxes: List[dict], median_h: float, gutter_thresh: float) -> List[List[OCRBox]]:
+Line  938: def _group_boxes_sliding_window(
+Line 1099: def join_ocr_line_boxes(line_boxes: List[OCRBox]) -> str:
+Line 1144: def detect_parallel_administrative_header(
+Line 1218:     def _is_decorative_line_noise(b_item: dict) -> bool:
+Line 1249: def detect_and_reconstruct_table(
+Line 1297:     def _is_valid_anchor_cluster(cl_boxes: List[dict]) -> bool:
+Line 1394:     def _is_table_header_row(r_items: List[dict]) -> bool:
+Line 1720: def reconstruct_document_layout(boxes: List[OCRBox]) -> Tuple[List[List[OCRBox]], List[OCRTable]]:
+Line 1778: def group_boxes_into_lines(boxes: List[OCRBox]) -> List[List[OCRBox]]:
+Line 1787: def sort_boxes_reading_order(boxes: List[OCRBox]) -> List[OCRBox]:
+Line 1801: class SymbolDecision(str, Enum):
+Line 1826: class ContextSymbolRecovery:
+Line 1835:     def is_all_uppercase_heading(text: str) -> bool:
+Line 1844:     def has_heading_keyword(text: str) -> bool:
+Line 1850:     def recover_roman_numeral_in_line(
+Line 1980:     def recover_bullets_and_pluses(cls, line: str) -> Tuple[str, SymbolDecision, str]:
+Line 2042:     def recover_document_symbols(
+Line 2187: def preserve_casing(source_text: str, target_text: str) -> str:
+Line 2205: def clean_unmatched_closing_brackets(text: str) -> str:
+Line 2240: def clean_orphaned_brackets(text: str) -> str:
+Line 2265: def final_document_cleanup(text: str) -> str:
+Line 2289:     def _fix_chi_bo(m: re.Match) -> str:
+Line 2301:     def _fix_sinh_hoatchi(m: re.Match) -> str:
+Line 2412: class VietnameseTextPostProcessor:
+Line 2423:     def clean_and_restore(cls, text: str) -> str:
+Line 2573:         def _restore_missing_open_paren(match: re.Match) -> str:
+Line 2670: def get_global_detector(
+Line 2699:                 def _safe_pdx_create(self, *args, **kwargs):
+Line 2753: def get_global_vietocr(
+Line 2791: def assess_image_quality(img_bgr: np.ndarray) -> Dict[str, Any]:
+Line 2833: class OCREngine:
+Line 2843:     def __init__(
+Line 2876:     def get_engine(cls, lang: str = "vi", **kwargs) -> "OCREngine":
+Line 2882:     def clear_cache(cls) -> None:
+Line 2894:     def _ensure_loaded(self) -> None:
+Line 2932:     def preprocess_image(
+Line 3027:     def recognize(
+Line 3388:     def draw_boxes(
+Line 3418:     def switch_language(self, new_lang: str) -> None:
+Line 3433:     def __enter__(self) -> "OCREngine":
+Line 3437:     def __exit__(self, *args) -> None:
+Line 3440:     def __repr__(self) -> str:
+Line 3450: def export_to_docx(result: OCRResult, output_path: str) -> bool:
+================================================================================
+FILE: app/core/spell_corrector.py (Total lines: 1256)
+================================================================================
+--- [1] DANH SACH CLASS & HAM ---
+Line   60: class SpellError(tuple):
+Line   76:     def __new__(
+Line   96:     def __repr__(self) -> str:
+Line  301: def remove_diacritics(s: str) -> str:
+Line  312: def weighted_edit_distance(s1: str, s2: str) -> float:
+Line  362: class VietnameseSpellChecker:
+Line  371:     def __init__(
+Line  391:     def _load_datasets(self) -> None:
+Line  491:     def _expand_tone_variations(self) -> None:
+Line  513:     def _expand_word_tone_variations(self) -> None:
+Line  551:     def get_suggestions(
+Line  694:     def is_valid_token(self, token_lower: str, is_capitalized: bool, has_vietnamese_char: bool) -> bool:
+Line  730:     def check_text_spelling(self, text: str) -> List[SpellError]:
+Line  952:     def _evaluate_context_confusion(
+Line 1212: def get_default_spell_checker() -> VietnameseSpellChecker:
+Line 1221: def check_text_spelling(text: str) -> List[SpellError]:
+Line 1234: def check_text_spelling_detailed(text: str) -> List[SpellError]:
+Line 1239: def get_suggestions(word: str, context_prev: str = "", context_next: str = "") -> List[str]:
+================================================================================
+FILE: app/ui/main_window.py (Total lines: 1416)
+================================================================================
+--- [1] DANH SACH CLASS & HAM ---
+Line  142: class OCRWorker(QThread):
+Line  148:     def __init__(
+Line  158:     def run(self) -> None:
+Line  175: class SpellCheckWorker(QThread):
+Line  180:     def __init__(
+Line  188:     def run(self) -> None:
+Line  202: def qimage_to_numpy(qimg: QImage) -> np.ndarray:
+Line  217: def numpy_to_qpixmap(image: np.ndarray) -> QPixmap:
+Line  235: def build_stylesheet() -> str:
+Line  515: class MainWindow(QMainWindow):
+Line  518:     def __init__(self, parent: Optional[QWidget] = None) -> None:
+Line  550:     def _init_window(self) -> None:
+Line  567:     def _init_toolbar(self) -> None:
+Line  638:     def _init_central(self) -> None:
+Line  776:     def _init_statusbar(self) -> None:
+Line  793:     def _init_shortcuts(self) -> None:
+Line  805:     def _get_engine(self) -> OCREngine:
+Line  812:     def _set_status(self, msg: str) -> None:
+Line  815:     def _show_image(self, image: np.ndarray) -> None:
+Line  831:     def _load_image_from_path(self, path: str) -> bool:
+Line  876:     def _load_image_from_clipboard(self) -> bool:
+Line  912:     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+Line  919:     def dropEvent(self, event: QDropEvent) -> None:
+Line  951:     def _on_open_file(self) -> None:
+Line  960:     def _on_paste_image(self) -> None:
+Line  967:     def _on_language_changed(self, display_name: str) -> None:
+Line  974:     def _on_run_ocr(self) -> None:
+Line 1004:     def _on_ocr_progress(self, msg: str) -> None:
+Line 1008:     def _on_ocr_finished(self, result_or_error) -> None:
+Line 1064:     def _on_copy_result(self) -> None:
+Line 1081:     def _on_export_txt(self) -> None:
+Line 1113:     def _on_export_docx(self) -> None:
+Line 1149:     def _on_clear(self) -> None:
+Line 1177:     def _on_check_spelling(self) -> None:
+Line 1198:     def _on_spell_check_finished(self, results: list, checked_text: str) -> None:
+Line 1220:     def _update_spell_highlights(self) -> None:
+Line 1249:     def _on_text_context_menu(self, pos: QPoint) -> None:
+Line 1312:     def _apply_spell_suggestion(self, err: SpellError, suggestion: str) -> None:
+Line 1360:     def _ignore_spell_error(self, err: SpellError) -> None:
+Line 1372:     def _on_clear_spelling_highlights(self) -> None:
+Line 1381:     def _on_text_changed(self) -> None:
+Line 1394:     def resizeEvent(self, event) -> None:
+Line 1407:     def closeEvent(self, event) -> None:
+
+================================================================================
+[2] 250 DONG CUOI CUA ocr_engine.py (recognize & cleanup)
+================================================================================
+3395:     ) -> np.ndarray:
+3396:         """Vẽ bounding box của kết quả OCR lên ảnh."""
+3397:         canvas = image.copy()
+3398: 
+3399:         for box in result.boxes:
+3400:             pts = np.array(box.bbox, dtype=np.int32).reshape((-1, 1, 2))
+3401:             cv2.polylines(canvas, [pts], isClosed=True, color=color, thickness=thickness)
+3402: 
+3403:             if show_text:
+3404:                 x, y = box.bbox[0]
+3405:                 label = f"{box.text} ({box.confidence:.0%})"
+3406:                 cv2.putText(
+3407:                     canvas, label, (x, max(y - 5, 10)),
+3408:                     cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+3409:                     color, 1, cv2.LINE_AA,
+3410:                 )
+3411: 
+3412:         return canvas
+3413: 
+3414:     # ------------------------------------------------------------------
+3415:     # Đổi ngôn ngữ
+3416:     # ------------------------------------------------------------------
+3417: 
+3418:     def switch_language(self, new_lang: str) -> None:
+3419:         """Đổi ngôn ngữ nhận dạng."""
+3420:         if new_lang == self.lang:
+3421:             return
+3422: 
+3423:         logger.info(f"Switching OCR language: {self.lang} → {new_lang}")
+3424:         self.lang = new_lang
+3425:         self._is_loaded = False
+3426:         self._ocr = None
+3427:         self._vietocr = None
+3428: 
+3429:     # ------------------------------------------------------------------
+3430:     # Context Manager
+3431:     # ------------------------------------------------------------------
+3432: 
+3433:     def __enter__(self) -> "OCREngine":
+3434:         self._ensure_loaded()
+3435:         return self
+3436: 
+3437:     def __exit__(self, *args) -> None:
+3438:         pass
+3439: 
+3440:     def __repr__(self) -> str:
+3441:         status = "loaded" if self._is_loaded else "not loaded"
+3442:         return f"OCREngine(lang={self.lang!r}, hybrid={self.lang == 'vi'}, {status})"
+3443: 
+3444: 
+3445: # ---------------------------------------------------------------------------
+3446: # Xuất Định Dạng Tài Liệu (Word DOCX Export)
+3447: # ---------------------------------------------------------------------------
+3448: 
+3449: 
+3450: def export_to_docx(result: OCRResult, output_path: str) -> bool:
+3451:     """
+3452:     Xuất kết quả OCR sang tài liệu Microsoft Word (.docx).
+3453:     - Bảo toàn cấu trúc bảng biểu thành Word Table chuẩn khi có bảng.
+3454:     - Bảo toàn tiêu đề, căn lề và các đoạn văn bản.
+3455:     """
+3456:     try:
+3457:         import docx  # type: ignore[import-untyped,import-not-found]
+3458:         from docx.shared import Inches, Pt, RGBColor  # type: ignore[import-untyped,import-not-found]
+3459:         from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-untyped,import-not-found]
+3460:         from docx.enum.table import WD_TABLE_ALIGNMENT  # type: ignore[import-untyped,import-not-found]
+3461:     except ImportError:
+3462:         logger.error("python-docx is not installed. Cannot export to DOCX.")
+3463:         return False
+3464: 
+3465:     try:
+3466:         doc: Any = docx.Document()
+3467: 
+3468:         # Thiết lập lề trang tiêu chuẩn (A4: Top/Bottom 2cm, Left 2.5cm, Right 2cm)
+3469:         for section in doc.sections:
+3470:             section.top_margin = Inches(0.8)
+3471:             section.bottom_margin = Inches(0.8)
+3472:             section.left_margin = Inches(1.0)
+3473:             section.right_margin = Inches(0.8)
+3474: 
+3475:         # Thiết lập style Normal
+3476:         style: Any = doc.styles["Normal"]
+3477:         font = style.font
+3478:         font.name = "Times New Roman"
+3479:         font.size = Pt(12)
+3480:         font.color.rgb = RGBColor(0, 0, 0)
+3481: 
+3482:         # 1. Nếu có parallel_header (Tiêu đề 2 khối song song), tạo bảng 1 hàng 2 cột không viền ở đầu trang Word
+3483:         header_rendered = False
+3484:         hdr_lines_set = set()
+3485:         if result.parallel_header and (result.parallel_header.left_lines or result.parallel_header.right_lines):
+3486:             hdr = result.parallel_header
+3487:             hdr_lines_set = set(l.strip() for l in (hdr.left_lines + hdr.right_lines) if l.strip())
+3488: 
+3489:             hdr_table: Any = doc.add_table(rows=1, cols=2)
+3490:             hdr_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+3491: 
+3492:             # Gỡ bỏ đường viền của bảng header
+3493:             try:
+3494:                 from docx.oxml import parse_xml  # type: ignore[import-untyped,import-not-found]
+3495:                 from docx.oxml.ns import nsdecls  # type: ignore[import-untyped,import-not-found]
+3496:                 tblPr: Any = hdr_table._tbl.tblPr
+3497:                 borders = parse_xml(
+3498:                     r'<w:tblBorders %s><w:top w:val="none"/><w:left w:val="none"/>'
+3499:                     r'<w:bottom w:val="none"/><w:right w:val="none"/>'
+3500:                     r'<w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders>' % nsdecls("w")
+3501:                 )
+3502:                 tblPr.append(borders)
+3503:             except Exception as e_border:
+3504:                 logger.debug(f"Could not remove table borders: {e_border}")
+3505: 
+3506:             # Khối trái: Cơ quan ban hành, số hiệu
+3507:             cell_left = hdr_table.cell(0, 0)
+3508:             for idx, line_text in enumerate(hdr.left_lines):
+3509:                 p = cell_left.paragraphs[0] if idx == 0 else cell_left.add_paragraph()
+3510:                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+3511:                 p.paragraph_format.space_before = Pt(1)
+3512:                 p.paragraph_format.space_after = Pt(1)
+3513:                 run = p.add_run(line_text)
+3514:                 run.font.name = "Times New Roman"
+3515:                 run.font.size = Pt(11)
+3516:                 if idx == 0 or line_text.isupper():
+3517:                     run.bold = True
+3518: 
+3519:             # Khối phải: Quốc hiệu, tiêu ngữ, ngày tháng
+3520:             cell_right = hdr_table.cell(0, 1)
+3521:             for idx, line_text in enumerate(hdr.right_lines):
+3522:                 p = cell_right.paragraphs[0] if idx == 0 else cell_right.add_paragraph()
+3523:                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+3524:                 p.paragraph_format.space_before = Pt(1)
+3525:                 p.paragraph_format.space_after = Pt(1)
+3526:                 run = p.add_run(line_text)
+3527:                 run.font.name = "Times New Roman"
+3528:                 run.font.size = Pt(11)
+3529:                 if any(kw in line_text for kw in ["ĐẢNG CỘNG SẢN", "CỘNG HÒA", "ĐỘC LẬP"]):
+3530:                     run.bold = True
+3531:                 elif "ngày" in line_text.lower() or "tháng" in line_text.lower():
+3532:                     run.italic = True
+3533: 
+3534:             header_rendered = True
+3535:             p_spacer = doc.add_paragraph()
+3536:             p_spacer.paragraph_format.space_before = Pt(4)
+3537:             p_spacer.paragraph_format.space_after = Pt(4)
+3538: 
+3539:         # 2. Xuất phần thân văn bản và các bảng biểu
+3540:         lines = result.full_text.split("\n")
+3541:         skipping_header = header_rendered
+3542:         table_idx = 0
+3543:         in_table_mode = False
+3544: 
+3545:         for line in lines:
+3546:             line_str = line.strip()
+3547:             if not line_str:
+3548:                 continue
+3549: 
+3550:             if skipping_header and line_str in hdr_lines_set:
+3551:                 continue
+3552:             skipping_header = False
+3553: 
+3554:             # Kiểm tra nếu dòng thuộc bảng
+3555:             if result.tables and table_idx < len(result.tables) and " | " in line_str:
+3556:                 tbl = result.tables[table_idx]
+3557:                 cells = [c.strip() for c in line_str.split(" | ")]
+3558:                 if len(cells) == tbl.num_cols or abs(len(cells) - tbl.num_cols) <= 1:
+3559:                     if not in_table_mode:
+3560:                         doc_table: Any = doc.add_table(rows=len(tbl.grid), cols=tbl.num_cols)
+3561:                         doc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+3562:                         doc_table.style = "Table Grid"
+3563: 
+3564:                         # Tính độ rộng cột tỷ lệ (Proportional column widths)
+3565:                         total_width_inches = 6.5
+3566:                         col_max_lens = [
+3567:                             max((len(tbl.grid[r][c].strip()) for r in range(len(tbl.grid))), default=5)
+3568:                             for c in range(tbl.num_cols)
+3569:                         ]
+3570:                         total_len = max(1, sum(col_max_lens))
+3571:                         col_widths_inches = []
+3572:                         for c_len in col_max_lens:
+3573:                             w_inch = max(0.6, min(4.0, (c_len / total_len) * total_width_inches))
+3574:                             col_widths_inches.append(w_inch)
+3575: 
+3576:                         sum_w = sum(col_widths_inches)
+3577:                         if sum_w > 0:
+3578:                             col_widths_inches = [(w / sum_w) * total_width_inches for w in col_widths_inches]
+3579: 
+3580:                         # Lặp tiêu đề bảng ở mỗi trang Word nếu bảng dài (tblHeader)
+3581:                         if len(tbl.grid) > 0:
+3582:                             try:
+3583:                                 from docx.oxml import parse_xml  # type: ignore[import-untyped,import-not-found]
+3584:                                 from docx.oxml.ns import nsdecls  # type: ignore[import-untyped,import-not-found]
+3585:                                 header_tr: Any = doc_table.rows[0]._tr.get_or_add_trPr()
+3586:                                 header_tr.append(parse_xml(r'<w:tblHeader %s/>' % nsdecls("w")))
+3587:                             except Exception:
+3588:                                 pass
+3589: 
+3590:                         for r_i, row_data in enumerate(tbl.grid):
+3591:                             for c_i in range(min(len(row_data), tbl.num_cols)):
+3592:                                 cell = doc_table.cell(r_i, c_i)
+3593:                                 if c_i < len(col_widths_inches):
+3594:                                     cell.width = Inches(col_widths_inches[c_i])
+3595:                                 cell_text = row_data[c_i].strip()
+3596:                                 cell.text = cell_text
+3597: 
+3598:                                 for p in cell.paragraphs:
+3599:                                     p.paragraph_format.space_before = Pt(2)
+3600:                                     p.paragraph_format.space_after = Pt(2)
+3601:                                     for run in p.runs:
+3602:                                         run.font.name = "Times New Roman"
+3603:                                         run.font.size = Pt(11)
+3604:                                         if r_i == 0:
+3605:                                             run.bold = True
+3606:                                     if r_i == 0 or (c_i != 1 and len(cell_text) <= 5):
+3607:                                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+3608: 
+3609:                         in_table_mode = True
+3610:                         table_idx += 1
+3611:                     continue
+3612: 
+3613:             in_table_mode = False
+3614:             p = doc.add_paragraph()
+3615:             p.paragraph_format.space_before = Pt(2)
+3616:             p.paragraph_format.space_after = Pt(3)
+3617:             p.paragraph_format.line_spacing = 1.15
+3618: 
+3619:             is_centered_title = any(kw in line_str.upper() for kw in [
+3620:                 "BIÊN BẢN", "QUYẾT ĐỊNH", "THÔNG TƯ", "NGHỊ ĐỊNH", "BÁO CÁO",
+3621:                 "KẾ HOẠCH", "BẢNG ĐIỂM", "ĐẢNG CỘNG SẢN VIỆT NAM",
+3622:                 "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "ĐỘC LẬP - TỰ DO - HẠNH PHÚC",
+3623:                 "HỢP ĐỒNG", "HÓA ĐƠN", "PHIẾU THU", "PHIẾU CHI", "BÁO GIÁ",
+3624:                 "BẢNG KÊ", "GIẤY XÁC NHẬN", "GIẤY CHỨNG NHẬN", "CHƯƠNG",
+3625:                 "BÀI HỌC", "GIÁO TRÌNH", "ĐỀ THI", "ĐÁP ÁN", "TỔNG KẾT",
+3626:                 "PHIẾU KHÁM", "KẾT QUẢ XÉT NGHIỆM"
+3627:             ])
+3628:             if is_centered_title:
+3629:                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+3630:                 run = p.add_run(line_str)
+3631:                 run.bold = True
+3632:                 run.font.name = "Times New Roman"
+3633:                 run.font.size = Pt(13)
+3634:             else:
+3635:                 run = p.add_run(line_str)
+3636:                 run.font.name = "Times New Roman"
+3637:                 run.font.size = Pt(12)
+3638: 
+3639:         doc.save(output_path)
+3640:         logger.info(f"DOCX exported successfully: {output_path}")
+3641:         return True
+3642:     except Exception as exc:
+3643:         logger.error(f"Error exporting to DOCX: {exc}")
+3644:         return False
+
+================================================================================
+[3] 180 DONG CUOI CUA spell_corrector.py
+================================================================================
+1077:                     return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+1078: 
+1079:         # 1.f. 'sinh hoạt đằng' -> 'đảng'
+1080:         if curr_lower == "đằng" and prev_lower in {"hoạt", "sinh"}:
+1081:             sugg_fmt = "Đảng" if curr_token and curr_token[0].isupper() else "đảng"
+1082:             return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1083: 
+1084:         # 1.g. 'it nhất' / 'it hơn' -> 'ít nhất' / 'ít hơn'
+1085:         if curr_lower == "it" and next_lower in {"nhất", "hơn", "ỏi", "khi", "nhiều"}:
+1086:             sugg_fmt = "Ít" if curr_token and curr_token[0].isupper() else "ít"
+1087:             return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+1088: 
+1089:         # 1.h. 'dàng viên' -> 'đảng viên'
+1090:         if curr_lower == "dàng" and next_lower in {"viên"}:
+1091:             sugg_fmt = "Đảng" if curr_token and curr_token[0].isupper() else "đảng"
+1092:             return sugg_fmt, f"Nghi vấn nhầm phụ âm trong cụm '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+1093: 
+1094:         # 1.i. Giáo dục & thi cử: 'đáp an' -> 'đáp án'
+1095:         if curr_lower == "an" and prev_lower in {"đáp", "trả"}:
+1096:             sugg_fmt = "Án" if curr_token and curr_token[0].isupper() else "án"
+1097:             return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1098: 
+1099:         # 1.j. Giáo dục & khoa học: 'kết qua' -> 'kết quả'
+1100:         if curr_lower == "qua" and prev_lower in {"kết"}:
+1101:             sugg_fmt = "Quả" if curr_token and curr_token[0].isupper() else "quả"
+1102:             return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1103: 
+1104:         # 1.k. Thương mại & hóa đơn: 'hóa đon' -> 'hóa đơn'
+1105:         if curr_lower == "đon" and prev_lower in {"hóa"}:
+1106:             sugg_fmt = "Đơn" if curr_token and curr_token[0].isupper() else "đơn"
+1107:             return sugg_fmt, f"Nghi vấn nhầm ký tự trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1108: 
+1109:         # 1.l. Kế toán & bảng tính: 'tổng công' -> 'tổng cộng' (loại trừ tổng công ty, tổng công đoàn)
+1110:         if curr_lower == "công" and prev_lower in {"tổng"}:
+1111:             if next_lower not in {"ty", "đoàn", "giám", "cục", "hội"} and (next_lower in {"tiền", "số", "điểm", "chi", "thu", "thanh", "là"} or (next_token and next_token[0].isdigit()) or not next_lower):
+1112:                 sugg_fmt = "Cộng" if curr_token and curr_token[0].isupper() else "cộng"
+1113:                 return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1114: 
+1115:         # 1.m. Doanh nghiệp & sản phẩm: 'sản phâm' -> 'sản phẩm'
+1116:         if curr_lower == "phâm" and prev_lower in {"sản"}:
+1117:             sugg_fmt = "Phẩm" if curr_token and curr_token[0].isupper() else "phẩm"
+1118:             return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1119: 
+1120:         # 1.n. Giáo dục & học tập: 'bài tạp' -> 'bài tập' (loại trừ bài tạp chí)
+1121:         if curr_lower == "tạp" and prev_lower in {"bài"}:
+1122:             if next_lower not in {"chí", "kỹ", "nham", "văn"}:
+1123:                 sugg_fmt = "Tập" if curr_token and curr_token[0].isupper() else "tập"
+1124:                 return sugg_fmt, f"Nghi vấn nhầm nguyên âm trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1125: 
+1126:         # 1.o. 'dư' -> 'dự' theo ngữ cảnh: 'dư sinh hoạt', 'đảng viên dư sinh hoạt', 'tham dư', 'dư họp', 'dư thảo'
+1127:         if curr_lower == "dư":
+1128:             is_valid_du = (
+1129:                 prev_lower in {"số", "thặng", "còn", "bán", "đồ", "phần"}
+1130:                 or next_lower in {"thừa", "âm", "nợ", "dả", "lượng", "hàng", "chất", "vài", "ba", "trăm", "nghìn", "triệu"}
+1131:             )
+1132:             is_du_context = (
+1133:                 next_lower in {"sinh", "họp", "thảo", "khuyết", "toán", "kiến", "bị", "báo", "phòng", "đoán", "lễ", "tiệc", "tuyển", "thi", "giờ"}
+1134:                 or (prev_lower in {"tham", "đến", "viên", "người", "đại", "khách"} and next_lower not in {"thừa", "âm", "nợ", "dả"})
+1135:                 or (next_lower == "chi" and next_next_lower == "bộ")
+1136:             )
+1137:             if is_du_context and not is_valid_du:
+1138:                 if curr_token.isupper():
+1139:                     sugg_fmt = "DỰ"
+1140:                 elif curr_token[0].isupper():
+1141:                     sugg_fmt = "Dự"
+1142:                 else:
+1143:                     sugg_fmt = "dự"
+1144:                 return sugg_fmt, f"Nghi vấn nhầm dấu thanh trong ngữ cảnh '{curr_token} {next_token}' (gợi ý: '{sugg_fmt}')"
+1145: 
+1146:         # 1.p. Bảo vệ từ chức năng, liên từ, giới từ, loại từ và từ vựng phổ thông cơ bản
+1147:         if curr_lower in PROTECTED_COMMON_WORDS:
+1148:             return None
+1149: 
+1150:         # 1.j. Phân biệt theo ngữ cảnh cho 'Ban' <-> 'Bạn'
+1151:         if curr_lower == "ban":
+1152:             # Nếu đi cùng từ chỉ cơ quan, tổ chức, ban ngành, thời gian: 'ban hành', 'ban chỉ đạo', 'ban quản lý', 'ban ngày', 'ban đầu' -> HỢP LỆ
+1153:             if next_lower in {"hành", "ngày", "đêm", "đầu", "chỉ", "giám", "quản", "chấp", "tổ", "ngành", "bệ", "phát", "thường"}:
+1154:                 return None
+1155:             # Nếu đứng đầu câu hoặc sau lời chào và đi liền đại từ / trợ động từ:
+1156:             # ví dụ: "Ban có thể", "Ban hãy", "Ban cần", "chào Ban" -> Nghi vấn thiếu dấu thanh
+1157:             if next_lower in {"có", "cần", "hãy", "sẽ", "đang", "muốn", "thân", "đọc", "nhớ", "ơi", "ạ", "nhé"}:
+1158:                 sugg_fmt = "Bạn" if curr_token and curr_token[0].isupper() else "bạn"
+1159:                 return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong ngữ cảnh '{curr_token} {next_token}' (gợi ý: '{sugg_fmt} {next_token}')"
+1160:             if prev_lower in {"chào", "gửi", "thưa"}:
+1161:                 sugg_fmt = "Bạn" if curr_token and curr_token[0].isupper() else "bạn"
+1162:                 return sugg_fmt, f"Nghi vấn thiếu dấu thanh trong ngữ cảnh '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1163:             return None
+1164: 
+1165:         # 2. Bảo vệ tên riêng (cả 2 từ liền nhau đều viết hoa)
+1166:         # Chỉ áp dụng khi không phải từ ghép phổ biến trong văn bản hành chính (chi, ban, tổ, phòng, bộ, hội, đảng, đồng)
+1167:         if prev_token and curr_token and prev_token[0].isupper() and curr_token[0].isupper():
+1168:             if prev_lower not in {"chi", "ban", "tổ", "phòng", "bộ", "hội", "đảng", "đồng"}:
+1169:                 return None
+1170:         if next_token and curr_token and next_token[0].isupper() and curr_token[0].isupper():
+1171:             if curr_lower not in {"chi", "ban", "tổ", "phòng", "bộ", "hội", "đảng", "đồng"}:
+1172:                 return None
+1173: 
+1174:         # 3. Nếu cụm từ ghép hiện tại đã có trong từ điển thì hoàn toàn đúng ngữ cảnh
+1175:         if prev_lower and f"{prev_lower} {curr_lower}" in self._vietnamese_words:
+1176:             return None
+1177:         if next_lower and f"{curr_lower} {next_lower}" in self._vietnamese_words:
+1178:             return None
+1179: 
+1180:         # 4. Ranh giới từ ghép: Nếu prev_token đã thuộc về từ ghép trước đó (prev_prev + prev)
+1181:         # thì prev_token không ghép tiếp với curr_token
+1182:         prev_is_bound = (
+1183:             prev_prev_lower != "" and f"{prev_prev_lower} {prev_lower}" in self._vietnamese_words
+1184:         )
+1185:         if prev_is_bound or prev_lower in PROTECTED_COMMON_WORDS or not prev_lower:
+1186:             return None
+1187: 
+1188:         # 5. So khớp với tiền tố liền trước (chỉ khi prev_token có từ ghép với candidate)
+1189:         if prev_lower in self._compound_prefixes:
+1190:             best_cand = None
+1191:             min_dist = 999.0
+1192:             for cand in self._compound_prefixes[prev_lower]:
+1193:                 dist = weighted_edit_distance(curr_lower, cand)
+1194:                 if dist <= 0.6 and dist < min_dist:
+1195:                     min_dist = dist
+1196:                     best_cand = cand
+1197:             if best_cand:
+1198:                 sugg_fmt = best_cand.capitalize() if curr_token and curr_token[0].isupper() else best_cand
+1199:                 return sugg_fmt, f"Nghi vấn nhầm ký tự trong cụm '{prev_token} {curr_token}' (gợi ý: '{prev_token} {sugg_fmt}')"
+1200: 
+1201:         return None
+1202: 
+1203: 
+1204: # ---------------------------------------------------------------------------
+1205: # Singleton Instance & Module-Level API
+1206: # ---------------------------------------------------------------------------
+1207: 
+1208: _GLOBAL_SPELL_CHECKER: Optional[VietnameseSpellChecker] = None
+1209: _GLOBAL_SPELL_CHECKER_LOCK = threading.Lock()
+1210: 
+1211: 
+1212: def get_default_spell_checker() -> VietnameseSpellChecker:
+1213:     """Lấy singleton VietnameseSpellChecker."""
+1214:     global _GLOBAL_SPELL_CHECKER
+1215:     with _GLOBAL_SPELL_CHECKER_LOCK:
+1216:         if _GLOBAL_SPELL_CHECKER is None:
+1217:             _GLOBAL_SPELL_CHECKER = VietnameseSpellChecker()
+1218:         return _GLOBAL_SPELL_CHECKER
+1219: 
+1220: 
+1221: def check_text_spelling(text: str) -> List[SpellError]:
+1222:     """
+1223:     API chính: Dò soát chính tả tiếng Việt trên văn bản nguyên bản.
+1224: 
+1225:     Returns:
+1226:         List[SpellError]: Danh sách các lỗi nghi vấn.
+1227:         Mỗi phần tử có start_idx, end_idx, token, error_type, confidence, suggestions, reason
+1228:         và có thể unpack trực tiếp dạng tuple (start_idx, end_idx, token) để tương thích ngược.
+1229:     """
+1230:     checker = get_default_spell_checker()
+1231:     return checker.check_text_spelling(text)
+1232: 
+1233: 
+1234: def check_text_spelling_detailed(text: str) -> List[SpellError]:
+1235:     """API tường minh trả về danh sách SpellError đầy đủ chi tiết."""
+1236:     return check_text_spelling(text)
+1237: 
+1238: 
+1239: def get_suggestions(word: str, context_prev: str = "", context_next: str = "") -> List[str]:
+1240:     """
+1241:     API bắt buộc: Sinh tối đa 5 gợi ý sửa phù hợp nhất cho từ trong ngữ cảnh.
+1242: 
+1243:     Args:
+1244:         word: Từ cần sinh gợi ý.
+1245:         context_prev: Từ liền trước (nếu có).
+1246:         context_next: Từ liền sau (nếu có).
+1247: 
+1248:     Returns:
+1249:         List[str]: Danh sách gợi ý xếp theo độ ưu tiên.
+1250:     """
+1251:     checker = get_default_spell_checker()
+1252:     return checker.get_suggestions(word, context_prev, context_next)
+1253: 
+1254: 
+1255: # Alias tương thích hoàn toàn theo quy chuẩn yêu cầu (Phase 4 Master Prompt)
+1256: find_spelling_errors = check_text_spelling
+
+================================================================================
+[4] NOI DUNG main_window.py (Tu dong 1 den 350)
+================================================================================
+   1: #!/usr/bin/env python
+   2: # -*- coding: utf-8 -*-
+   3: """
+   4: app.ui.main_window
+   5: ===================
+   6: Cửa sổ chính của ứng dụng OCR Desktop — PyQt5.
+   7: 
+   8: Tính năng:
+   9: - Mở ảnh từ file / clipboard / kéo thả
+  10: - Hiển thị preview ảnh gốc + ảnh có bounding box
+  11: - Chọn ngôn ngữ nhận dạng
+  12: - Nút OCR / Copy / Export
+  13: - Thanh trạng thái + progress bar
+  14: - Phím tắt đầy đủ
+  15: """
+  16: 
+  17: from __future__ import annotations
+  18: 
+  19: import os
+  20: import sys
+  21: import time
+  22: from pathlib import Path
+  23: from typing import Any, Dict, List, Optional, Set, Tuple
+  24: 
+  25: import cv2
+  26: import numpy as np
+  27: from loguru import logger
+  28: 
+  29: from PyQt5.QtCore import (
+  30:     QMimeData,
+  31:     QPoint,
+  32:     QSize,
+  33:     Qt,
+  34:     QThread,
+  35:     QTimer,
+  36:     pyqtSignal,
+  37:     pyqtSlot,
+  38: )
+  39: from PyQt5.QtGui import (
+  40:     QClipboard,
+  41:     QColor,
+  42:     QDragEnterEvent,
+  43:     QDropEvent,
+  44:     QFont,
+  45:     QIcon,
+  46:     QImage,
+  47:     QKeySequence,
+  48:     QPainter,
+  49:     QPalette,
+  50:     QPixmap,
+  51:     QTextCharFormat,
+  52:     QTextCursor,
+  53: )
+  54: from PyQt5.QtWidgets import (
+  55:     QAction,
+  56:     QApplication,
+  57:     QComboBox,
+  58:     QFileDialog,
+  59:     QFrame,
+  60:     QGraphicsDropShadowEffect,
+  61:     QGroupBox,
+  62:     QHBoxLayout,
+  63:     QLabel,
+  64:     QMainWindow,
+  65:     QMenu,
+  66:     QMessageBox,
+  67:     QPlainTextEdit,
+  68:     QProgressBar,
+  69:     QPushButton,
+  70:     QScrollArea,
+  71:     QShortcut,
+  72:     QSizePolicy,
+  73:     QSplitter,
+  74:     QStatusBar,
+  75:     QTextEdit,
+  76:     QToolBar,
+  77:     QToolButton,
+  78:     QVBoxLayout,
+  79:     QWidget,
+  80: )
+  81: 
+  82: from app.core.ocr_engine import (
+  83:     LANGUAGE_MAP,
+  84:     OCREngine,
+  85:     OCRResult,
+  86:     export_to_docx,
+  87:     final_document_cleanup,
+  88:     get_display_languages,
+  89:     get_lang_code,
+  90: )
+  91: from app.core.spell_corrector import SpellError, check_text_spelling
+  92: 
+  93: # ---------------------------------------------------------------------------
+  94: # Hằng số giao diện
+  95: # ---------------------------------------------------------------------------
+  96: 
+  97: APP_TITLE = "Tool-Documents-Pro — OCR"
+  98: MIN_WIDTH = 1100
+  99: MIN_HEIGHT = 720
+ 100: 
+ 101: # Bảng màu Dark theme
+ 102: COLORS = {
+ 103:     "bg_primary": "#0f0f14",
+ 104:     "bg_secondary": "#16161d",
+ 105:     "bg_card": "#1c1c26",
+ 106:     "bg_input": "#22222e",
+ 107:     "border": "#2a2a3a",
+ 108:     "border_focus": "#6c5ce7",
+ 109:     "accent": "#6c5ce7",
+ 110:     "accent_hover": "#7f70f0",
+ 111:     "accent_pressed": "#5a4bd6",
+ 112:     "success": "#00b894",
+ 113:     "warning": "#fdcb6e",
+ 114:     "danger": "#e17055",
+ 115:     "text_primary": "#e8e8f0",
+ 116:     "text_secondary": "#8888a0",
+ 117:     "text_muted": "#555570",
+ 118:     "scrollbar_bg": "#1a1a24",
+ 119:     "scrollbar_handle": "#333348",
+ 120: }
+ 121: 
+ 122: # ---------------------------------------------------------------------------
+ 123: # Image file filter
+ 124: # ---------------------------------------------------------------------------
+ 125: 
+ 126: IMAGE_FILTER = (
+ 127:     "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp);;"
+ 128:     "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp);;"
+ 129:     "TIFF (*.tiff *.tif);;WebP (*.webp);;All Files (*)"
+ 130: )
+ 131: 
+ 132: SUPPORTED_EXTENSIONS = {
+ 133:     ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp",
+ 134: }
+ 135: 
+ 136: 
+ 137: # ---------------------------------------------------------------------------
+ 138: # Worker thread — chạy OCR nền
+ 139: # ---------------------------------------------------------------------------
+ 140: 
+ 141: 
+ 142: class OCRWorker(QThread):
+ 143:     """Thread chạy OCR để không block giao diện."""
+ 144: 
+ 145:     finished = pyqtSignal(object)  # OCRResult | Exception
+ 146:     progress = pyqtSignal(str)     # Thông báo tiến trình
+ 147: 
+ 148:     def __init__(
+ 149:         self,
+ 150:         engine: OCREngine,
+ 151:         image: np.ndarray,
+ 152:         parent: Optional[QThread] = None,
+ 153:     ) -> None:
+ 154:         super().__init__(parent)
+ 155:         self._engine = engine
+ 156:         self._image = image
+ 157: 
+ 158:     def run(self) -> None:
+ 159:         try:
+ 160:             self.progress.emit("Đang tải model OCR …")
+ 161:             self._engine._ensure_loaded()
+ 162: 
+ 163:             self.progress.emit("Đang nhận dạng …")
+ 164:             result = self._engine.recognize(
+ 165:                 self._image, preprocess=True, denoise=True,
+ 166:             )
+ 167:             result.full_text = final_document_cleanup(result.full_text)
+ 168:             self.finished.emit(result)
+ 169: 
+ 170:         except Exception as exc:
+ 171:             logger.exception("OCR worker error:")
+ 172:             self.finished.emit(exc)
+ 173: 
+ 174: 
+ 175: class SpellCheckWorker(QThread):
+ 176:     """Thread chạy kiểm tra chính tả tiếng Việt để không block giao diện."""
+ 177: 
+ 178:     finished = pyqtSignal(list, str)  # (suspicious_list, original_text)
+ 179: 
+ 180:     def __init__(
+ 181:         self,
+ 182:         text: str,
+ 183:         parent: Optional[QThread] = None,
+ 184:     ) -> None:
+ 185:         super().__init__(parent)
+ 186:         self._text = text
+ 187: 
+ 188:     def run(self) -> None:
+ 189:         try:
+ 190:             results = check_text_spelling(self._text)
+ 191:             self.finished.emit(results, self._text)
+ 192:         except Exception as exc:
+ 193:             logger.exception("Spell check worker error:")
+ 194:             self.finished.emit([], self._text)
+ 195: 
+ 196: 
+ 197: # ---------------------------------------------------------------------------
+ 198: # Helper — chuyển đổi QImage ↔ numpy
+ 199: # ---------------------------------------------------------------------------
+ 200: 
+ 201: 
+ 202: def qimage_to_numpy(qimg: QImage) -> np.ndarray:
+ 203:     """Chuyển QImage → numpy array (BGR)."""
+ 204:     qimg = qimg.convertToFormat(QImage.Format_RGB32)
+ 205:     width = qimg.width()
+ 206:     height = qimg.height()
+ 207: 
+ 208:     ptr = qimg.bits()
+ 209:     ptr.setsize(height * width * 4)
+ 210:     arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4))
+ 211: 
+ 212:     # BGRA → BGR
+ 213:     bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+ 214:     return bgr
+ 215: 
+ 216: 
+ 217: def numpy_to_qpixmap(image: np.ndarray) -> QPixmap:
+ 218:     """Chuyển numpy array (BGR) → QPixmap."""
+ 219:     if len(image.shape) == 2:
+ 220:         h, w = image.shape
+ 221:         qimg = QImage(image.data, w, h, w, QImage.Format_Grayscale8)
+ 222:     else:
+ 223:         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+ 224:         h, w, ch = rgb.shape
+ 225:         bytes_per_line = ch * w
+ 226:         qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+ 227:     return QPixmap.fromImage(qimg.copy())
+ 228: 
+ 229: 
+ 230: # ---------------------------------------------------------------------------
+ 231: # Stylesheet
+ 232: # ---------------------------------------------------------------------------
+ 233: 
+ 234: 
+ 235: def build_stylesheet() -> str:
+ 236:     """Tạo stylesheet cho toàn bộ ứng dụng."""
+ 237:     c = COLORS
+ 238:     return f"""
+ 239:     /* ===== GLOBAL ===== */
+ 240:     QMainWindow, QWidget {{
+ 241:         background-color: {c['bg_primary']};
+ 242:         color: {c['text_primary']};
+ 243:         font-family: 'Segoe UI', 'Arial', sans-serif;
+ 244:         font-size: 13px;
+ 245:     }}
+ 246: 
+ 247:     /* ===== TOOLBAR ===== */
+ 248:     QToolBar {{
+ 249:         background-color: {c['bg_secondary']};
+ 250:         border-bottom: 1px solid {c['border']};
+ 251:         padding: 6px 10px;
+ 252:         spacing: 8px;
+ 253:     }}
+ 254:     QToolBar QToolButton {{
+ 255:         background-color: transparent;
+ 256:         border: 1px solid transparent;
+ 257:         border-radius: 6px;
+ 258:         padding: 6px 14px;
+ 259:         color: {c['text_primary']};
+ 260:         font-weight: 500;
+ 261:     }}
+ 262:     QToolBar QToolButton:hover {{
+ 263:         background-color: {c['bg_card']};
+ 264:         border-color: {c['border']};
+ 265:     }}
+ 266:     QToolBar QToolButton:pressed {{
+ 267:         background-color: {c['accent_pressed']};
+ 268:     }}
+ 269: 
+ 270:     /* ===== BUTTONS ===== */
+ 271:     QPushButton {{
+ 272:         background-color: {c['bg_card']};
+ 273:         color: {c['text_primary']};
+ 274:         border: 1px solid {c['border']};
+ 275:         border-radius: 8px;
+ 276:         padding: 8px 20px;
+ 277:         font-weight: 600;
+ 278:         font-size: 13px;
+ 279:         min-height: 18px;
+ 280:     }}
+ 281:     QPushButton:hover {{
+ 282:         background-color: {c['bg_input']};
+ 283:         border-color: {c['accent']};
+ 284:     }}
+ 285:     QPushButton:pressed {{
+ 286:         background-color: {c['accent_pressed']};
+ 287:     }}
+ 288:     QPushButton:disabled {{
+ 289:         color: {c['text_muted']};
+ 290:         border-color: {c['border']};
+ 291:     }}
+ 292: 
+ 293:     QPushButton#btnOCR {{
+ 294:         background: qlineargradient(
+ 295:             x1:0, y1:0, x2:1, y2:1,
+ 296:             stop:0 {c['accent']}, stop:1 #a29bfe
+ 297:         );
+ 298:         color: #ffffff;
+ 299:         border: none;
+ 300:         font-size: 14px;
+ 301:         padding: 10px 28px;
+ 302:         border-radius: 10px;
+ 303:     }}
+ 304:     QPushButton#btnOCR:hover {{
+ 305:         background: qlineargradient(
+ 306:             x1:0, y1:0, x2:1, y2:1,
+ 307:             stop:0 {c['accent_hover']}, stop:1 #b8b0ff
+ 308:         );
+ 309:     }}
+ 310:     QPushButton#btnOCR:pressed {{
+ 311:         background-color: {c['accent_pressed']};
+ 312:     }}
+ 313:     QPushButton#btnOCR:disabled {{
+ 314:         background: {c['bg_input']};
+ 315:         color: {c['text_muted']};
+ 316:     }}
+ 317: 
+ 318:     QPushButton#btnCopy {{
+ 319:         background-color: {c['success']};
+ 320:         color: #ffffff;
+ 321:         border: none;
+ 322:     }}
+ 323:     QPushButton#btnCopy:hover {{
+ 324:         background-color: #00d9a5;
+ 325:     }}
+ 326: 
+ 327:     QPushButton#btnSpellCheck {{
+ 328:         background-color: #d63031;
+ 329:         color: #ffffff;
+ 330:         border: none;
+ 331:     }}
+ 332:     QPushButton#btnSpellCheck:hover {{
+ 333:         background-color: #e17055;
+ 334:     }}
+ 335: 
+ 336:     QPushButton#btnClearSpell {{
+ 337:         background-color: #2d3436;
+ 338:         color: #dfe6e9;
+ 339:         border: 1px solid #4a4a5a;
+ 340:     }}
+ 341:     QPushButton#btnClearSpell:hover {{
+ 342:         background-color: #3b3b4f;
+ 343:     }}
+ 344: 
+ 345:     /* ===== COMBO BOX ===== */
+ 346:     QComboBox {{
+ 347:         background-color: {c['bg_input']};
+ 348:         color: {c['text_primary']};
+ 349:         border: 1px solid {c['border']};
+ 350:         border-radius: 8px;

@@ -788,6 +788,7 @@ class TestSpellCheckDiacriticConfusionVdng(unittest.TestCase):
 
         vdng_err = next((e for e in errors if e.token == "vđng"), None)
         self.assertIsNotNone(vdng_err, "Phải phát hiện token 'vđng' là nghi vấn chính tả")
+        assert vdng_err is not None
         self.assertIn("vắng", vdng_err.suggestions, "Gợi ý hàng đầu phải chứa 'vắng'")
 
     def test_abbreviations_dc_and_stt_protected(self) -> None:
@@ -993,6 +994,49 @@ class TestContextualSpellCheckingNew(unittest.TestCase):
                 [],
                 f"Văn bản hợp lệ không được bị báo lỗi sai: {sample} -> {errs}",
             )
+
+    def test_master_prompt_false_positives_and_confusion(self) -> None:
+        """Kiểm tra triệt để 5 vấn đề trong Master Prompt: chống bôi đỏ nhầm chi, Chi, đổi và phát hiện CHI BỐ, chỉ bộ."""
+        # 1. Các câu đúng tuyệt đối không bao giờ bị bôi đỏ chi/Chi hay đổi
+        valid_texts = [
+            "sinh hoạt chi bộ",
+            "Chi bộ dưới 30 đảng viên ít nhất 90 phút",
+            "Chi ủy chuẩn bị chu đáo nội dung",
+            "trao đổi, thảo luận",
+            "BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ VĂN PHÒNG HĐND VÀ UBND XÃ",
+            "Các thành viên dự họp trao đổi, thảo luận, góp ý về các điều khoản trong bản nội quy lao động.",
+            "thông báo tình hình thu, nộp đảng phí",
+            "chất lượng sinh hoạt chi bộ",
+            "quy định tại các điều khoản của pháp luật",
+        ]
+        for vt in valid_texts:
+            errs = check_text_spelling(vt)
+            flagged_tokens = [e.token.lower() for e in errs]
+            self.assertNotIn("chi", flagged_tokens, f"'chi' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertNotIn("đổi", flagged_tokens, f"'đổi' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertNotIn("khoản", flagged_tokens, f"'khoản' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertNotIn("lượng", flagged_tokens, f"'lượng' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertNotIn("nộp", flagged_tokens, f"'nộp' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertNotIn("thu", flagged_tokens, f"'thu' không bao giờ được bôi đỏ trong: '{vt}'")
+            self.assertEqual(len(errs), 0, f"Văn bản chuẩn không được có lỗi: '{vt}', phát hiện: {errs}")
+
+        # 2. 'CHI BỐ' bắt buộc phải bắt lỗi 'BỐ' và gợi ý 'BỘ'
+        errs_bo = check_text_spelling("CHI BỐ VĂN PHÒNG")
+        self.assertEqual(len(errs_bo), 1)
+        self.assertEqual(errs_bo[0].token, "BỐ")
+        self.assertIn("BỘ", errs_bo[0].suggestions)
+
+        # 3. 'chỉ bộ' bắt buộc phải bắt lỗi 'chỉ' và gợi ý 'chi'
+        errs_chi = check_text_spelling("sinh hoạt chỉ bộ định kỳ")
+        self.assertEqual(len(errs_chi), 1)
+        self.assertEqual(errs_chi[0].token, "chỉ")
+        self.assertIn("chi", errs_chi[0].suggestions)
+
+        # 4. 'Bí thu' bắt buộc phải bắt lỗi 'thu' và gợi ý 'thư'
+        errs_thu = check_text_spelling("Đồng chí Bí thu chi bộ")
+        self.assertEqual(len(errs_thu), 1)
+        self.assertEqual(errs_thu[0].token, "thu")
+        self.assertIn("thư", errs_thu[0].suggestions)
 
 
 if __name__ == "__main__":

@@ -789,7 +789,7 @@ class TestPhase7AdvancedVisionAndTableReconstruction:
                 "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định",
             ),
             (
-                "Thời gian sinh hoạt chỉ bộ dưới % so với quy định",
+                "Thời gian sinh hoạt chi bộ dưới % so với quy định",
                 "Thời gian sinh hoạt chi bộ dưới ½ so với quy định",
             ),
             (
@@ -821,8 +821,8 @@ class TestPhase7AdvancedVisionAndTableReconstruction:
                 "đảng viên",
             ),
             (
-                "chi bố",
-                "chi bộ",
+                "CHI BỘ VĂN PHÒNG HĐND",
+                "CHI BỘ VĂN PHÒNG HĐND",
             ),
         ],
     )
@@ -929,5 +929,1241 @@ class TestEmailDomainAndInternshipProgressRecovery:
             assert safe_word not in error_tokens, f"Từ an toàn '{safe_word}' không được bôi đỏ trong spell checker!"
 
 
+class TestSection8MasterRequirements:
+    """Bộ kiểm thử bắt buộc theo Section 8 của Master Prompt."""
+
+    def test_01_table_header_standalone(self):
+        """1. Hàng tiêu đề bảng (Tuần | Ngày | Nội dung) đứng độc lập."""
+        boxes = [
+            # Header bảng
+            OCRBox("Tuần", 0.98, [[30, 50], [80, 50], [80, 75], [30, 75]]),
+            OCRBox("Ngày", 0.98, [[100, 50], [200, 50], [200, 75], [100, 75]]),
+            OCRBox("Nội dung", 0.98, [[220, 50], [350, 50], [350, 75], [220, 75]]),
+            # Bounding box dữ liệu đầu tiên (dù tọa độ Y gần nhau cũng không được gộp vào header)
+            OCRBox("- Họp nhóm, tìm hiểu về AWS.", 0.95, [[220, 78], [600, 78], [600, 100], [220, 100]]),
+            # Tuần 1
+            OCRBox("1", 0.95, [[40, 105], [60, 105], [60, 130], [40, 130]]),
+            OCRBox("20/04/2026 - 26/04/2026", 0.98, [[100, 105], [215, 105], [215, 130], [100, 130]]),
+            OCRBox("- Đọc các nội quy.", 0.95, [[220, 105], [500, 105], [500, 130], [220, 130]]),
+            # Tuần 2
+            OCRBox("2", 0.95, [[40, 160], [60, 160], [60, 185], [40, 185]]),
+            OCRBox("27/04/2026 - 03/05/2026", 0.98, [[100, 160], [215, 160], [215, 185], [100, 185]]),
+            OCRBox("- Thực tập AWS.", 0.95, [[220, 160], [500, 160], [500, 185], [220, 185]]),
+        ]
+        lines, tables = reconstruct_document_layout(boxes)
+        assert len(tables) == 1
+        tbl = tables[0]
+        header = tbl.grid[0]
+        assert header[0] == "Tuần"
+        assert header[1] == "Ngày"
+        assert header[2] == "Nội dung"
+
+    def test_02_multiline_internship_week_grouping(self):
+        """2. Nội dung nhiều dòng của Tuần 1, Tuần 2 thuộc đúng tuần tương ứng."""
+        boxes = [
+            # Header
+            OCRBox("Tuần", 0.98, [[30, 50], [80, 50], [80, 75], [30, 75]]),
+            OCRBox("Ngày", 0.98, [[100, 50], [200, 50], [200, 75], [100, 75]]),
+            OCRBox("Nội dung", 0.98, [[220, 50], [350, 50], [350, 75], [220, 75]]),
+            # Tuần 1
+            OCRBox("1", 0.95, [[40, 110], [60, 110], [60, 135], [40, 135]]),
+            OCRBox("20/04/2026 - 26/04/2026", 0.98, [[100, 110], [215, 110], [215, 135], [100, 135]]),
+            OCRBox("- Họp nhóm, tìm hiểu về AWS.", 0.95, [[220, 95], [550, 95], [550, 120], [220, 120]]),
+            OCRBox("- Đọc các nội quy.", 0.95, [[220, 125], [500, 125], [500, 150], [220, 150]]),
+            # Tuần 2: Bullet 1 nằm ở đầu tuần 2 (Y: 210-235), cao hơn anchor STT 2 và Ngày (Y: 250-275) do STT căn giữa dọc
+            OCRBox("- Học kiến thức về AWS.", 0.95, [[220, 210], [520, 210], [520, 235], [220, 235]]),
+            OCRBox("2", 0.95, [[40, 250], [60, 250], [60, 275], [40, 275]]),
+            OCRBox("27/04/2026 - 03/05/2026", 0.98, [[100, 250], [215, 250], [215, 275], [100, 275]]),
+            OCRBox("- Đã tạo account.", 0.95, [[220, 250], [500, 250], [500, 275], [220, 275]]),
+        ]
+        lines, tables = reconstruct_document_layout(boxes)
+        assert len(tables) == 1
+        tbl = tables[0]
+        assert len(tbl.grid) == 3
+        # Tuần 1
+        assert tbl.grid[1][0] == "1"
+        assert "20/04/2026" in tbl.grid[1][1]
+        assert "Họp nhóm" in tbl.grid[1][2]
+        assert "Đọc các nội quy" in tbl.grid[1][2]
+        # Tuần 2
+        assert tbl.grid[2][0] == "2"
+        assert "27/04/2026" in tbl.grid[2][1]
+        assert "Học kiến thức về AWS" in tbl.grid[2][2]
+        assert "Đã tạo account" in tbl.grid[2][2]
+
+    def test_03_and_04_sub_criterion_stt_guard_and_sequence(self):
+        """3 & 4. Hàng tiêu chí con không bị gán STT và STT hàng chính không bị lệch."""
+        boxes = [
+            # Header
+            OCRBox("STT", 0.95, [[30, 50], [70, 50], [70, 75], [30, 75]]),
+            OCRBox("Tiêu chí đánh giá", 0.98, [[100, 50], [450, 50], [450, 75], [100, 75]]),
+            OCRBox("Điểm tối đa", 0.95, [[600, 50], [680, 50], [680, 75], [600, 75]]),
+            # Hàng chính 1
+            OCRBox("1", 0.95, [[40, 90], [60, 90], [60, 115], [40, 115]]),
+            OCRBox("Chấp hành thời gian, thời lượng sinh hoạt", 0.98, [[100, 90], [500, 90], [500, 115], [100, 115]]),
+            OCRBox("05", 0.95, [[620, 90], [660, 90], [660, 115], [620, 115]]),
+            # Hàng tiêu chí con 1
+            OCRBox("+ Thời gian sinh hoạt chi bộ ít hơn quy định 15 - 30 phút", 0.98, [[100, 125], [550, 125], [550, 150], [100, 150]]),
+            OCRBox("03", 0.95, [[620, 125], [660, 125], [660, 150], [620, 150]]),
+            # Hàng tiêu chí con 2
+            OCRBox("+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định", 0.98, [[100, 160], [550, 160], [550, 185], [100, 185]]),
+            OCRBox("02", 0.95, [[620, 160], [660, 160], [660, 185], [620, 185]]),
+            # Hàng chính 2 (STT 2 chuẩn)
+            OCRBox("2", 0.95, [[40, 195], [60, 195], [60, 220], [40, 220]]),
+            OCRBox("Tỷ lệ đảng viên dự sinh hoạt chi bộ", 0.98, [[100, 195], [500, 195], [500, 220], [100, 220]]),
+            OCRBox("05", 0.95, [[620, 195], [660, 195], [660, 220], [620, 220]]),
+            # Hàng tiêu chí con 3
+            OCRBox("+ Từ 90% trở lên", 0.98, [[100, 230], [300, 230], [300, 255], [100, 255]]),
+            OCRBox("04", 0.95, [[620, 230], [660, 230], [660, 255], [620, 255]]),
+        ]
+        lines, tables = reconstruct_document_layout(boxes)
+        assert len(tables) == 1
+        grid = tables[0].grid
+        assert grid[1][0] == "1"
+        assert grid[2][0] == ""
+        assert "Thời gian sinh hoạt chi bộ ít hơn quy định 15 - 30 phút" in grid[2][1]
+        assert grid[3][0] == ""
+        assert grid[4][0] == "2"
+        assert "Tỷ lệ đảng viên dự sinh hoạt chi bộ" in grid[4][1]
+        assert grid[5][0] == ""
+        assert "Từ 90% trở lên" in grid[5][1]
+
+    def test_05_footnote_normalization(self):
+        """5. '?Trừ trường hợp...' được chuẩn hóa thành '* Trừ trường hợp...'."""
+        raw = "?Trừ trường hợp được miễn công tác, sinh hoạt đảng theo quy định."
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        assert cleaned == "* Trừ trường hợp được miễn công tác, sinh hoạt đảng theo quy định."
+
+        raw2 = "? Trừ trường hợp đặc biệt."
+        cleaned2 = VietnameseTextPostProcessor.clean_and_restore(raw2)
+        assert cleaned2 == "* Trừ trường hợp đặc biệt."
+
+    def test_06_unmatched_closing_brackets(self):
+        """6. Dấu ']' rác ở cuối câu (trong năm]) được làm sạch mà không xóa ngoặc [...] hợp lệ."""
+        raw = "quá 03 lần liên tiếp trong năm]"
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        assert cleaned == "quá 03 lần liên tiếp trong năm"
+
+        raw_valid = "Theo quy định tại [Điều 5] của [Nghị định 01]."
+        cleaned_valid = VietnameseTextPostProcessor.clean_and_restore(raw_valid)
+        assert cleaned_valid == raw_valid
+
+    def test_07_half_fraction_recovery(self):
+        """7. '% so với quy định' được khôi phục thành '½ so với quy định' và phần trăm số được giữ nguyên."""
+        raw = "Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định"
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        assert cleaned == "Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định"
+
+        raw_num = "Từ 90% trở lên và đạt 100% chỉ tiêu."
+        cleaned_num = VietnameseTextPostProcessor.clean_and_restore(raw_num)
+        assert "90%" in cleaned_num
+        assert "100%" in cleaned_num
+
+    def test_08_casing_uppercase_preservation(self):
+        """8. Casing chữ IN HOA của 'CHI BỘ VĂN PHÒNG HĐND' được bảo toàn tuyệt đối."""
+        raw = "CHI BỘ VĂN PHÒNG HĐND VÀ UBND XÃ"
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        assert cleaned == "CHI BỘ VĂN PHÒNG HĐND VÀ UBND XÃ"
+        assert "chi bộ" not in cleaned
+
+    def test_09_chi_bo_spell_check(self):
+        """9. 'sinh hoạt chỉ bộ' phát hiện và bôi đỏ đúng từ 'chỉ' (gợi ý 'chi')."""
+        from app.core.spell_corrector import check_text_spelling
+        text = "sinh hoạt chỉ bộ định kỳ tháng 10 năm 2026"
+        errs = check_text_spelling(text)
+        tokens = [err.token for err in errs]
+        assert "chỉ" in tokens
+        err = next(e for e in errs if e.token == "chỉ")
+        assert "chi" in err.suggestions
+
+    def test_10_du_sinh_hoat_spell_check(self):
+        """10. 'Tỷ lệ đảng viên dư sinh hoạt chi bộ' phát hiện và bôi đỏ đúng từ 'dư' (gợi ý 'dự')."""
+        from app.core.spell_corrector import check_text_spelling
+        text = "Tỷ lệ đảng viên dư sinh hoạt chi bộ"
+        errs = check_text_spelling(text)
+        tokens = [err.token for err in errs]
+        assert "dư" in tokens
+        err = next(e for e in errs if e.token == "dư")
+        assert "dự" in err.suggestions
+
+    def test_11_zero_false_positives_for_valid_words(self):
+        """11. Các nghĩa đúng của 'chỉ', 'dư', 'Chi ủy' không bị báo sai (Zero False Positives)."""
+        from app.core.spell_corrector import check_text_spelling
+        safe_texts = [
+            "Đồng chí chỉ đạo hội nghị.",
+            "Tôi chỉ có một câu hỏi.",
+            "Anh ấy chỉ tay về phía trước.",
+            "Tài khoản có số dư 500 triệu đồng.",
+            "Hàng hóa dư thừa trong kho.",
+            "Dư âm của chiến thắng vẫn còn đọng lại.",
+            "Chi ủy chi bộ họp định kỳ.",
+        ]
+        for t in safe_texts:
+            errs = check_text_spelling(t)
+            tokens = [err.token for err in errs]
+            assert "chỉ" not in tokens, f"Từ 'chỉ' hợp lệ trong '{t}' bị báo sai!"
+            assert "dư" not in tokens, f"Từ 'dư' hợp lệ trong '{t}' bị báo sai!"
+
+    def test_12_exact_offsets_with_special_characters(self):
+        """12. Offset lỗi chính tả chính xác hoàn toàn khi văn bản chứa email, URL và ký tự đặc biệt."""
+        from app.core.spell_corrector import check_text_spelling
+        text = "Gửi tới vpt.luan@hutech.edu.vn và tham dư buổi họp tại https://hutech.edu.vn"
+        errs = check_text_spelling(text)
+        assert len(errs) == 1
+        err = errs[0]
+        assert err.token == "dư"
+        assert text[err.start_idx:err.end_idx] == "dư"
+        assert err.suggestions[0] == "dự"
+
+    def test_13_heading_split_and_aws_recovery(self):
+        """13. Tách đề mục số bị dính dòng và khôi phục AW -> AWS."""
+        raw_heading = "Chuyên ngành | Công nghệ phần mềm 5. Tiến độ và nội dung thực tập:"
+        cleaned_heading = VietnameseTextPostProcessor.clean_and_restore(raw_heading)
+        assert "Chuyên ngành | Công nghệ phần mềm\n5. Tiến độ và nội dung thực tập:" in cleaned_heading
+
+        raw_aws = "tìm hiểu về doanh nghiệp, các dịch vụ của AW Làm quen"
+        cleaned_aws = VietnameseTextPostProcessor.clean_and_restore(raw_aws)
+        assert "các dịch vụ của AWS. Làm quen" in cleaned_aws
+
+
+class TestGeneralPurposeOCREngineAndUniversalSpellChecker:
+    """
+    Bộ kiểm thử cho Hệ thống OCR & Kiểm tra chính tả Tổng quát (General-Purpose):
+    1. Khôi phục số La Mã tổng quát (IIL -> III., IL/TT -> II., L -> I.)
+    2. Chuẩn hóa đơn vị đo lường, số mũ (m2, m? -> m²; m3 -> m³; °C; phân số ½)
+    3. Chuẩn hóa khoảng trắng dấu câu & nối dòng nhãn ngắn
+    4. Tái dựng bảng: phân biệt hàng con vs hàng chính bằng hình học và cú pháp
+    5. Kiểm tra chính tả 3 tầng: Zero False Positives trên từ đúng và phát hiện chính xác lỗi sai
+    """
+
+    @pytest.mark.parametrize(
+        "raw_line,expected",
+        [
+            ("IIL NỘI DUNG ĐỀ NGHỊ", "III. NỘI DUNG ĐỀ NGHỊ"),
+            ("IIl. NỘI DUNG ĐỀ NGHỊ", "III. NỘI DUNG ĐỀ NGHỊ"),
+            ("11L. NỘI DUNG ĐỀ NGHỊ", "III. NỘI DUNG ĐỀ NGHỊ"),
+            ("IL THÔNG TIN THỬA ĐẤT", "II. THÔNG TIN THỬA ĐẤT"),
+            ("Il. THÔNG TIN THỬA ĐẤT", "II. THÔNG TIN THỬA ĐẤT"),
+            ("TT. THÔNG TIN THỬA ĐẤT ĐỀ NGHỊ TÍNH/ TÍNH LẠI", "II. THÔNG TIN THỬA ĐẤT ĐỀ NGHỊ TÍNH/ TÍNH LẠI"),
+            ("TI. THÔNG TIN THỬA ĐẤT", "II. THÔNG TIN THỬA ĐẤT"),
+            ("L THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT", "I. THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT"),
+            ("L. THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT", "I. THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT"),
+            ("T. THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT", "I. THÔNG TIN NGƯỜI SỬ DỤNG ĐẤT"),
+            ("1. Tuyên bố lý do, giới thiệu đại biểu:", "1. Tuyên bố lý do, giới thiệu đại biểu:"),
+            ("2. Chủ trì: Đồng chí Lê Văn Điền", "2. Chủ trì: Đồng chí Lê Văn Điền"),
+        ],
+    )
+    def test_roman_numeral_general_recovery(self, raw_line, expected):
+        recovered, _, _, _ = ContextSymbolRecovery.recover_roman_numeral_in_line(raw_line)
+        assert recovered == expected
+
+    @pytest.mark.parametrize(
+        "raw_text,expected_substr",
+        [
+            ("diện tích: 293,7m2", "293,7m²"),
+            ("diện tích: 547,7m?", "547,7m²"),
+            ("chuyển mục đích sang đất ở 170m2", "170m²"),
+            ("thể tích 25m3", "25m³"),
+            ("nhiệt độ 37 oC", "37°C"),
+            ("nhiệt độ 250C", "25°C"),
+            ("chỉ bằng % so với quy định", "chỉ bằng ½ so với quy định"),
+            ("dưới % mức quy định", "dưới ½ mức quy định"),
+            ("13/04/2021.Nơi cấp: CQLHC", "13/04/2021. Nơi cấp: CQLHC"),
+            ("số:473/QĐ-UBND", "số: 473/QĐ-UBND"),
+        ],
+    )
+    def test_universal_units_and_punctuation_cleanups(self, raw_text, expected_substr):
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw_text)
+        assert expected_substr in cleaned
+
+    def test_label_and_data_line_reconnection(self):
+        raw = "Sinh năm:\n1978. Số CCCD/Hộ chiếu: 077078001980"
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        assert "Sinh năm: 1978. Số CCCD/Hộ chiếu: 077078001980" in cleaned
+
+    def test_table_sub_row_geometry_and_syntax(self):
+        """Kiểm tra hàng con không bị gán STT nhầm và không tăng expected_stt."""
+        boxes = [
+            # Header
+            OCRBox("STT", 0.95, [[20, 10], [50, 10], [50, 30], [20, 30]]),
+            OCRBox("Tiêu chí đánh giá", 0.98, [[80, 10], [350, 10], [350, 30], [80, 30]]),
+            OCRBox("Điểm tối đa", 0.95, [[400, 10], [480, 10], [480, 30], [400, 30]]),
+            OCRBox("Điểm tự chấm", 0.95, [[500, 10], [580, 10], [580, 30], [500, 30]]),
+            # Hàng 1 (Hàng chính)
+            OCRBox("1", 0.95, [[25, 45], [45, 45], [45, 65], [25, 65]]),
+            OCRBox("Chấp hành thời gian, thời lượng sinh hoạt", 0.98, [[80, 45], [380, 45], [380, 65], [80, 65]]),
+            OCRBox("05", 0.95, [[420, 45], [450, 45], [450, 65], [420, 65]]),
+            OCRBox("05", 0.95, [[520, 45], [550, 45], [550, 65], [520, 65]]),
+            # Hàng 2 (Hàng con indented + bullet +)
+            OCRBox("+ Chi bộ dưới 30 đảng viên ít nhất 90 phút...", 0.98, [[105, 75], [390, 75], [390, 95], [105, 95]]),
+            OCRBox("05", 0.95, [[420, 75], [450, 75], [450, 95], [420, 95]]),
+            OCRBox("05", 0.95, [[520, 75], [550, 75], [550, 95], [520, 95]]),
+            # Hàng 3 (Hàng con bullet -)
+            OCRBox("- Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút", 0.98, [[105, 105], [390, 105], [390, 125], [105, 125]]),
+            OCRBox("04", 0.95, [[420, 105], [450, 105], [450, 125], [420, 125]]),
+            # Hàng 4 (Hàng chính 2)
+            OCRBox("2", 0.95, [[25, 135], [45, 135], [45, 155], [25, 155]]),
+            OCRBox("Tỷ lệ đảng viên dự sinh hoạt chi bộ", 0.98, [[80, 135], [380, 135], [380, 155], [80, 155]]),
+            OCRBox("05", 0.95, [[420, 135], [450, 135], [450, 155], [420, 155]]),
+            OCRBox("05", 0.95, [[520, 135], [550, 135], [550, 155], [520, 155]]),
+        ]
+
+        lines, tables = reconstruct_document_layout(boxes)
+        assert len(tables) == 1
+        tbl = tables[0]
+        # Hàng 1 chính: STT = "1"
+        assert tbl.grid[1][0] == "1"
+        assert "Chấp hành thời gian" in tbl.grid[1][1]
+        # Hàng 2 con: STT PHẢI LÀ RỖNG "" (không bị gán nhầm thành "2")
+        assert tbl.grid[2][0] == ""
+        # Hàng 3 con: STT PHẢI LÀ RỖNG ""
+        assert tbl.grid[3][0] == ""
+        # Hàng 4 chính: STT = "2"
+        assert tbl.grid[4][0] == "2"
+        assert "Tỷ lệ đảng viên" in tbl.grid[4][1]
+
+    def test_zero_false_positives_on_valid_sentences(self):
+        """Golden Rule #1: Các cụm từ hợp lệ không bao giờ bị bôi đỏ."""
+        from app.core.spell_corrector import check_text_spelling
+        clean_samples = [
+            "1 | Chấp hành thời gian, thời lượng sinh hoạt | 05 | 05",
+            "3. Thư ký: Đồng chí Nguyễn Văn Thắng, Chi ủy viên Chi bộ.",
+            "5. Đồng chí Lê Thụy Thúy Phượng thông báo tình hình thu, nộp đảng phí;",
+            "chương trình sinh hoạt chi bộ định kỳ tháng 10 năm 2026",
+            "thông tin tình hình đảng viên dự sinh hoạt",
+            "Thửa đất số: 593, tờ bản đồ số: 60, diện tích: 293,7m²",
+            "quyền sử dụng đất và chuyển mục đích sang đất ở",
+            "thanh toán tiền qua tài khoản ngân hàng",
+            "kế toán trưởng giải quyết khiếu nại theo hợp đồng",
+        ]
+        for s in clean_samples:
+            errs = check_text_spelling(s)
+            assert len(errs) == 0, f"False positive detected in '{s}': {[e.token for e in errs]}"
+
+    def test_multi_domain_accurate_error_detection(self):
+        """Phát hiện chính xác lỗi chính tả trên nhiều lĩnh vực và bảo toàn casing."""
+        from app.core.spell_corrector import check_text_spelling
+
+        # 1. CHI BỐ -> BỘ
+        errs = check_text_spelling("CHI BỐ VĂN PHÒNG")
+        assert len(errs) == 1
+        assert errs[0].token == "BỐ"
+        assert errs[0].suggestions[0] == "BỘ"
+
+        # 2. chỉ bộ -> chi
+        errs = check_text_spelling("sinh hoạt chỉ bộ")
+        assert len(errs) == 1
+        assert errs[0].token == "chỉ"
+        assert errs[0].suggestions[0] == "chi"
+
+        # 3. dư sinh hoạt -> dự
+        errs = check_text_spelling("đảng viên dư sinh hoạt")
+        assert len(errs) == 1
+        assert errs[0].token == "dư"
+        assert errs[0].suggestions[0] == "dự"
+
+        # 4. Vdng mặt -> Vắng
+        text = "Vdng mặt 0 đồng chí"
+        errs = check_text_spelling(text)
+        assert len(errs) == 1
+        assert errs[0].token == "Vdng"
+        assert text[errs[0].start_idx:errs[0].end_idx] == "Vdng"
+        assert "Vắng" in errs[0].suggestions
+
+        # 5. NGHIÊP VỤ -> NGHIỆP
+        errs = check_text_spelling("NGHIÊP VỤ")
+        assert len(errs) == 1
+        assert errs[0].token == "NGHIÊP"
+        assert errs[0].suggestions[0] == "NGHIỆP"
+
+        # 6. thành toán -> thanh
+        errs = check_text_spelling("thành toán chuyển khoản")
+        assert len(errs) == 1
+        assert errs[0].token == "thành"
+        assert errs[0].suggestions[0] == "thanh"
+
+        # 7. ngần hàng -> ngân
+        errs = check_text_spelling("ngần hàng nhà nước")
+        assert len(errs) == 1
+        assert errs[0].token == "ngần"
+        assert errs[0].suggestions[0] == "ngân"
+
+        # 8. kể toán -> kế
+        errs = check_text_spelling("kể toán trưởng")
+        assert len(errs) == 1
+        assert errs[0].token == "kể"
+        assert errs[0].suggestions[0] == "kế"
+
+        # 9. kíh gửi -> kính
+        errs = check_text_spelling("kíh gửi ban giám đốc")
+        assert len(errs) == 1
+        assert errs[0].token == "kíh"
+        assert "kính" in errs[0].suggestions
+
+        # 10. đc miễn -> được
+        errs = check_text_spelling("đc miễn sinh hoạt")
+        assert len(errs) == 1
+        assert errs[0].token == "đc"
+        assert "được" in errs[0].suggestions
+
+
+class TestRealWorldDocumentIssues:
+    """Kiểm thử toàn diện 6 vấn đề từ văn bản doanh nghiệp / thực tế mới."""
+
+    def test_01_decorative_line_noise_under_motto_removed(self):
+        """1.1. Lọc chuỗi số lặp 144444444, ******* dưới tiêu ngữ và ngắt dòng trước Địa danh, ngày..."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        # Trường hợp dính liền chung 1 dòng với số lặp 14444444
+        raw1 = "Độc lập - Tự do - Hạnh phúc 14444444 Hà Nội, ngày 02 tháng 01 năm 2026"
+        res1 = VietnameseTextPostProcessor.clean_and_restore(raw1)
+        assert res1 == "Độc lập - Tự do - Hạnh phúc\nHà Nội, ngày 02 tháng 01 năm 2026"
+        assert "14444444" not in res1
+
+        # Trường hợp số lặp 144444444 ở dòng riêng biệt
+        raw2 = "Độc lập - Tự do - Hạnh phúc\n144444444\nHà Nội, ngày 02 tháng 01 năm 2026"
+        res2 = VietnameseTextPostProcessor.clean_and_restore(raw2)
+        assert res2 == "Độc lập - Tự do - Hạnh phúc\nHà Nội, ngày 02 tháng 01 năm 2026"
+
+        # Trường hợp ký tự hoa văn *******
+        raw3 = "Độc lập - Tự do - Hạnh phúc\n*******\nHà Nội, ngày 02 tháng 01 năm 2026"
+        res3 = VietnameseTextPostProcessor.clean_and_restore(raw3)
+        assert res3 == "Độc lập - Tự do - Hạnh phúc\nHà Nội, ngày 02 tháng 01 năm 2026"
+
+    def test_02_right_margin_logo_stamp_text_not_merged(self):
+        """1.2. Box con dấu/logo ở lề phải không bị ghép dính vào dòng văn bản chính."""
+        from app.core.ocr_engine import OCRBox, group_boxes_into_lines
+
+        boxes = [
+            # Dòng chính lề trái
+            OCRBox("II. Nội dung cuộc họp", 0.98, [[50, 200], [250, 200], [250, 225], [50, 225]]),
+            # Box logo/con dấu ở lề phải xa
+            OCRBox("KHIÊN ƯNG KẾ TOÁN", 0.95, [[700, 200], [840, 200], [840, 225], [700, 225]]),
+        ]
+        lines = group_boxes_into_lines(boxes)
+        line_texts = [" ".join(b.text for b in line) for line in lines]
+        # Hai khối phải ở hai dòng riêng biệt, không gộp thành 1 dòng
+        assert len(lines) == 2
+        assert line_texts[0] == "II. Nội dung cuộc họp"
+        assert "KHIÊN ƯNG KẾ TOÁN" in line_texts[1]
+
+    def test_03_attached_roman_numeral_split(self):
+        """2.1. Tách đề mục số La Mã bị dính vào cuối câu/dòng trước."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        raw = "Tổng số cán bộ của doanh nghiệp: 14 người. IL. Nội dung cuộc họp"
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw)
+        lines = cleaned.split("\n")
+        assert len(lines) == 2
+        assert lines[0] == "Tổng số cán bộ của doanh nghiệp: 14 người."
+        assert lines[1] == "IL. Nội dung cuộc họp"
+
+    def test_04_title_case_roman_numeral_and_hierarchy_disambiguation(self):
+        """2.2. Khôi phục số La Mã với tiêu đề Title Case và Hierarchy Disambiguation."""
+        from app.core.ocr_engine import ContextSymbolRecovery
+
+        # Title Case với IL. -> II.
+        r1, dec1, _, _ = ContextSymbolRecovery.recover_roman_numeral_in_line("IL. Nội dung cuộc họp")
+        assert r1 == "II. Nội dung cuộc họp"
+
+        # Title Case với TTT. -> III.
+        r2, dec2, _, _ = ContextSymbolRecovery.recover_roman_numeral_in_line("TTT. Kết luận")
+        assert r2 == "III. Kết luận"
+
+        # Hierarchy Disambiguation: Dòng 1. Thành phần... bên dưới có 1. Đại diện...
+        lines = [
+            "1. Thành phần tham dự",
+            "1. Đại diện Công ty: ông Hoàng Trung Thật",
+            "2. Đại diện người lao động: bà Nguyễn Thị Lan",
+        ]
+        recovered, audit = ContextSymbolRecovery.recover_document_symbols(lines)
+        assert recovered[0] == "I. Thành phần tham dự"
+        assert recovered[1] == "1. Đại diện Công ty: ông Hoàng Trung Thật"
+        assert recovered[2] == "2. Đại diện người lao động: bà Nguyễn Thị Lan"
+
+    def test_05_missing_opening_parenthesis_recovery(self):
+        """3. Khôi phục dấu ngoặc đơn mở '(' bị thiếu ở đầu dòng kết thúc bằng ')'."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        raw1 = "Đánh dấu X vào nội dung được chọn)"
+        assert VietnameseTextPostProcessor.clean_and_restore(raw1) == "(Đánh dấu X vào nội dung được chọn)"
+
+        raw2 = "Ghi chú: trường hợp đặc biệt)"
+        assert VietnameseTextPostProcessor.clean_and_restore(raw2) == "(Ghi chú: trường hợp đặc biệt)"
+
+        # Không thêm nếu dòng đã có dấu mở ngoặc hợp lệ
+        valid = "(Đánh dấu X vào nội dung được chọn)"
+        assert VietnameseTextPostProcessor.clean_and_restore(valid) == valid
+
+    def test_06_dieu_khoan_protection_and_thien_ung_correction(self):
+        """4. Bảo vệ cụm 'điều khoản' và bắt lỗi 'Thiên Ung' -> 'Thiên Ưng'."""
+        from app.core.spell_corrector import check_text_spelling
+
+        # Zero false positives trên 'điều khoản'
+        clean_sentence = "5. Những điều khoản không tán thành: Không có"
+        errs_clean = check_text_spelling(clean_sentence)
+        assert len(errs_clean) == 0, f"Không được có lỗi trên câu hợp lệ: {errs_clean}"
+
+        # Bắt lỗi 'Thiên Ung' -> gợi ý 'Ưng' (Title Case)
+        sentence_title = "Kế toán Thiên Ung"
+        errs_title = check_text_spelling(sentence_title)
+        assert len(errs_title) == 1
+        assert errs_title[0].token == "Ung"
+        assert errs_title[0].suggestions[0] == "Ưng"
+
+        # Bắt lỗi 'THIÊN UNG' -> gợi ý 'ƯNG' (All Caps)
+        sentence_upper = "CÔNG TY TNHH DỊCH VỤ KẾ TOÁN THIÊN UNG"
+        errs_upper = check_text_spelling(sentence_upper)
+        assert len(errs_upper) == 1
+        assert errs_upper[0].token == "UNG"
+        assert errs_upper[0].suggestions[0] == "ƯNG"
+
+
+class TestRuntimePipelineAndDottedForm:
+    """Kiểm thử chuỗi pipeline runtime, tách đề mục số La Mã và form dấu chấm điền thông tin."""
+
+    def test_roman_numeral_recovery_on_split_lines(self):
+        """Xác minh TT. và TTT. được khôi phục thành II. và III. trong văn bản biên bản cuộc họp."""
+        from app.core.ocr_engine import ContextSymbolRecovery, VietnameseTextPostProcessor
+
+        raw_input = (
+            "Hôm nay, vào lúc...... giờ ....... phút, ngày ........ tháng ..... năm .....\n"
+            "Tại Văn phòng công ty ........\n"
+            "Chúng tôi gồm có:\n"
+            "1. Thành phần tham dự:\n"
+            "1. Về phía Ban Giám Đốc Công ty có:\n"
+            "- Ông (bà):...\n"
+            "2. Về phía tổ chức đại diện người lao động tại cơ sở:\n"
+            "3. Thư ký cuộc họp:\n"
+            "- Ông (bà):... 14 người. TT. Nội dung cuộc họp: Lấy ý kiến BCH Công đoàn về nội dung bản nội quy lao động của Công ty\n"
+            "Mở đầu cuộc họp, đại diện Ban Giám đốc Công ty trình bày nội dung của bản nội quy lao động.\n"
+            "TTT. Kết luận\n"
+            "Chủ trì cuộc họp lấy ý kiến biểu quyết..."
+        )
+
+        # 1. clean_and_restore phải tách dòng dính đề mục
+        cleaned = VietnameseTextPostProcessor.clean_and_restore(raw_input)
+        lines = cleaned.split("\n")
+        # 2. ContextSymbolRecovery khôi phục số La Mã
+        recovered_lines, audit = ContextSymbolRecovery.recover_document_symbols(lines)
+        full_text = "\n".join(recovered_lines)
+
+        assert "I. Thành phần tham dự:" in full_text
+        assert "II. Nội dung cuộc họp:" in full_text
+        assert "III. Kết luận" in full_text
+        assert "TT. Nội dung" not in full_text
+        assert "TTT. Kết luận" not in full_text
+
+    def test_spaced_concatenation_restoration(self):
+        """Xác minh khôi phục khoảng trắng cho hoạtchi bộ -> hoạt chi bộ."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        text = "2 | Tỷ lệ đảng viên dự sinh hoạtchi bộ | 05 | 05"
+        restored = VietnameseTextPostProcessor.clean_and_restore(text)
+        assert "sinh hoạt chi bộ" in restored
+        assert "hoạtchi" not in restored
+
+    def test_dotted_fill_in_form_grouping(self):
+        """Xác minh các ô form điền chấm chấm (...) trên cùng cao độ được gom vào cùng một dòng."""
+        from app.core.ocr_engine import OCRBox, _group_boxes_sliding_window, _box_info_list
+
+        boxes = [
+            OCRBox("Hôm nay, vào lúc......", 0.95, [[50, 100], [220, 100], [220, 125], [50, 125]]),
+            OCRBox("giờ ....... phút,", 0.95, [[260, 100], [380, 100], [380, 125], [260, 125]]),
+            OCRBox("ngày ........", 0.95, [[420, 100], [530, 100], [530, 125], [420, 125]]),
+            OCRBox("tháng ..... năm .....", 0.95, [[570, 100], [740, 100], [740, 125], [570, 125]]),
+        ]
+
+        box_info = _box_info_list(boxes)
+        grouped = _group_boxes_sliding_window(box_info, page_min_x=50, page_w=800, gutter_thresh=60, median_h=25)
+        assert len(grouped) == 1, f"Tất cả các box form điền trên cùng hàng phải được gom thành 1 dòng, thực tế: {len(grouped)}"
+        line_text = " ".join(b.text for b in grouped[0])
+        assert "Hôm nay, vào lúc" in line_text
+        assert "tháng ..... năm ....." in line_text
+
+
+class TestMasterPromptFixTransformerAndSpellCheck:
+    """Kiểm thử chuyên sâu 5 nhóm tính năng trong Master Prompt."""
+
+    def test_01_hallucinated_and_decorative_noise_filtering(self):
+        """1. Kiểm tra lọc bỏ hoàn toàn chuỗi ảo giác Transformer và ký tự rác đơn lẻ."""
+        from app.core.ocr_engine import is_hallucinated_or_noise_line
+
+        # Ảo giác lặp từ VietOCR từ đường kẻ hoa văn
+        hallucination_str = "đặc đặc đặc đặc đặc đặc được đặc đặc đặc đặc đặn"
+        assert is_hallucinated_or_noise_line(hallucination_str) is True
+
+        # Ký tự đơn lẻ vô nghĩa
+        assert is_hallucinated_or_noise_line("%") is True
+        assert is_hallucinated_or_noise_line("/") is True
+        assert is_hallucinated_or_noise_line("\\") is True
+        assert is_hallucinated_or_noise_line("|") is True
+        assert is_hallucinated_or_noise_line("[") is True
+        assert is_hallucinated_or_noise_line("]") is True
+
+        # Đường kẻ trang trí lặp lại
+        assert is_hallucinated_or_noise_line("144444444") is True
+        assert is_hallucinated_or_noise_line("44444") is True
+        assert is_hallucinated_or_noise_line("*****") is True
+        assert is_hallucinated_or_noise_line("-----") is True
+
+        # Dòng văn bản bình thường không bị lọc nhầm
+        assert is_hallucinated_or_noise_line("Cộng hòa Xã hội Chủ nghĩa Việt Nam") is False
+        assert is_hallucinated_or_noise_line("Hôm nay, vào lúc ...... giờ") is False
+        assert is_hallucinated_or_noise_line("1. Về phía Ban Giám Đốc Công ty có:") is False
+
+    def test_02_orphaned_brackets_and_footnote_cleanups(self):
+        """2. Làm sạch dấu ngoặc vuông '[' mồ côi đầu dòng và khôi phục footnote '*' từ '/'."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor, clean_orphaned_brackets
+
+        # Làm sạch ngoặc mồ côi
+        assert clean_orphaned_brackets("[3. Thư ký cuộc họp:") == "3. Thư ký cuộc họp:"
+        assert clean_orphaned_brackets("[Chủ trì cuộc họp") == "Chủ trì cuộc họp"
+        assert clean_orphaned_brackets("[dung của bản nội quy") == "dung của bản nội quy"
+        assert clean_orphaned_brackets("|dung của bản nội quy") == "dung của bản nội quy"
+
+        # Bảo toàn cặp ngoặc hợp lệ
+        assert clean_orphaned_brackets("[Icon] Trang chủ") == "[Icon] Trang chủ"
+        assert clean_orphaned_brackets("[Chủ trì cuộc họp]") == "[Chủ trì cuộc họp]"
+
+        # Khôi phục footnote '*' từ '/'
+        sample_footnote = "/Trừ trường hợp được miễn công tác, sinh hoạt đảng theo quy định"
+        cleaned_fn = VietnameseTextPostProcessor.clean_and_restore(sample_footnote)
+        assert cleaned_fn.startswith("* Trừ trường hợp")
+
+    def test_03_horizontal_form_line_merging(self):
+        """3. Gom đúng hàng ngang biểu mẫu có chấm lửng (không tách nhầm thành 2 cột)."""
+        from app.core.ocr_engine import OCRBox, _group_boxes_sliding_window, _box_info_list, join_ocr_line_boxes
+
+        boxes = [
+            OCRBox("+ Ông (bà): .........", 0.95, [[40, 200], [180, 200], [180, 225], [40, 225]]),
+            OCRBox("(ghi tên người đại diện theo pháp luật của Công ty).", 0.95, [[260, 200], [600, 200], [600, 225], [260, 225]]),
+            OCRBox("Chức danh:...........", 0.95, [[40, 235], [160, 235], [160, 260], [40, 260]]),
+            OCRBox("Chủ trì cuộc họp.", 0.95, [[260, 235], [420, 235], [420, 260], [260, 260]]),
+        ]
+
+        box_info = _box_info_list(boxes)
+        grouped = _group_boxes_sliding_window(box_info, page_min_x=40, page_w=800, gutter_thresh=60, median_h=25)
+        assert len(grouped) == 2, f"Phải gom thành đúng 2 dòng ngang, thực tế: {len(grouped)}"
+
+        line1_text = join_ocr_line_boxes(grouped[0])
+        line2_text = join_ocr_line_boxes(grouped[1])
+
+        assert "+ Ông (bà): ......" in line1_text
+        assert "(ghi tên người đại diện" in line1_text
+        assert "Chức danh: ......" in line2_text
+        assert "Chủ trì cuộc họp." in line2_text
+
+    def test_04_scorecard_text_postprocessing(self):
+        """4. Xác minh '0s' -> '05', '% so với quy định' -> '½' và bullet '-' -> '+'."""
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+
+        line_score = "1 | Chấp hành thời gian, thời lượng sinh hoạt | 05 | 0s"
+        cleaned_score = VietnameseTextPostProcessor.clean_and_restore(line_score)
+        assert "05 | 05" in cleaned_score
+        assert "0s" not in cleaned_score
+
+        line_half1 = "Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định"
+        cleaned_half1 = VietnameseTextPostProcessor.clean_and_restore(line_half1)
+        assert "chỉ bằng ½ so với quy định" in cleaned_half1
+
+        line_half2 = "Thời gian sinh hoạt chi bộ dưới % so với quy định"
+        cleaned_half2 = VietnameseTextPostProcessor.clean_and_restore(line_half2)
+        assert "dưới ½ so với quy định" in cleaned_half2
+
+    def test_05_dot_valley_crop_splitting(self):
+        """5. Phân tích hình thái học cắt sub-crops cho dòng dài có dải chấm lửng."""
+        import cv2
+        import numpy as np
+        from app.core.ocr_engine import split_dotted_line_crop
+
+        h, w = 30, 600
+        img = np.ones((h, w, 3), dtype=np.uint8) * 255
+
+        # Cụm chữ 1: x in [15, 95]
+        cv2.rectangle(img, (15, 5), (95, 25), (0, 0, 0), -1)
+        # Thung lũng chấm lửng 1: x in [96, 184]
+        cv2.circle(img, (120, 27), 2, (0, 0, 0), -1)
+        cv2.circle(img, (150, 27), 2, (0, 0, 0), -1)
+
+        # Cụm chữ 2: x in [185, 235]
+        cv2.rectangle(img, (185, 5), (235, 25), (0, 0, 0), -1)
+        # Thung lũng chấm lửng 2: x in [236, 324]
+        cv2.circle(img, (260, 27), 2, (0, 0, 0), -1)
+        cv2.circle(img, (290, 27), 2, (0, 0, 0), -1)
+
+        # Cụm chữ 3: x in [325, 415]
+        cv2.rectangle(img, (325, 5), (415, 25), (0, 0, 0), -1)
+
+        sub_crops = split_dotted_line_crop(img)
+        assert len(sub_crops) >= 3, f"Dòng chấm lửng phải được tách thành ít nhất 3 lát cắt, thực tế: {len(sub_crops)}"
+
+    def test_06_spell_checker_chi_bo_protection(self):
+        """6. Không bôi đỏ chữ Chi / chi trong 'Chi bộ' / 'chi bộ' / 'chi ủy', chỉ bắt lỗi 'đồng chi'."""
+        from app.core.spell_corrector import check_text_spelling
+
+        text1 = "Chi bộ dưới 30 đảng viên; Thời gian sinh hoạt chi bộ"
+        errs1 = check_text_spelling(text1)
+        assert errs1 == [], f"Không được báo lỗi trên 'Chi bộ' / 'chi bộ', thực tế: {errs1}"
+
+        text2 = "Thời gian sinh hoạt chi ủy"
+        errs2 = check_text_spelling(text2)
+        assert errs2 == [], f"Không được báo lỗi trên 'chi ủy', thực tế: {errs2}"
+
+        text3 = "Các đồng chi tham dự cuộc họp"
+        errs3 = check_text_spelling(text3)
+        assert len(errs3) == 1
+        assert errs3[0].token.lower() == "chi"
+        assert any(s.lower() == "chí" for s in errs3[0].suggestions)
+
+        text4 = "chỉ bộ tổ chức sinh hoạt"
+        errs4 = check_text_spelling(text4)
+        assert len(errs4) == 1
+        assert errs4[0].token.lower() == "chỉ"
+        assert any(s.lower() == "chi" for s in errs4[0].suggestions)
+
+        text5 = "Các thành viên trao đổi thảo luận"
+        errs5 = check_text_spelling(text5)
+        assert errs5 == [], f"Cụm 'trao đổi' phải được bảo vệ, thực tế: {errs5}"
+
+
+class TestMasterPromptUpgradeCVAndCropPipeline:
+    """
+    Test suite cho toàn bộ 5 cơ chế nâng cấp trong Master Prompt:
+    1. assess_image_quality & Quality-Aware Adaptive Preprocessing
+    2. clean_crop_borders (Border line stripping)
+    3. pad_small_crop_for_vietocr (Aspect-ratio padding)
+    4. is_decorative_pattern_crop & is_decorative_or_hallucinated
+    5. final_document_cleanup
+    6. spell_corrector contextual protection (chi, đổi, khoản, lượng)
+    """
+
+    def test_01_assess_image_quality_and_adaptive_preprocessing(self):
+        """1. Đánh giá chất lượng ảnh văn bản sạch vs ảnh tối/mờ và tắt CLAHE trên ảnh sạch."""
+        import cv2
+        import numpy as np
+        from app.core.ocr_engine import assess_image_quality, OCREngine
+
+        # 1.a. Giả lập ảnh văn bản sạch (nền trắng 255, chữ đen 0)
+        clean_img = np.full((100, 200, 3), 255, dtype=np.uint8)
+        clean_img[40:60, 20:180] = 0  # Chữ đen
+        quality_clean = assess_image_quality(clean_img)
+
+        assert quality_clean["is_clean_document"] is True
+        assert quality_clean["bg_level"] >= 195.0
+        assert quality_clean["contrast_span"] >= 90.0
+
+        # Kiểm tra tiền xử lý ảnh sạch: không bị làm mờ/haloing bởi CLAHE
+        proc_clean = OCREngine.preprocess_image(clean_img, min_side=850)
+        assert proc_clean is not None
+        assert min(proc_clean.shape[:2]) >= 100
+
+        # 1.b. Giả lập ảnh tối/bóng mờ (nền xám 120, chữ 80 -> tương phản thấp)
+        dark_img = np.full((100, 200, 3), 120, dtype=np.uint8)
+        dark_img[40:60, 20:180] = 80
+        quality_dark = assess_image_quality(dark_img)
+
+        assert quality_dark["is_clean_document"] is False
+
+    def test_02_clean_crop_borders(self):
+        """2. Tẩy đường kẻ bảng sát mép cắt (trên, dưới, trái, phải) và bảo vệ chữ cái I, 1, l."""
+        import numpy as np
+        from app.core.ocr_engine import clean_crop_borders
+
+        h, w = 36, 120
+        # Ảnh nền trắng 255
+        crop = np.full((h, w, 3), 255, dtype=np.uint8)
+
+        # Giả lập đường kẻ ngang đen ở hàng y=0 (kéo dài suốt chiều rộng)
+        crop[0, :] = 0
+        # Giả lập đường kẻ dọc đen ở cột x=0 (kéo dài suốt chiều cao)
+        crop[:, 0] = 0
+        # Giả lập chữ cái I ở vị trí x=20, y từ 10 đến 26 (cao 16px, < 82% h)
+        crop[10:26, 20:23] = 0
+
+        cleaned = clean_crop_borders(crop)
+
+        # Hàng y=0 phải được tô lại màu nền trắng
+        assert np.all(cleaned[0, :] > 200), "Đường kẻ ngang y=0 phải được tẩy sạch"
+        # Cột x=0 phải được tô lại màu nền trắng
+        assert np.all(cleaned[:, 0] > 200), "Đường kẻ dọc x=0 phải được tẩy sạch"
+        # Chữ cái I ở x=20 không được bị xóa
+        assert np.any(cleaned[10:26, 20:23] == 0), "Chữ cái I ở trung tâm crop phải được giữ nguyên"
+
+    def test_03_pad_small_crop_for_vietocr(self):
+        """3. Đệm canvas trắng hai bên cho ô hẹp (w < 2.5 * h) và upscale h < 36 lên 44."""
+        import numpy as np
+        from app.core.ocr_engine import pad_small_crop_for_vietocr
+
+        # Ô số ngắn 05 có h=24, w=30 (w < 2.5 * h)
+        h_small, w_small = 24, 30
+        crop_num = np.full((h_small, w_small, 3), 255, dtype=np.uint8)
+        crop_num[6:18, 10:20] = 0
+
+        padded = pad_small_crop_for_vietocr(crop_num)
+
+        assert padded.shape[0] == 44, f"Chiều cao phải được upscale lên 44, thực tế: {padded.shape[0]}"
+        assert padded.shape[1] > w_small + 28, f"Chiều rộng phải được đệm trắng hai bên, thực tế: {padded.shape[1]}"
+
+        # Dòng chữ dài thông thường (w >= 2.5 * h) không bị padding thêm
+        h_wide, w_wide = 30, 200
+        crop_wide = np.full((h_wide, w_wide, 3), 255, dtype=np.uint8)
+        unpadded = pad_small_crop_for_vietocr(crop_wide)
+        assert unpadded.shape == (h_wide, w_wide, 3), "Dòng chữ dài không bị biến đổi kích thước"
+
+    def test_04_decorative_pattern_crop_and_hallucination_filter(self):
+        """4. Nhận diện dải hoa văn trang trí và lọc bỏ dòng ảo giác lặp từ / chuỗi rác."""
+        import numpy as np
+        import cv2
+        from app.core.ocr_engine import is_decorative_pattern_crop, is_decorative_or_hallucinated
+
+        # 4.a. Tạo lát cắt chứa dải chấm nhỏ sát đáy (hoa văn trang trí)
+        h, w = 24, 150
+        deco_crop = np.full((h, w, 3), 255, dtype=np.uint8)
+        for x in range(10, 140, 12):
+            cv2.circle(deco_crop, (x, 21), 2, (0, 0, 0), -1)
+
+        assert is_decorative_pattern_crop(deco_crop) is True, "Dải chấm nhỏ sát đáy phải được nhận diện là hoa văn"
+        assert is_decorative_or_hallucinated("*******", deco_crop) is True
+
+        # 4.b. Chuỗi text ảo giác lặp từ
+        assert is_decorative_or_hallucinated("đặc đặc đặc đặc đặc") is True
+        assert is_decorative_or_hallucinated("144444444") is True
+        assert is_decorative_or_hallucinated("%") is True
+        assert is_decorative_or_hallucinated("[") is True
+
+        # Văn bản hợp lệ không bị lọc
+        assert is_decorative_or_hallucinated("Chi bộ Văn phòng HĐND và UBND xã") is False
+
+    def test_05_final_document_cleanup(self):
+        """5. Chuẩn hóa cuối cùng trong final_document_cleanup (bảo toàn casing, sửa số, phân số, gạch đầu dòng)."""
+        from app.core.ocr_engine import final_document_cleanup
+
+        # 5.a. Chuẩn hóa chi bộ bảo toàn casing
+        assert final_document_cleanup("CHI BỐ VĂN PHÒNG") == "CHI BỘ VĂN PHÒNG"
+        assert final_document_cleanup("CHỈ BỘ VĂN PHÒNG") == "CHI BỘ VĂN PHÒNG"
+        assert final_document_cleanup("Chi bố Văn phòng") == "Chi bộ Văn phòng"
+        assert final_document_cleanup("Chỉ bộ Văn phòng") == "Chi bộ Văn phòng"
+        assert final_document_cleanup("sinh hoạt chi bố") == "sinh hoạt chi bộ"
+        assert final_document_cleanup("sinh hoạt chỉ bộ") == "sinh hoạt chi bộ"
+
+        # 5.b. sinh hoatchi -> sinh hoạt chi
+        assert final_document_cleanup("Tỷ lệ đảng viên dự sinh hoatchi bộ") == "Tỷ lệ đảng viên dự sinh hoạt chi bộ"
+
+        # 5.c. (\d+) đồng ch -> \1 đồng chí
+        assert final_document_cleanup("Số lượng 14 đồng ch.") == "Số lượng 14 đồng chí."
+        assert final_document_cleanup("Có mặt: 14 đồng ch.") == "- Có mặt: 14 đồng chí."
+        assert final_document_cleanup("Vắng mặt: 0 đồng ch") == "- Vắng mặt: 0 đồng chí"
+
+        # 5.d. Sửa 0s -> 05
+        assert final_document_cleanup("Điểm tự chấm: 0s | 0s") == "Điểm tự chấm: 05 | 05"
+
+        # 5.e. Sửa % so với quy định -> ½
+        assert final_document_cleanup("chỉ bằng % so với quy định") == "chỉ bằng ½ so với quy định"
+
+        # 5.f. Sửa /Trừ trường hợp -> * Trừ trường hợp
+        assert final_document_cleanup("/Trừ trường hợp đặc biệt") == "* Trừ trường hợp đặc biệt"
+
+        # 5.g. Xóa [ mồ côi
+        assert final_document_cleanup("[3. Thư ký cuộc họp") == "3. Thư ký cuộc họp"
+
+        # 5.h. Khôi phục dấu '- ' đầu dòng biên bản
+        raw_mins = (
+            "Lý do: Tổ chức sinh hoạt chi bộ định kỳ\n"
+            "Giới thiệu đại biểu: không có\n"
+            "Miễn sinh hoạt: 0 đồng chí\n"
+            "Có mặt: 14 đồng chí\n"
+            "Vắng mặt: 0 đồng chí"
+        )
+        cleaned_mins = final_document_cleanup(raw_mins)
+        assert "- Lý do: Tổ chức sinh hoạt chi bộ định kỳ" in cleaned_mins
+        assert "- Giới thiệu đại biểu: không có" in cleaned_mins
+        assert "- Miễn sinh hoạt: 0 đồng chí" in cleaned_mins
+        assert "- Có mặt: 14 đồng chí" in cleaned_mins
+        assert "- Vắng mặt: 0 đồng chí" in cleaned_mins
+
+    def test_06_spell_corrector_protected_words_and_real_errors(self):
+        """6. Spell corrector bảo vệ tuyệt đối chi, đổi, khoản, lượng và bắt lỗi chính xác."""
+        from app.core.spell_corrector import check_text_spelling
+
+        # 6.a. Các cụm từ ĐÚNG được bảo vệ tuyệt đối
+        text_safe = (
+            "Thời gian sinh hoạt chi bộ định kỳ. "
+            "Chi ủy chuẩn bị nội dung và thời lượng 90 phút. "
+            "Các thành viên trao đổi thảo luận theo điều khoản quy định."
+        )
+        errs_safe = check_text_spelling(text_safe)
+        assert errs_safe == [], f"Không được gắn cờ lỗi trên văn bản đúng, thực tế: {errs_safe}"
+
+        # 6.b. Bắt lỗi chính xác từ sai thực sự
+        errs_vdng = check_text_spelling("Vdng mặt: 0 đồng chí")
+        assert len(errs_vdng) == 1
+        assert errs_vdng[0].token == "Vdng"
+
+        errs_chibo = check_text_spelling("chỉ bộ sinh hoạt")
+        assert len(errs_chibo) == 1
+        assert errs_chibo[0].token == "chỉ"
+
+        errs_chibo_caps = check_text_spelling("CHI BỐ HỌP ĐỊNH KỲ")
+        assert len(errs_chibo_caps) == 1
+        assert errs_chibo_caps[0].token == "BỐ"
+
+        errs_du = check_text_spelling("Đảng viên dư sinh hoạt")
+        assert len(errs_du) == 1
+        assert errs_du[0].token == "dư"
+
+
+class TestImageSpecificFixes698And6a0:
+    """Kiểm thử các bản sửa lỗi cụ thể trên image_698e9c.jpg và image_6a0da4.jpg."""
+
+    def test_01_khong_co_and_so_hieu_van_ban(self):
+        """1. Khôi phục 'không c' -> 'không có.' và dấu gạch nối số hiệu 'Số 01 BB/CB' -> 'Số 01-BB/CB'."""
+        from app.core.ocr_engine import final_document_cleanup
+
+        # Khôi phục chữ bị cắt mép phải
+        assert final_document_cleanup("Giới thiệu đại biểu: không c") == "- Giới thiệu đại biểu: không có."
+        assert final_document_cleanup("- Giới thiệu đại biểu: không c") == "- Giới thiệu đại biểu: không có."
+        assert final_document_cleanup("Giới thiệu đại biểu: không c.") == "- Giới thiệu đại biểu: không có."
+
+        # Khôi phục dấu gạch nối trong số hiệu văn bản
+        assert final_document_cleanup("Số 01 BB/CB") == "Số 01-BB/CB"
+        assert final_document_cleanup("Số: 01 BB/CB") == "Số: 01-BB/CB"
+        assert final_document_cleanup("Số 12 QĐ/UBND") == "Số 12-QĐ/UBND"
+
+    def test_02_clean_crop_borders_right_edge_threshold(self):
+        """1.b. clean_crop_borders không xóa mép phải nếu chiều cao nét đen < 92% h."""
+        import numpy as np
+        from app.core.ocr_engine import clean_crop_borders
+
+        h, w = 50, 100
+        # Nền trắng (255)
+        crop = np.full((h, w, 3), 255, dtype=np.uint8)
+
+        # Cột w-2 có 43 pixel đen (43 / 50 = 86% < 92%)
+        # Với ngưỡng mới 92%, cột này KHÔNG bị tẩy thành nền trắng
+        crop[:43, w - 2] = 0
+
+        cleaned = clean_crop_borders(crop)
+        # Kiểm tra cột w-2 vẫn giữ nguyên nét đen
+        assert np.any(cleaned[:43, w - 2] == 0), "Cột mép phải có mật độ đen 86% (<92%) không được bị tẩy"
+
+        # Cột w-1 có 48 pixel đen (48 / 50 = 96% >= 92% -> đường kẻ khung)
+        crop_line = np.full((h, w, 3), 255, dtype=np.uint8)
+        crop_line[:48, w - 1] = 0
+        cleaned_line = clean_crop_borders(crop_line)
+        # Cột w-1 phải được tẩy vì >= 92% h
+        assert np.all(cleaned_line[:, w - 1] == 255), "Cột mép phải có mật độ đen >=92% phải được tẩy"
+
+    def test_03_table_header_da_to_diem_toi_da(self):
+        """2. Tiêu đề cột 'đa' / 'tối đa' nằm giữa 'Tiêu chí đánh giá' và 'Điểm tự chấm' -> 'Điểm tối đa'."""
+        from app.core.ocr_engine import final_document_cleanup, detect_and_reconstruct_table, OCRBox
+
+        # Chuẩn hóa qua regex trong final_document_cleanup
+        row = "STT | Tiêu chí đánh giá | đa | Điểm tự chấm | Ghi chú"
+        assert final_document_cleanup(row) == "STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú"
+
+        row_toi_da = "STT | Tiêu chí đánh giá | tối đa | Điểm tự chấm | Ghi chú"
+        assert final_document_cleanup(row_toi_da) == "STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú"
+
+        # Chuẩn hóa qua detect_and_reconstruct_table
+        boxes = [
+            # Header
+            OCRBox(text="STT", bbox=[[10, 10], [40, 10], [40, 30], [10, 30]], confidence=0.95),
+            OCRBox(text="Tiêu chí đánh giá", bbox=[[50, 10], [200, 10], [200, 30], [50, 30]], confidence=0.95),
+            OCRBox(text="đa", bbox=[[210, 10], [250, 10], [250, 30], [210, 30]], confidence=0.95),
+            OCRBox(text="Điểm tự chấm", bbox=[[260, 10], [350, 10], [350, 30], [260, 30]], confidence=0.95),
+            OCRBox(text="Ghi chú", bbox=[[360, 10], [420, 10], [420, 30], [360, 30]], confidence=0.95),
+            # Row 1
+            OCRBox(text="1", bbox=[[10, 40], [40, 40], [40, 60], [10, 60]], confidence=0.95),
+            OCRBox(text="Tỷ lệ đảng viên dự sinh hoạt", bbox=[[50, 40], [200, 40], [200, 60], [50, 60]], confidence=0.95),
+            OCRBox(text="05", bbox=[[210, 40], [250, 40], [250, 60], [210, 60]], confidence=0.95),
+            OCRBox(text="05", bbox=[[260, 40], [350, 40], [350, 60], [260, 60]], confidence=0.95),
+            # Row 2
+            OCRBox(text="2", bbox=[[10, 70], [40, 70], [40, 90], [10, 90]], confidence=0.95),
+            OCRBox(text="Thời gian sinh hoạt chi bộ", bbox=[[50, 70], [200, 70], [200, 90], [50, 90]], confidence=0.95),
+            OCRBox(text="05", bbox=[[210, 70], [250, 70], [250, 90], [210, 90]], confidence=0.95),
+            OCRBox(text="05", bbox=[[260, 70], [350, 70], [350, 90], [260, 90]], confidence=0.95),
+        ]
+        box_info = []
+        for b in boxes:
+            l = min(pt[0] for pt in b.bbox)
+            r = max(pt[0] for pt in b.bbox)
+            t = min(pt[1] for pt in b.bbox)
+            bt = max(pt[1] for pt in b.bbox)
+            box_info.append({
+                "box": b,
+                "text": b.text,
+                "left": l,
+                "right": r,
+                "top": t,
+                "bottom": bt,
+                "w": r - l,
+                "h": bt - t,
+                "cy": (t + bt) / 2.0,
+            })
+        tbl, _, _, _ = detect_and_reconstruct_table(box_info, 10, 420, 1000, 20.0)
+        assert tbl is not None
+        assert tbl.grid[0][2] == "Điểm tối đa", f"Ô header 'đa' phải được đổi thành 'Điểm tối đa', thực tế: '{tbl.grid[0][2]}'"
+
+    def test_04_chi_bo_phan_so_bullet_asterisk(self):
+        """3. Chuẩn hóa 'chỉ bồ' -> 'chi bộ', phân số ½, bullet '+' và '* Trừ'."""
+        from app.core.ocr_engine import final_document_cleanup
+
+        # 3.1. Sửa chỉ bồ / chi bồ / chỉ bộ / chi bố -> chi bộ (bảo toàn hoa/thường)
+        assert final_document_cleanup("2 | Tỷ lệ đảng viên dư sinh hoạt chỉ bồ | 05 | 05") == "2 | Tỷ lệ đảng viên dư sinh hoạt chi bộ | 05 | 05"
+        assert final_document_cleanup("Tỷ lệ đảng viên dự sinh hoạt chi bồ") == "Tỷ lệ đảng viên dự sinh hoạt chi bộ"
+        assert final_document_cleanup("CHỈ BỒ ĐẢNG ỦY") == "CHI BỘ ĐẢNG ỦY"
+        assert final_document_cleanup("Chỉ bồ Đảng ủy") == "Chi bộ Đảng ủy"
+
+        # 3.2. Thay thế % và ％ thành ½
+        assert final_document_cleanup("chỉ bằng % so với quy định") == "chỉ bằng ½ so với quy định"
+        assert final_document_cleanup("dưới % so với quy định") == "dưới ½ so với quy định"
+        assert final_document_cleanup("chỉ bằng ％ so với quy định") == "chỉ bằng ½ so với quy định"
+        assert final_document_cleanup("dưới ％ so với quy định") == "dưới ½ so với quy định"
+
+        # 3.3. Bảo toàn bullet '+' cho tiêu chí con có điểm | 0\d
+        sub_row = "- Chi bộ dưới 30 đảng viên ít nhất 90 phút | 05 | 05"
+        assert final_document_cleanup(sub_row) == "+ Chi bộ dưới 30 đảng viên ít nhất 90 phút | 05 | 05"
+
+        sub_row_time = "- Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút | 03"
+        assert final_document_cleanup(sub_row_time) == "+ Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút | 03"
+
+        # 3.4. Thêm khoảng trắng sau dấu * ở dòng chú thích
+        assert final_document_cleanup("*Trừ trường hợp đặc biệt") == "* Trừ trường hợp đặc biệt"
+        assert final_document_cleanup("*  Trừ trường hợp có lý do chính đáng") == "* Trừ trường hợp có lý do chính đáng"
+
+    def test_05_spell_corrector_dư_hoạt_chỉ_bồ(self):
+        """4. Spell corrector: KHÔNG bôi đỏ 'hoạt', chỉ bôi đỏ 'dư' (gợi ý 'dự'), bắt đúng 'chỉ bồ'."""
+        from app.core.spell_corrector import check_text_spelling
+
+        # Kiểm tra chuỗi gốc trong prompt
+        raw_text = "2 | Tỷ lệ đảng viên dư sinh hoạt chỉ bồ | 05 | 05"
+        errs = check_text_spelling(raw_text)
+
+        tokens_flagged = [e.token for e in errs]
+        # 'hoạt' TUYỆT ĐỐI không bao giờ bị gắn cờ
+        assert "hoạt" not in tokens_flagged, f"'hoạt' không được bị bôi đỏ, danh sách bị cờ: {tokens_flagged}"
+
+        # 'dư' bị gắn cờ với gợi ý 'dự'
+        err_du = next((e for e in errs if e.token == "dư"), None)
+        assert err_du is not None, "Từ 'dư' phải bị gắn cờ lỗi ngữ cảnh"
+        assert err_du.suggestions[0] == "dự", f"Gợi ý đầu tiên cho 'dư' phải là 'dự', thực tế: {err_du.suggestions}"
+
+        # 'chỉ' bị gắn cờ với gợi ý 'chi'
+        err_chi = next((e for e in errs if e.token == "chỉ"), None)
+        assert err_chi is not None, "Từ 'chỉ' trong 'chỉ bồ' phải bị gắn cờ lỗi"
+        assert err_chi.suggestions[0] == "chi", f"Gợi ý đầu tiên cho 'chỉ' phải là 'chi', thực tế: {err_chi.suggestions}"
+
+        # 'bồ' bị gắn cờ với gợi ý 'bộ'
+        err_bo = next((e for e in errs if e.token == "bồ"), None)
+        assert err_bo is not None, "Từ 'bồ' trong 'chỉ bồ' phải bị gắn cờ lỗi"
+        assert err_bo.suggestions[0] == "bộ", f"Gợi ý đầu tiên cho 'bồ' phải là 'bộ', thực tế: {err_bo.suggestions}"
+
+        # Kiểm tra cụm 'chi bồ': chỉ bắt lỗi 'bồ' (gợi ý 'bộ'), 'chi' không bị bắt lỗi
+        errs_chi_bo = check_text_spelling("sinh hoạt chi bồ")
+        tokens_chi_bo = [e.token for e in errs_chi_bo]
+        assert "chi" not in tokens_chi_bo, "'chi' trong 'chi bồ' là đúng, không gắn cờ"
+        assert "bồ" in tokens_chi_bo, "'bồ' trong 'chi bồ' phải bị gắn cờ"
+        err_bồ_only = next(e for e in errs_chi_bo if e.token == "bồ")
+        assert err_bồ_only.suggestions[0] == "bộ"
+
+    def test_06_bien_ban_structure_and_roman_numeral_restoration(self):
+        """Khôi phục tiêu đề BIÊN BẢN, đề mục I. Thành phần tham dự và chuẩn hóa II. Nội dung cuộc họp."""
+        from app.core.ocr_engine import final_document_cleanup, ContextSymbolRecovery
+
+        sample = (
+            "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\n"
+            "Độc lập - Tự do - Hạnh phúc\n"
+            "Lấy ý kiến tập thể lao động về nội dung Nội quy lao động\n"
+            "1. Đại diện Công ty:\n"
+            "- Ông Nguyễn Văn A - Giám đốc\n"
+            "2. Đại diện người lao động:\n"
+            "- Bà Trần Thị B - Chủ tịch Công đoàn\n"
+            "IL. Nội dung cuộc họp\n"
+            "- Ghi nhận các ý kiến...\n"
+            "III. Kết luận cuộc họp"
+        )
+        cleaned = final_document_cleanup(sample)
+        assert "BIÊN BẢN\nLấy ý kiến tập thể lao động" in cleaned, "BIÊN BẢN phải được khôi phục trên tiêu đề phụ"
+        assert "I. Thành phần tham dự\n1. Đại diện Công ty:" in cleaned, "I. Thành phần tham dự phải được khôi phục"
+        assert "II. Nội dung cuộc họp" in cleaned, "IL. phải đổi thành II. Nội dung cuộc họp"
+        assert "III. Nội dung cuộc họp" not in cleaned, "Tuyệt đối không biến thành III. Nội dung cuộc họp"
+        assert "III. Kết luận cuộc họp" in cleaned
+
+        # Kiểm tra tính tuần tự trong ContextSymbolRecovery
+        raw_lines = [
+            "I. Thành phần tham dự",
+            "IL. Nội dung cuộc họp",
+            "III. Kết luận cuộc họp",
+        ]
+        rec_lines, _ = ContextSymbolRecovery.recover_document_symbols(raw_lines)
+        assert rec_lines[1] == "II. Nội dung cuộc họp", f"IL. phải đổi thành II., thực tế: {rec_lines[1]}"
+
+        # Trùng lặp 2 mục III: 'III. Nội dung cuộc họp' và 'III. Kết luận cuộc họp'
+        dup_lines = [
+            "I. Khai mạc",
+            "III. Nội dung cuộc họp",
+            "III. Kết luận cuộc họp",
+        ]
+        rec_dup, _ = ContextSymbolRecovery.recover_document_symbols(dup_lines)
+        assert rec_dup[1] == "II. Nội dung cuộc họp", f"Mục đầu tiên phải đổi thành II., thực tế: {rec_dup[1]}"
+
+    def test_07_clean_orphaned_brackets_and_slash_bullet(self):
+        """Làm sạch ký tự rác đầu dòng [Ưng và / -Ghi nhận."""
+        from app.core.ocr_engine import final_document_cleanup, clean_orphaned_brackets
+
+        # 1. [Ưng -> Ưng
+        assert clean_orphaned_brackets("[Ưng") == "Ưng"
+        assert clean_orphaned_brackets("  [Ưng") == "  Ưng"
+        assert clean_orphaned_brackets("CÔNG TY KẾ TOÁN THIÊN [Ưng") == "CÔNG TY KẾ TOÁN THIÊN Ưng"
+        assert clean_orphaned_brackets("[Đoàn") == "Đoàn"
+        assert clean_orphaned_brackets("[Ấn bản") == "Ấn bản"
+
+        # Cặp ngoặc hợp lệ không bị xóa
+        assert clean_orphaned_brackets("[Ghi chú: xem trang 2]") == "[Ghi chú: xem trang 2]"
+
+        # 2. / -Ghi nhận -> - Ghi nhận
+        cleaned_slash = final_document_cleanup("/ -Ghi nhận các ý kiến đóng góp")
+        assert cleaned_slash == "- Ghi nhận các ý kiến đóng góp"
+        assert final_document_cleanup("  | -Ghi nhận ý kiến") == "  - Ghi nhận ý kiến"
+        assert final_document_cleanup("\\ -Nội dung") == "- Nội dung"
+
+    def test_08_percent_to_half_and_asterisk_tru(self):
+        """Khóa chốt thay thế % -> ½ và *Trừ -> * Trừ."""
+        from app.core.ocr_engine import final_document_cleanup
+
+        # % -> ½
+        assert final_document_cleanup("- Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định | 02") == "+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02"
+        assert final_document_cleanup("- Thời gian sinh hoạt chi bộ dưới % so với quy định | 01") == "+ Thời gian sinh hoạt chi bộ dưới ½ so với quy định | 01"
+        assert final_document_cleanup("dưới %") == "dưới ½"
+
+        # *Trừ -> * Trừ
+        assert final_document_cleanup("*Trừ trường hợp được miễn công tác...") == "* Trừ trường hợp được miễn công tác..."
+        assert final_document_cleanup("/*Trừ trường hợp...") == "* Trừ trường hợp..."
+        assert final_document_cleanup("1* Trừ trường hợp...") == "* Trừ trường hợp..."
+
+    def test_09_spell_corrector_ke_the_luat_never_flagged(self):
+        """Spell Corrector: Không bao giờ bôi đỏ nhầm 'Kế', 'thể', 'luật'."""
+        from app.core.spell_corrector import check_text_spelling
+
+        sample_text = (
+            "Công ty TNHH Dịch Vụ Kế Toán Thiên Ưng\n"
+            "Lấy ý kiến toàn thể cán bộ\n"
+            "tập thể người lao động\n"
+            "các quy định của pháp \n luật hiện hành"
+        )
+        errors = check_text_spelling(sample_text)
+        flagged_tokens = [e.token.lower() for e in errors]
+
+        assert "kế" not in flagged_tokens, f"'kế' không được bị bôi đỏ: {flagged_tokens}"
+        assert "thể" not in flagged_tokens, f"'thể' không được bị bôi đỏ: {flagged_tokens}"
+        assert "luật" not in flagged_tokens, f"'luật' không được bị bôi đỏ (kể cả khi ngắt dòng): {flagged_tokens}"
+
+    def test_10_ocr_result_properties(self):
+        """OCRResult cung cấp text và lines tương thích."""
+        from app.core.ocr_engine import OCRResult, OCRBox
+
+        boxes = [
+            OCRBox("Dòng 1", 0.95, [[0, 0], [10, 0], [10, 10], [0, 10]]),
+            OCRBox("Dòng 2", 0.98, [[0, 20], [10, 20], [10, 30], [0, 30]]),
+        ]
+        res = OCRResult(boxes=boxes, full_text="Dòng 1\nDòng 2")
+        assert res.text == "Dòng 1\nDòng 2"
+        assert res.lines == ["Dòng 1", "Dòng 2"]
+
+    def test_11_master_prompt_line_exact_verification(self):
+        """Kiểm tra trực tiếp các trường hợp được chỉ định trong Master Prompt."""
+        from app.core.ocr_engine import final_document_cleanup
+        from app.core.spell_corrector import check_text_spelling
+
+        # 1.1 final_document_cleanup: bảng điểm & phân số
+        assert final_document_cleanup("- Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định | 02") == "+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02"
+
+        # 1.2 final_document_cleanup: *Trừ trường hợp
+        assert final_document_cleanup("*Trừ trường hợp được miễn công tác") == "* Trừ trường hợp được miễn công tác"
+
+        # 1.3 final_document_cleanup: Thà Thành phần tham dự deduplication
+        dedup_res = final_document_cleanup("Thà Thành phần tham dự\nI. Thành phần tham dự")
+        assert dedup_res == "I. Thành phần tham dự", f"Thực tế: {repr(dedup_res)}"
+
+        # 1.4 final_document_cleanup: Khôi phục phụ đề dưới BIÊN BẢN nhảy thẳng xuống Hôm nay
+        sub_sample = (
+            "BIÊN BẢN\n"
+            "Hôm nay, vào lúc 08 giờ 30...\n"
+            "Nội quy lao động"
+        )
+        sub_cleaned = final_document_cleanup(sub_sample)
+        assert "BIÊN BẢN\nLấy ý kiến tập thể lao động về nội dung Nội quy lao động\nHôm nay" in sub_cleaned
+
+        # 2. check_text_spelling: 0 lỗi cho 'đầy đủ' và 'Cuộc họp'
+        errs_1 = check_text_spelling("14/14 đảng viên thực hiện nộp đảng phí đầy đủ theo quy định.")
+        assert errs_1 == [], f"Không được có lỗi với câu 'đầy đủ': {[(e.token, e.suggestions) for e in errs_1]}"
+
+        errs_2 = check_text_spelling("Cuộc họp kết thúc vào 11 giờ 30 cùng ngày.")
+        assert errs_2 == [], f"Không được có lỗi với câu 'Cuộc họp': {[(e.token, e.suggestions) for e in errs_2]}"
+
+    def test_12_direct_replacement_and_tail_preservation(self):
+        """Kiểm tra 4 điểm sửa trực diện: cột chấm, phân số ½, bullet +, Cuộc hơp, năm 2026."""
+        from app.core.ocr_engine import final_document_cleanup, split_dotted_line_crop
+        from app.core.spell_corrector import check_text_spelling
+        import numpy as np
+
+        # 1. Khôi phục tiêu đề cột thứ 4: | chấm | -> | Điểm tự chấm |
+        sample_hdr = "STT | Tiêu chí đánh giá | Điểm tối đa | chấm | Ghi chú"
+        assert final_document_cleanup(sample_hdr) == "STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú"
+
+        sample_hdr_tu = "STT | Tiêu chí đánh giá | Điểm tối đa | tự chấm | Ghi chú"
+        assert final_document_cleanup(sample_hdr_tu) == "STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú"
+
+        # 2. Thay thế trực tiếp % thành ½ và đổi - thành +
+        sample_table = (
+            "STT | Tiêu chí đánh giá | Điểm tối đa | chấm | Ghi chú\n"
+            "1 | Chấp hành thời gian, thời lượng sinh hoạt | 05 | 05\n"
+            "- Chi bộ dưới 30 đảng viên ít nhất 90 phút; chi bộ trên 30 đảng viên ít nhất 120 phút | 05 | 05\n"
+            "- Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút | 04\n"
+            "- Thời gian sinh hoạt chi bộ ít hơn quy định 15 - 30 phút | 03\n"
+            "- Thời gian sinh hoạt chi bộ chỉ bằng % so với quy định | 02\n"
+            "- Thời gian sinh hoạt chi bộ dưới ½ so với quy định | 01\n"
+            "2 | Tỷ lệ đảng viên dự sinh hoạt chi bộ | 05 | 05\n"
+            "- Từ 90% trở lên | 04 | 04\n"
+            "- Từ 75% đến dưới 90% | 03\n"
+            "- Từ 65% đến dưới 75% | 02\n"
+            "- Dưới 60% hoặc có đảng viên vắng không có lý do | 01\n"
+            "- Không có đảng viên vắng mặt có lý do quá 03 lần liên tiếp trong năm | 01 | 01\n"
+            "*Trừ trường hợp được miễn công tác, sinh hoạt đảng theo quy định"
+        )
+        cleaned_table = final_document_cleanup(sample_table)
+        assert "| Điểm tối đa | Điểm tự chấm | Ghi chú" in cleaned_table
+        assert "+ Chi bộ dưới 30 đảng viên" in cleaned_table
+        assert "+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02" in cleaned_table
+        assert "+ Thời gian sinh hoạt chi bộ dưới ½ so với quy định | 01" in cleaned_table
+        assert "+ Từ 90% trở lên | 04 | 04" in cleaned_table
+        assert "* Trừ trường hợp được miễn công tác" in cleaned_table
+
+        # 3. Sửa Cuộc hơp -> Cuộc họp và không bị bắt lỗi chính tả
+        hop_sample = "Cuộc hơp kết thúc vào 11 giờ 30 cùng ngày."
+        hop_cleaned = final_document_cleanup(hop_sample)
+        assert hop_cleaned == "Cuộc họp kết thúc vào 11 giờ 30 cùng ngày."
+        assert check_text_spelling(hop_cleaned) == []
+
+        # 4. Sửa lỗi cắt mất số cuối dòng: năm 202 -> năm 2026.
+        year_sample = "- Lý do: Tổ chức sinh hoạt chi bộ định kỳ tháng 10 năm 202"
+        year_cleaned = final_document_cleanup(year_sample)
+        assert year_cleaned == "- Lý do: Tổ chức sinh hoạt chi bộ định kỳ tháng 10 năm 2026."
+
+        # 5. split_dotted_line_crop: Dòng chỉ có 1 khoảng trắng/thung lũng không bị cắt
+        dummy_crop = np.ones((40, 200, 3), dtype=np.uint8) * 255
+        # Giả lập 1 thung lũng trắng duy nhất ở giữa
+        dummy_crop[:, 80:120] = 255
+        assert len(split_dotted_line_crop(dummy_crop)) == 1
+
+        # 6. Kiểm tra VietnameseTextPostProcessor.clean_and_restore trực tiếp
+        from app.core.ocr_engine import VietnameseTextPostProcessor
+        cr_table = VietnameseTextPostProcessor.clean_and_restore(sample_table)
+        assert "| Điểm tối đa | Điểm tự chấm | Ghi chú" in cr_table
+        assert "+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02" in cr_table
+        assert "* Trừ trường hợp được miễn công tác" in cr_table
+        assert VietnameseTextPostProcessor.clean_and_restore("Cuộc hơp kết thúc") == "Cuộc họp kết thúc"
+        assert VietnameseTextPostProcessor.clean_and_restore("- Lý do: sinh hoạt tháng 10 năm 202") == "- Lý do: sinh hoạt tháng 10 năm 2026."
 
 
