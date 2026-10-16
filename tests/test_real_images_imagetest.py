@@ -108,6 +108,19 @@ class TestRealImagesImageTestE2E:
             idx_ht = full_text.index("Họ tên")
             assert idx_ds < idx_ht, "DANH SÁCH phải đứng trước tiêu đề bảng"
 
+        from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-untyped,import-not-found]
+        if len(doc.tables) >= 2:
+            hdr_table = doc.tables[0]
+            for p in hdr_table.cell(0, 0).paragraphs:
+                if p.text.strip():
+                    assert p.alignment == WD_ALIGN_PARAGRAPH.LEFT, "Khối trái header Mẫu số 02 phải căn trái"
+            for p in hdr_table.cell(0, 1).paragraphs:
+                if p.text.strip():
+                    assert p.alignment == WD_ALIGN_PARAGRAPH.RIGHT, "Khối phải header Mẫu số 02 phải căn phải"
+            main_table = doc.tables[1]
+            col7_texts = [main_table.cell(r, 6).text.strip() for r in range(len(main_table.rows))]
+            assert "(7)" in col7_texts, f"Cột 7 phải chứa (7), nhận được: {col7_texts}"
+
     def test_03_vanban1_bien_ban_sinh_hoat_chi_bo(self, ocr_engine: OCREngine, spell_checker: VietnameseSpellChecker, tmp_path: Path):
         """Kiểm tra vanban1.png: Biên bản sinh hoạt chi bộ định kỳ tháng 10 năm 2026."""
         import re

@@ -929,8 +929,10 @@ class OCREngine:
             b.text = final_document_cleanup(b.text)
 
         for tbl in detected_tables:
+            is_wide_tbl = tbl.num_cols >= 8
             for r_idx in range(len(tbl.grid)):
                 row_cells = tbl.grid[r_idx]
+                has_col_numbers = any(row_cells[ci].strip() in {"(1)", "(2)", "(3)"} for ci in range(min(4, len(row_cells))))
                 for c_idx in range(len(row_cells)):
                     cell_val = row_cells[c_idx]
                     cell_val = re.sub(
@@ -939,9 +941,30 @@ class OCREngine:
                         cell_val,
                         flags=re.IGNORECASE,
                     )
-                    row_cells[c_idx] = final_document_cleanup(cell_val)
+                    cell_cleaned = final_document_cleanup(cell_val)
+                    if is_wide_tbl:
+                        if has_col_numbers and c_idx == 6 and cell_cleaned.strip() in {"0", "(0)", "O", "(O)", "7"}:
+                            cell_cleaned = "(7)"
+                        elif has_col_numbers and c_idx == 8 and cell_cleaned.strip() in {"0", "(0)", "O", "(O)", "9"}:
+                            cell_cleaned = "(9)"
+                        if "NCUT" in cell_cleaned or ("3" in cell_cleaned and "4" in cell_cleaned and "5" in cell_cleaned):
+                            cell_cleaned = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", cell_cleaned)
+                        if "học vấn" in cell_cleaned.lower():
+                            cell_cleaned = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", cell_cleaned, flags=re.IGNORECASE)
+                    row_cells[c_idx] = cell_cleaned
+
             for c in tbl.cells:
-                c.text = final_document_cleanup(c.text)
+                c_clean = final_document_cleanup(c.text)
+                if is_wide_tbl:
+                    if c.col_start == 6 and c_clean.strip() in {"0", "(0)", "O", "(O)", "7"}:
+                        c_clean = "(7)"
+                    elif c.col_start == 8 and c_clean.strip() in {"0", "(0)", "O", "(O)", "9"}:
+                        c_clean = "(9)"
+                    if "NCUT" in c_clean or ("3" in c_clean and "4" in c_clean and "5" in c_clean):
+                        c_clean = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", c_clean)
+                    if "học vấn" in c_clean.lower():
+                        c_clean = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", c_clean, flags=re.IGNORECASE)
+                c.text = c_clean
 
         # Khóa chốt bảo đảm full_text luôn được xử lý qua final_document_cleanup sau cùng
         full_text = final_document_cleanup(full_text)

@@ -1090,19 +1090,33 @@ def final_document_cleanup(text: str) -> str:
     text = re.sub(r"\bTT\.\b(?=\s*\|)", "TT", text)
     text = re.sub(r"(\|\s*)NCUT(\s*\|)", r"\1Họ tên NCUT\2", text)
     text = re.sub(r"(?m)^([ \t]*)NCUT(?=\s*\|)", r"\1Họ tên NCUT", text)
-    text = re.sub(r"Số\s+lượng\s+NCUT\s*\([^)]*\)", "Số lượng NCUT (3=4+5)", text, flags=re.IGNORECASE)
+    text = re.sub(r"Số\s+lượng\s+NCUT[^\n|]*(?=\||$)", "Số lượng NCUT (3=4+5)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", text)
     text = re.sub(r"\((?:3\s*[-=]\s*445|3\s*=\s*4\s*\+\s*5)\)", "(3=4+5)", text)
     text = re.sub(r"\bNơi\s+\(thôn\)", "Nơi cư trú (thôn)", text, flags=re.IGNORECASE)
-    text = re.sub(r"Trình\s+độ\s+học\s+VẤN/\s*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
-    text = re.sub(r"Trình\s+độ\s+học\s+vấn/\s*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
+    text = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
     text = re.sub(r"nhà\s*0311\s*tu\s+hành", "nhà tu hành", text)
     text = re.sub(r"\bChức\s+việc,\s*nhà(?:\s*0311)?\s*tu\s+hành\b", "Chức sắc, chức việc, nhà tu hành", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:Chức\s+sắc,\s*)+(?:chức\s+việc|Chức\s+việc)", "Chức sắc, chức việc", text)
     text = re.sub(r"Trưởng\s+ban\s+trận\s+thôn\b", "Trưởng ban công tác mặt trận thôn", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<!nhà giáo, )(?<!thầy )nhà\s+thuốc,\s*lương\s+y", "nhà giáo, thầy thuốc, lương y", text, flags=re.IGNORECASE)
     text = re.sub(r"\bĐảng\s+VIÊN\b", "Đảng viên", text)
-    text = re.sub(r"(\(\s*6\s*\)\s*\|\s*)0(?=\s*\|\s*\(\s*8\s*\))", r"\1(7)", text)
-    text = re.sub(r"(\(\s*8\s*\)\s*\|\s*)\(0\)(?=\s*\|\s*\(\s*10\s*\))", r"\1(9)", text)
+    # Sửa lỗi cột (0) thành (7) và (0) thành (9) trong hàng đánh số cột
+    text = re.sub(r"(\(\s*6\s*\)\s*\|\s*)(?:\(?\s*[0Oo]\s*\)?|7)(?=\s*\|\s*\(\s*8\s*\))", r"\1(7)", text)
+    text = re.sub(r"(\(\s*8\s*\)\s*\|\s*)(?:\(?\s*[0Oo]\s*\)?|9)(?=\s*\|\s*\(\s*10\s*\))", r"\1(9)", text)
+    def _normalize_col_numbers_line(line_s: str) -> str:
+        if "(1)" in line_s and "(2)" in line_s and "|" in line_s:
+            parts = [p.strip() for p in line_s.split("|")]
+            if len(parts) >= 14:
+                if parts[6] in {"0", "(0)", "O", "(O)", "o", "(o)", "7", "( 0 )", "( 7 )"}:
+                    parts[6] = "(7)"
+                if parts[8] in {"0", "(0)", "O", "(O)", "o", "(o)", "9", "( 0 )", "( 9 )"}:
+                    parts[8] = "(9)"
+                return " | ".join(parts)
+        return line_s
+
+    if "(1)" in text and "(2)" in text:
+        text = "\n".join(_normalize_col_numbers_line(l) for l in text.split("\n"))
     text = re.sub(r"\(\s*1\s*\)\s*2\s*\|\s*\(\s*3\s*\)", "(1) | (2) | (3)", text)
     text = re.sub(r"Từ\s+[Cc]ột\s+\([9Đ]\)\s+đến\s+cột\s+\([^)]*\):*(?:\s*5\):*)?", "Từ Cột (9) đến cột (15):", text)
     text = re.sub(r"Từ\s+[Cc]ột\s+\(9\)\s+đến\s+cột\s+\(15\):+5\):*", "Từ Cột (9) đến cột (15):", text)

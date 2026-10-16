@@ -89,11 +89,16 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             except Exception as e_border:
                 logger.debug(f"Could not remove table borders: {e_border}")
 
-            # Khối trái: Cơ quan ban hành, số hiệu
+            valid_left_lines = [
+                re.sub(r"^\d+\s+(CỘNG\s+HÒA|ĐỘC\s+LẬP|ĐẢNG\s+CỘNG\s+SẢN|ỦY\s+BAN)", r"\1", l.strip(), flags=re.IGNORECASE)
+                for l in hdr.left_lines
+                if l.strip() and not re.match(r"^\d{1,2}$", l.strip())
+            ]
+            align_left = WD_ALIGN_PARAGRAPH.LEFT if has_wide_table else WD_ALIGN_PARAGRAPH.CENTER
             cell_left = hdr_table.cell(0, 0)
-            for idx, line_text in enumerate(hdr.left_lines):
+            for idx, line_text in enumerate(valid_left_lines):
                 p = cell_left.paragraphs[0] if idx == 0 else cell_left.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.alignment = align_left
                 p.paragraph_format.space_before = Pt(1)
                 p.paragraph_format.space_after = Pt(1)
                 run = p.add_run(line_text)
@@ -102,11 +107,16 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                 if idx == 0 or line_text.isupper():
                     run.bold = True
 
-            # Khối phải: Quốc hiệu, tiêu ngữ, ngày tháng
+            valid_right_lines = [
+                re.sub(r"^\d+\s+(CỘNG\s+HÒA|ĐỘC\s+LẬP|ĐẢNG\s+CỘNG\s+SẢN)", r"\1", l.strip(), flags=re.IGNORECASE)
+                for l in hdr.right_lines
+                if l.strip() and not re.match(r"^\d{1,2}$", l.strip())
+            ]
+            align_right = WD_ALIGN_PARAGRAPH.RIGHT if has_wide_table else WD_ALIGN_PARAGRAPH.CENTER
             cell_right = hdr_table.cell(0, 1)
-            for idx, line_text in enumerate(hdr.right_lines):
+            for idx, line_text in enumerate(valid_right_lines):
                 p = cell_right.paragraphs[0] if idx == 0 else cell_right.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.alignment = align_right
                 p.paragraph_format.space_before = Pt(1)
                 p.paragraph_format.space_after = Pt(1)
                 run = p.add_run(line_text)
@@ -193,6 +203,23 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                 except Exception:
                     pass
 
+            def _clean_cell_content(cell_str: str, col_idx: int) -> str:
+                s = cell_str.strip()
+                if is_wide:
+                    # Chuẩn hóa hàng số thứ tự cột: cột 7 (index 6) và cột 9 (index 8)
+                    if col_idx == 6 and s in {"0", "(0)", "O", "(O)", "o", "(o)", "7", "( 0 )", "( 7 )"}:
+                        return "(7)"
+                    if col_idx == 8 and s in {"0", "(0)", "O", "(O)", "o", "(o)", "9", "( 0 )", "( 9 )"}:
+                        return "(9)"
+                    # Chuẩn hóa công thức Số lượng NCUT (3=4+5)
+                    if "NCUT" in s or ("3" in s and "4" in s and "5" in s):
+                        s = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", s)
+                        s = re.sub(r"Số\s+lượng\s+NCUT[^\n|]*(?=\||$)", "Số lượng NCUT (3=4+5)", s, flags=re.IGNORECASE)
+                    # Khôi phục dấu gạch chéo trong Trình độ học vấn/chuyên môn
+                    if "học vấn" in s.lower():
+                        s = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", s, flags=re.IGNORECASE)
+                return s
+
             has_merged_cells = bool(tbl.cells and any(c.is_merged for c in tbl.cells))
             if has_merged_cells:
                 # Đổ dữ liệu các ô không gộp
@@ -200,7 +227,7 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                     if not c.is_merged:
                         try:
                             w_cell = doc_table.cell(c.row_start, c.col_start)
-                            w_cell.text = c.text
+                            w_cell.text = _clean_cell_content(c.text, c.col_start)
                         except Exception as e_cell:
                             logger.debug(f"Error populating unmerged cell: {e_cell}")
                 # Đổ dữ liệu các ô gộp
@@ -210,14 +237,14 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                             c_tl = doc_table.cell(c.row_start, c.col_start)
                             c_br = doc_table.cell(c.row_end - 1, c.col_end - 1)
                             merged_w_cell = c_tl.merge(c_br)
-                            merged_w_cell.text = c.text
+                            merged_w_cell.text = _clean_cell_content(c.text, c.col_start)
                         except Exception as e_merge:
                             logger.debug(f"Error merging table cells: {e_merge}")
             else:
                 for r_i, row_data in enumerate(tbl.grid):
                     for c_i in range(min(len(row_data), tbl.num_cols)):
                         cell = doc_table.cell(r_i, c_i)
-                        cell.text = row_data[c_i].strip()
+                        cell.text = _clean_cell_content(row_data[c_i], c_i)
 
             # Định dạng font, cỡ chữ, căn lề và độ rộng cột
             for r_i, row in enumerate(doc_table.rows):

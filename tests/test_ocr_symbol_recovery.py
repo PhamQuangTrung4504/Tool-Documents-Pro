@@ -2193,4 +2193,70 @@ class TestImageSpecificFixes698And6a0:
         r3 = "Công ty TNHH Dịch vụ Kế Toán Thiên\nƯng thông báo"
         assert final_document_cleanup(r3) == "Công ty TNHH Dịch vụ Kế Toán Thiên Ưng thông báo"
 
+    def test_14_mau_so_02_col7_col9_and_header_alignment(self, tmp_path):
+        """Kiểm tra Mẫu số 02: sửa 0 thành (7), (0) thành (9), (3 - 445) thành (3=4+5), khôi phục gạch chéo, và căn trái/phải header."""
+        import docx
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from app.core.docx_exporter import export_to_docx
+        from app.core.models import OCRResult, ParallelHeader, OCRTable, TableCell
+        from app.core.text_postprocessor import final_document_cleanup
+
+        # 1. Kiểm tra text cleanup
+        s = "(1) | (2) | (3) | (4) | (5) | (6) | 0 | (8) | (0) | (10) | (11) | (12) | (13) | (14) | (15) | (16)"
+        cleaned = final_document_cleanup(s)
+        assert "(6) | (7) | (8) | (9) | (10)" in cleaned
+
+        s2 = "Số lượng NCUT (3 - 445)"
+        assert "(3=4+5)" in final_document_cleanup(s2)
+
+        s3 = "Trình độ học vấn chuyên môn"
+        assert "Trình độ học vấn/chuyên môn" in final_document_cleanup(s3)
+
+        # 2. Kiểm tra export_to_docx cho bảng 16 cột
+        hdr = ParallelHeader(
+            left_lines=["ỦY BAN NHÂN DÂN XÃ..."],
+            right_lines=["3", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "Độc lập - Tự do - Hạnh phúc"],
+        )
+        tbl = OCRTable(
+            num_rows=3,
+            num_cols=16,
+            grid=[
+                ["TT", "Họ tên NCUT", "Số lượng NCUT (3 - 445)"] + [""] * 13,
+                ["TT", "Họ tên NCUT", "Số lượng NCUT (3 - 445)", "Nam", "Nữ", "Dân tộc", "Nơi cư trú (thôn)", "Trình độ học vấn chuyên môn"] + [""] * 8,
+                ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "0", "(8)", "(0)", "(10)", "(11)", "(12)", "(13)", "(14)", "(15)", "(16)"],
+            ],
+            cells=[
+                TableCell(row_start=0, col_start=0, row_end=2, col_end=1, text="TT"),
+                TableCell(row_start=0, col_start=2, row_end=2, col_end=3, text="Số lượng NCUT (3 - 445)"),
+                TableCell(row_start=1, col_start=7, row_end=2, col_end=8, text="Trình độ học vấn chuyên môn"),
+                TableCell(row_start=2, col_start=6, row_end=3, col_end=7, text="0"),
+                TableCell(row_start=2, col_start=8, row_end=3, col_end=9, text="(0)"),
+            ],
+        )
+        res = OCRResult(
+            boxes=[],
+            full_text="DANH SÁCH\n" + s,
+            parallel_header=hdr,
+            tables=[tbl],
+        )
+        doc_path = tmp_path / "test_mau_02.docx"
+        assert export_to_docx(res, doc_path) is True
+
+        doc = docx.Document(doc_path)
+        hdr_tbl = doc.tables[0]
+        # Khối trái căn trái
+        for p in hdr_tbl.cell(0, 0).paragraphs:
+            assert p.alignment == WD_ALIGN_PARAGRAPH.LEFT
+        # Khối phải căn phải và không chứa số 3 mồ côi
+        right_texts = [p.text for p in hdr_tbl.cell(0, 1).paragraphs]
+        assert "3" not in right_texts
+        for p in hdr_tbl.cell(0, 1).paragraphs:
+            assert p.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+
+        data_tbl = doc.tables[1]
+        assert data_tbl.cell(2, 6).text == "(7)"
+        assert data_tbl.cell(2, 8).text == "(9)"
+        assert "(3=4+5)" in data_tbl.cell(0, 2).text
+        assert "Trình độ học vấn/chuyên môn" in data_tbl.cell(1, 7).text
+
 

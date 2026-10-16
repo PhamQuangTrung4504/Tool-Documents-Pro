@@ -423,6 +423,8 @@ def detect_parallel_administrative_header(
             return True
         if re.fullmatch(r"^(?:NG|N|G|II|I|[*–—\-_~.]+)$", txt_u):
             return True
+        if re.fullmatch(r"^\d{1,2}$", txt):
+            return True
         return False
 
     left_b = [b for b in left_b if not _is_decorative_line_noise(b)]
