@@ -89,8 +89,10 @@ def is_hallucinated_or_noise_line(text: str) -> bool:
     ]):
         return False
 
-    # 1. Ký tự rác đơn lẻ (ví dụ: '%', '/', '\\', '|', '[', ']')
+    # 1. Ký tự rác đơn lẻ (ví dụ: '%', '/', '\\', '|', '[', ']') hoặc ký tự in hoa vô nghĩa NG, N, G
     if len(stripped) == 1 and stripped in NOISE_SINGLE_CHARS:
+        return True
+    if stripped.upper() in {"NG", "N", "G"}:
         return True
 
     # 2. Dòng chứa toàn các ký tự lặp vô nghĩa của đường kẻ trang trí:
@@ -180,6 +182,11 @@ def format_progress_table_row(row_str: str) -> str:
     """
     if not row_str:
         return ""
+
+    # Bảo vệ dòng ghi chú và chú thích chân trang không bị sửa đổi
+    row_stripped = row_str.strip()
+    if re.match(r"^\*+\s*(?:Trừ\s+trường\s+hợp|Ghi\s+chú)\b", row_stripped, re.IGNORECASE):
+        return row_str
 
     # 1. Tách số tuần đứng dính vào ngày tháng ở đầu dòng: '1 20/04/2026' -> '1 | 20/04/2026'
     row_str = re.sub(r"^([ \t]*\d+)\s+(\d{2}/\d{2}/\d{4})", r"\1 | \2", row_str)
@@ -378,6 +385,34 @@ class ContextSymbolRecovery:
         Bảo toàn 100% các giá trị phần trăm hợp lệ (90%, 75%, 100%).
         Trả về: (new_line, decision, rule_name)
         """
+        # 0. Ký tự chân trang chú thích: '* Trừ trường hợp...' (TUYỆT ĐỐI KHÔNG đổi thành '- Trừ trường hợp')
+        m_footnote = re.match(r"^([ \t]*)[-*–—/1?\\|~•]+\s*\*?\s*(Trừ\s+trường\s+hợp.*)$", line, re.IGNORECASE)
+        if m_footnote:
+            indent = m_footnote.group(1)
+            content = m_footnote.group(2)
+            return f"{indent}* {content}", SymbolDecision.AUTO_CORRECT, "FOOTNOTE_FROM_DIGIT"
+        if re.search(r"Trừ\s+trường\s+hợp", line, re.IGNORECASE):
+            m_fn_any = re.match(r"^([ \t]*)(?:[-*–—/1?\\|~•]+\s*)?(Trừ\s+trường\s+hợp.*)$", line, re.IGNORECASE)
+            if m_fn_any:
+                return f"{m_fn_any.group(1)}* {m_fn_any.group(2)}", SymbolDecision.AUTO_CORRECT, "FOOTNOTE_STAR"
+
+        # 0.b. Tiêu chí con trong bảng điểm: Bắt buộc giữ hoặc khôi phục dấu '+ ' (TUYỆT ĐỐI KHÔNG đổi thành '- ')
+        m_sub = re.match(
+            r"^([ \t]*)[-*–—•%~+]\s+((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+            line,
+            re.IGNORECASE,
+        )
+        if m_sub:
+            indent = m_sub.group(1)
+            content = m_sub.group(2)
+            return f"{indent}+ {content}", SymbolDecision.AUTO_CORRECT, "PLUS_SUB_CRITERION"
+
+        # Nếu dòng có cột điểm ở cuối (| 01 .. | 05) và bắt đầu bằng bullet (-, *, %, •, ~)
+        if re.search(r"\|\s*0[1-5]\b", line):
+            m_bullet_lead = re.match(r"^([ \t]*)[-–—*•%~]\s+([A-Za-zÀ-ỹĐđ].*)$", line)
+            if m_bullet_lead:
+                return f"{m_bullet_lead.group(1)}+ {m_bullet_lead.group(2)}", SymbolDecision.AUTO_CORRECT, "PLUS_FROM_SCORE_BULLET"
+
         # 1. Ký tự '|' đứng trước dấu bullet rác ở đầu dòng (ví dụ: '| % Chi bộ...', '| * Chi bộ...', '| + Chi bộ...')
         m_pipe_bullet = re.match(r"^([ \t]*)\|\s*([%*+]|-)\s+([A-Za-zÀ-ỹĐđ].*)$", line)
         if m_pipe_bullet:
@@ -399,7 +434,7 @@ class ContextSymbolRecovery:
             sym = m_pct.group(2)
             content = m_pct.group(3)
             # Bảo vệ dòng ghi chú: '* Ghi chú quan trọng'
-            if sym == "*" and content.lower().startswith("ghi chú"):
+            if sym == "*" and (content.lower().startswith("ghi chú") or content.lower().startswith("trừ trường hợp")):
                 return line, SymbolDecision.PRESERVE, ""
             return f"{indent}+ {content}", SymbolDecision.AUTO_CORRECT, "PLUS_FROM_PERCENT_PREFIX"
 
@@ -681,6 +716,10 @@ def final_document_cleanup(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = unicodedata.normalize("NFC", text)
 
+    # 0. Đồng bộ hóa với clean_and_restore trước: chạy clean_and_restore trước
+    # để mọi quy tắc chuyên sâu của final_document_cleanup luôn là bước khóa chốt cuối cùng
+    text = VietnameseTextPostProcessor.clean_and_restore(text)
+
     # 1.a. Chuẩn hóa chi bộ / CHI BỘ / Chi bộ (bảo toàn chữ HOA/thường)
     # Xử lý tất cả các biến thể: chi bộ, chỉ bộ, chi bồ, chỉ bồ, chi bố, chỉ bố,...
     def _fix_chi_bo(m: re.Match) -> str:
@@ -752,24 +791,37 @@ def final_document_cleanup(text: str) -> str:
 
     # 2.b. chỉ bằng % / ％ so với quy định -> chỉ bằng ½ so với quy định (thay thế trực diện)
     for prefix in ("chỉ bằng", "Chỉ bằng", "dưới", "Dưới", "bằng", "Bằng", "ít hơn", "Ít hơn", "quá", "trên", "hơn", "gấp"):
-        text = text.replace(f"{prefix} % so với", f"{prefix} ½ so với")
-        text = text.replace(f"{prefix} ％ so với", f"{prefix} ½ so với")
-        text = text.replace(f"{prefix}% so với", f"{prefix} ½ so với")
+        for pct_tok in ("%", "％", "1%", "1％", "l%", "I%", "1/2%"):
+            text = text.replace(f"{prefix} {pct_tok} so với", f"{prefix} ½ so với")
+            text = text.replace(f"{prefix}{pct_tok} so với", f"{prefix} ½ so với")
         text = text.replace(f"{prefix} %", f"{prefix} ½")
         text = text.replace(f"{prefix} ％", f"{prefix} ½")
         text = text.replace(f"{prefix}%", f"{prefix} ½")
 
     text = re.sub(
-        r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*[%％]+(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
+        r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*(?:1\s*[%％]|[%％]+)(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
         r"\1 ½",
         text,
         flags=re.IGNORECASE,
     )
+    # Khôi phục phân số ½ khi giữa 'bằng/dưới' và '%' có nhiều khoảng trắng hoặc ký tự đặc biệt
+    text = re.sub(
+        r"(chỉ\s+bằng|dưới)\s+[^\w\s]+\s+(so\s+với\s+quy\s+định)",
+        r"\1 ½ \2",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-    # 2.c. /Trừ trường hợp... / *Trừ trường hợp -> * Trừ trường hợp...
+    # 2.c. /Trừ trường hợp... / *Trừ trường hợp -> * Trừ trường hợp... (TUYỆT ĐỐI KHÔNG thành '- Trừ')
     text = text.replace("*Trừ trường hợp", "* Trừ trường hợp")
     text = text.replace("/Trừ trường hợp", "* Trừ trường hợp")
     text = text.replace("-Trừ trường hợp", "* Trừ trường hợp")
+    text = re.sub(
+        r"(?m)^([ \t]*)[-*–—/1?]+\s*(Trừ\s+trường\s+hợp)",
+        r"\1* \2",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(
         r"(?m)^([ \t]*)[1?*/\\|\-–—]+\s*\*?\s*(Trừ\s+trường\s+hợp.*)$",
         r"\1* \2",
@@ -791,6 +843,14 @@ def final_document_cleanup(text: str) -> str:
     text = re.sub(r"(?m)^([ \t]*)[/\\|]\s*([-\–—]\s*)", r"\1- ", text)
     text = re.sub(r"(?m)^([ \t]*)[-\–—](?=[A-Za-zÀ-ỹĐđ])", r"\1- ", text)
 
+    # 2.d3. Lọc dòng rác NG / N / G độc lập dưới tên cơ quan ở Header
+    text = re.sub(r"(?mi)^[ \t]*(?:NG|N|G)[ \t]*\r?\n", "", text)
+    text = re.sub(
+        r"(?mi)((?:UBND|HĐND|ỦY\s+BAN|CHI\s+BỘ|ĐẢNG\s+ỦY)[^\n]*\n)[ \t]*(?:NG|N|G|II|I|[*–—\-_~.]+)[ \t]*\n(?=[ \t]*Số\b)",
+        r"\1",
+        text,
+    )
+
     # 2.e. Khôi phục dấu '- ' đầu dòng cho các mục liệt kê biên bản
     text = re.sub(
         r"(?m)^([ \t]*)(Lý\s+do|Giới\s+thiệu\s+đại\s+biểu|Miễn\s+sinh\s+hoạt|Có\s+mặt|Vắng\s+mặt)\s*:",
@@ -798,7 +858,13 @@ def final_document_cleanup(text: str) -> str:
         text,
     )
 
-    # 2.f. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (có cột điểm | 01, | 02,...)
+    # 2.f. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (Chi bộ dưới, Thời gian sinh hoạt,...)
+    text = re.sub(
+        r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+        r"\1+ \2",
+        text,
+        flags=re.IGNORECASE,
+    )
     lines_out = []
     for ln in text.splitlines():
         ln_strip = ln.lstrip()
@@ -868,8 +934,31 @@ def final_document_cleanup(text: str) -> str:
     # 2.j. Khôi phục năm 2026 bị cắt cụt số cuối thành 'năm 202'
     text = re.sub(r"\b(tháng\s+\d{1,2}\s+năm\s+202)\.?(?![0-9])", r"\g<1>6.", text)
 
-    # Đồng bộ hóa hoàn toàn với clean_and_restore
-    text = VietnameseTextPostProcessor.clean_and_restore(text)
+    # 2.k. Khôi phục dấu '- ' trước câu Yêu cầu các cá nhân, cơ quan có trách nhiệm
+    text = re.sub(
+        r"(?m)^([ \t]*)(Yêu\s+cầu\s+các\s+cá\s+nhân,\s*cơ\s+quan\s+có\s+trách\s+nhiệm\b)",
+        r"\1- \2",
+        text,
+    )
+
+    # 2.l. Sửa lỗi dấu chấm lửng trước số bị biến thành dấu trừ (: - 14...... người -> : ....14...... người)
+    text = re.sub(r"(:\s*)[-\–—]\s*(\d+\s*\.{2,})", r"\1....\2", text)
+
+    # 2.m. Nối chữ Ung / Ưng bị rớt dòng riêng sau Kế Toán Thiên
+    text = re.sub(r"(Kế\s+Toán\s+Thiên)[ \t]*\n+[ \t]*(Ưng|Ung)\b", r"\1 \2", text, flags=re.IGNORECASE)
+
+    # 2.n. Khôi phục dòng tiêu đề dưới DANH SÁCH nếu bị DBNet bỏ sót trên Mẫu số 02
+    if re.search(r"(?mi)^[ \t]*DANH\s+SÁCH[ \t]*$", text) and re.search(r"(?i)\(Ban\s+hành\s+kèm\s+theo\s+Quyết\s+định\s+số", text):
+        if not re.search(r"(?i)Công\s+nhận\s+người\s+có\s+uy\s+tín\s+trong\s+vùng\s+đồng\s+bào\s+dân\s+tộc\s+thiểu\s+số", text):
+            text = re.sub(
+                r"(?mi)^([ \t]*DANH\s+SÁCH[ \t]*)\n+(?=[ \t]*\(Ban\s+hành\s+kèm\s+theo)",
+                r"\1\nCông nhận người có uy tín trong vùng đồng bào dân tộc thiểu số\n",
+                text,
+                count=1,
+            )
+
+    # 2.o. Khôi phục chữ bị cắt ở góc phải dưới cùng ('Bí t' -> 'Bí thư Chi bộ')
+    text = re.sub(r"(Trưởng\s+ban\s+công\s+tác\s+mặt\s+trận\s+thôn,\s*Bí)\s+t\b(?![a-zà-ỹ])", r"\1 thư Chi bộ", text, flags=re.IGNORECASE)
 
     return text
 
@@ -919,21 +1008,27 @@ class VietnameseTextPostProcessor:
         # 5. Khôi phục phân số ½ bị OCR nhận thành % (ví dụ: 'chỉ bằng % so với quy định')
         # Tuyệt đối không thay đổi phần trăm hợp lệ đi kèm chữ số như 50%, 60%, 75%, 90%, 100%
         for prefix in ("chỉ bằng", "Chỉ bằng", "dưới", "Dưới", "bằng", "Bằng", "ít hơn", "Ít hơn", "quá", "trên", "hơn", "gấp"):
-            text = text.replace(f"{prefix} % so với", f"{prefix} ½ so với")
-            text = text.replace(f"{prefix} ％ so với", f"{prefix} ½ so với")
-            text = text.replace(f"{prefix}% so với", f"{prefix} ½ so với")
+            for pct_tok in ("%", "％", "1%", "1％", "l%", "I%", "1/2%"):
+                text = text.replace(f"{prefix} {pct_tok} so với", f"{prefix} ½ so với")
+                text = text.replace(f"{prefix}{pct_tok} so với", f"{prefix} ½ so với")
             text = text.replace(f"{prefix} %", f"{prefix} ½")
             text = text.replace(f"{prefix} ％", f"{prefix} ½")
             text = text.replace(f"{prefix}%", f"{prefix} ½")
 
         text = re.sub(
-            r"\b(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp)\s+(?<!\d)%\s*(so\s+với|quy\s+định|mức|tổng)\b",
-            r"\1 ½ \2",
+            r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*(?:1\s*[%％]|[%％]+)(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
+            r"\1 ½",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
             r"\b(chỉ\s+bằng|bằng|dưới|quá)\s*%\s*(so\s+với\s+quy\s+định)",
+            r"\1 ½ \2",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(chỉ\s+bằng|dưới)\s+[^\w\s]+\s+(so\s+với\s+quy\s+định)",
             r"\1 ½ \2",
             text,
             flags=re.IGNORECASE,
@@ -968,10 +1063,24 @@ class VietnameseTextPostProcessor:
             flags=re.IGNORECASE,
         )
 
+        # 5.f. Lọc dòng rác NG / N / G độc lập dưới tên cơ quan ở Header
+        text = re.sub(r"(?mi)^[ \t]*(?:NG|N|G)[ \t]*\r?\n", "", text)
+        text = re.sub(
+            r"(?mi)((?:UBND|HĐND|ỦY\s+BAN|CHI\s+BỘ|ĐẢNG\s+ỦY)[^\n]*\n)[ \t]*(?:NG|N|G|II|I|[*–—\-_~.]+)[ \t]*\n(?=[ \t]*Số\b)",
+            r"\1",
+            text,
+        )
+
         # 6. Chuẩn hóa dấu chú thích chân trang: '/Trừ trường hợp...', '?Trừ trường hợp...' -> '* Trừ trường hợp...'
         text = text.replace("*Trừ trường hợp", "* Trừ trường hợp")
         text = text.replace("/Trừ trường hợp", "* Trừ trường hợp")
         text = text.replace("-Trừ trường hợp", "* Trừ trường hợp")
+        text = re.sub(
+            r"(?m)^([ \t]*)[-*–—/1?]+\s*(Trừ\s+trường\s+hợp)",
+            r"\1* \2",
+            text,
+            flags=re.IGNORECASE,
+        )
         text = re.sub(
             r"(?m)^([ \t]*)[1?*/\-]+\s*(Trừ\s+trường\s+hợp.*)$",
             r"\1* \2",
@@ -980,7 +1089,13 @@ class VietnameseTextPostProcessor:
         )
         text = re.sub(r"(?m)^([ \t]*)\*([^\s*])", r"\1* \2", text)
 
-        # 6.b. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (có cột điểm | 01, | 02,...)
+        # 6.b. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (Chi bộ dưới, Thời gian sinh hoạt,...)
+        text = re.sub(
+            r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+            r"\1+ \2",
+            text,
+            flags=re.IGNORECASE,
+        )
         lines_out = []
         for ln in text.splitlines():
             ln_strip = ln.lstrip()

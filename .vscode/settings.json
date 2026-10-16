@@ -7,5 +7,22 @@
   "python.autoComplete.extraPaths": [
     "${workspaceFolder}/venv/Lib/site-packages",
     "${workspaceFolder}"
+  ],
+  "cSpell.enableFiletypes": [
+    "!python"
+  ],
+  "cSpell.ignoreWords": [
+    "vietocr",
+    "paddleocr",
+    "paddlex",
+    "paddlepaddle",
+    "dbnet",
+    "colspan",
+    "rowspan",
+    "NCUT",
+    "ghichu",
+    "ubnd",
+    "H'LEO",
+    "cot"
   ]
 }

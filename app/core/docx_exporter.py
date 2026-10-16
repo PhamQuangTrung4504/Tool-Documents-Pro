@@ -160,14 +160,40 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                             except Exception:
                                 pass
 
-                        for r_i, row_data in enumerate(tbl.grid):
-                            for c_i in range(min(len(row_data), tbl.num_cols)):
-                                cell = doc_table.cell(r_i, c_i)
-                                if c_i < len(col_widths_inches):
-                                    cell.width = Inches(col_widths_inches[c_i])
-                                cell_text = row_data[c_i].strip()
-                                cell.text = cell_text
+                        has_merged_cells = bool(tbl.cells and any(c.is_merged for c in tbl.cells))
+                        if has_merged_cells:
+                            for c in tbl.cells:
+                                if not c.is_merged:
+                                    try:
+                                        w_cell = doc_table.cell(c.row_start, c.col_start)
+                                        w_cell.text = c.text
+                                    except Exception as e_cell:
+                                        logger.debug(f"Error populating unmerged cell: {e_cell}")
+                            for c in tbl.cells:
+                                if c.is_merged:
+                                    try:
+                                        c_tl = doc_table.cell(c.row_start, c.col_start)
+                                        c_br = doc_table.cell(c.row_end - 1, c.col_end - 1)
+                                        merged_w_cell = c_tl.merge(c_br)
+                                        merged_w_cell.text = c.text
+                                    except Exception as e_merge:
+                                        logger.debug(f"Error merging table cells: {e_merge}")
+                        else:
+                            for r_i, row_data in enumerate(tbl.grid):
+                                for c_i in range(min(len(row_data), tbl.num_cols)):
+                                    cell = doc_table.cell(r_i, c_i)
+                                    if c_i < len(col_widths_inches):
+                                        cell.width = Inches(col_widths_inches[c_i])
+                                    cell.text = row_data[c_i].strip()
 
+                        for r_i, row in enumerate(doc_table.rows):
+                            for c_i, cell in enumerate(row.cells):
+                                if c_i < len(col_widths_inches):
+                                    try:
+                                        cell.width = Inches(col_widths_inches[c_i])
+                                    except Exception:
+                                        pass
+                                cell_text = cell.text.strip()
                                 for p in cell.paragraphs:
                                     p.paragraph_format.space_before = Pt(2)
                                     p.paragraph_format.space_after = Pt(2)

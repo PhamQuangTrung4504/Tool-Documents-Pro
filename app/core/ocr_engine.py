@@ -100,10 +100,14 @@ from app.core.table_evaluator import (
 )
 from app.core.table_engines import (
     MorphologicalGridTableEngine,
+    PhysicalGridTopologyEngine,
     SpatialProjectionGraphEngine,
     UnifiedHybridTableEngine,
+    extract_physical_table_topology,
     morphological_grid_engine,
+    physical_grid_engine,
     spatial_projection_engine,
+    split_table_crossing_boxes,
     unified_hybrid_engine,
 )
 from app.core.recognition_diagnostics import (
@@ -575,6 +579,11 @@ class OCREngine:
         else:
             raise TypeError(f"source phải là str, Path hoặc np.ndarray, nhận {type(source)}")
 
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        elif len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
         orig_h, orig_w = image.shape[:2]
 
         # 2. Tiền xử lý ảnh
@@ -745,17 +754,37 @@ class OCREngine:
         # 5. Lọc nhiễu quét do cắt ngang viền ảnh (Border noise filtering)
         boxes = filter_border_noise_boxes(boxes, image_width=orig_w, image_height=orig_h)
 
+        # 5.b. Tách các OCRBox bị DBNet gộp ngang xuyên qua vạch kẻ dọc của bảng
+        boxes = split_table_crossing_boxes(boxes, image=image, vietocr_model=self._vietocr)
+
         # 6. Gom nhóm các khối chữ theo dòng và tái dựng bố cục tài liệu (Layout Reconstruction)
-        layout_res = reconstruct_document_layout(boxes)
+        layout_res = reconstruct_document_layout(boxes, image=image)
         grouped_lines = layout_res[0]
         detected_tables = layout_res[1]
         parallel_hdr = getattr(layout_res, "parallel_header", None)
         boxes = [b for line in grouped_lines for b in line]
 
         # 7. Tổng hợp toàn bộ văn bản (đối với bảng, nối các ô bằng ' | ', đối với văn bản thường nối bằng space)
-        # Xây dựng bản đồ ánh xạ hàng bảng theo box id để nhận diện chính xác 100% hàng bảng
+        # Nhận diện các bảng vật lý có ô gộp phức tạp để render nguyên khối theo đúng thứ tự đọc
+        phys_merged_tables = {}
+        for tbl in detected_tables:
+            cells = getattr(tbl, "cells", [])
+            is_phys_merged = any(getattr(c, "is_merged", False) for c in cells) and (
+                tbl.num_cols >= 6 or any(getattr(c, "col_span", 1) >= 3 for c in cells)
+            )
+            if is_phys_merged:
+                tbl_box_ids = {id(b) for r_b in tbl.row_boxes for b in r_b} | {
+                    id(b) for c in cells for b in c.boxes
+                }
+                phys_merged_tables[id(tbl)] = (tbl, tbl_box_ids)
+
+        rendered_physical_table_ids: Set[int] = set()
+
+        # Xây dựng bản đồ ánh xạ hàng bảng theo box id cho các bảng thông thường (scorecard, simple grid)
         table_row_map = {}
         for tbl in detected_tables:
+            if id(tbl) in phys_merged_tables:
+                continue
             for r_idx, r_boxes in enumerate(tbl.row_boxes):
                 if r_idx < len(tbl.grid):
                     box_id_set = frozenset(id(b) for b in r_boxes)
@@ -768,6 +797,30 @@ class OCREngine:
                 continue
 
             line_box_ids = frozenset(id(b) for b in line)
+
+            # Kiểm tra xem dòng này có chứa box thuộc bảng vật lý ô gộp phức tạp không
+            matched_phys_tbl_id = None
+            for tbl_id, (tbl, tbl_box_ids) in phys_merged_tables.items():
+                if any(id(b) in tbl_box_ids for b in line):
+                    matched_phys_tbl_id = tbl_id
+                    break
+
+            if matched_phys_tbl_id is not None:
+                if matched_phys_tbl_id not in rendered_physical_table_ids:
+                    rendered_physical_table_ids.add(matched_phys_tbl_id)
+                    tbl, _ = phys_merged_tables[matched_phys_tbl_id]
+                    for row_data in tbl.grid:
+                        non_empty_cells = [c.strip() for c in row_data if c.strip()]
+                        if not non_empty_cells:
+                            continue
+                        if not row_data[0].strip():
+                            formatted_row = " | ".join(non_empty_cells)
+                        else:
+                            formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
+                        formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+                        formatted_row = format_progress_table_row(formatted_row)
+                        text_lines.append(formatted_row)
+                continue
             matched_tbl_row = None
             if line_box_ids in table_row_map:
                 candidate_tuple = table_row_map[line_box_ids]
@@ -841,14 +894,21 @@ class OCREngine:
         # 9. Hậu xử lý bắt buộc toàn văn trước khi trả về kết quả OCR:
         # a. Khôi phục bullet '+' cho các dòng tiêu chí con trong bảng đánh giá chất lượng
         full_text = re.sub(
-            r"(?m)^-\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
-            r"+ \1",
+            r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
+            r"\1+ \2",
             full_text,
             flags=re.IGNORECASE,
         )
         full_text = re.sub(
-            r"(?m)^([ \t]*)[-\–—]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
+            r"(?m)^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
             r"\1+ \2",
+            full_text,
+            flags=re.IGNORECASE,
+        )
+        # a2. Khôi phục ghi chú chân trang '* Trừ trường hợp...'
+        full_text = re.sub(
+            r"(?m)^([ \t]*)[-*–—/1?]+\s*(Trừ\s+trường\s+hợp)",
+            r"\1* \2",
             full_text,
             flags=re.IGNORECASE,
         )
@@ -872,7 +932,7 @@ class OCREngine:
                 for c_idx in range(len(row_cells)):
                     cell_val = row_cells[c_idx]
                     cell_val = re.sub(
-                        r"^([ \t]*)[-\–—]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*)",
+                        r"^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
                         r"\1+ \2",
                         cell_val,
                         flags=re.IGNORECASE,

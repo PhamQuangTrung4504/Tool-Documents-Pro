@@ -2166,4 +2166,31 @@ class TestImageSpecificFixes698And6a0:
         assert VietnameseTextPostProcessor.clean_and_restore("Cuộc hơp kết thúc") == "Cuộc họp kết thúc"
         assert VietnameseTextPostProcessor.clean_and_restore("- Lý do: sinh hoạt tháng 10 năm 202") == "- Lý do: sinh hoạt tháng 10 năm 2026."
 
+    def test_13_fraction_1pct_footnote_star_and_admin_rules(self):
+        """Kiểm tra đổi 1% -> ½, giữ * Trừ trường hợp và 3 quy tắc văn bản hành chính."""
+        from app.core.text_postprocessor import final_document_cleanup, VietnameseTextPostProcessor
+
+        s = (
+            "- Thời gian sinh hoạt chi bộ chỉ bằng 1% so với quy định | 02\n"
+            "- Thời gian sinh hoạt chi bộ dưới % so với quy định | 01\n"
+            "*Trừ trường hợp được miễn công tác"
+        )
+        out = final_document_cleanup(s)
+        expected = (
+            "+ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02\n"
+            "+ Thời gian sinh hoạt chi bộ dưới ½ so với quy định | 01\n"
+            "* Trừ trường hợp được miễn công tác"
+        )
+        assert out == expected
+
+        # 3 quy tắc văn bản hành chính
+        r1 = "Yêu cầu các cá nhân, cơ quan có trách nhiệm xây dựng Nội quy lao động"
+        assert final_document_cleanup(r1) == "- Yêu cầu các cá nhân, cơ quan có trách nhiệm xây dựng Nội quy lao động"
+
+        r2 = "Tổng số cán bộ của doanh nghiệp: - 14...... người"
+        assert final_document_cleanup(r2) == "Tổng số cán bộ của doanh nghiệp: ....14...... người"
+
+        r3 = "Công ty TNHH Dịch vụ Kế Toán Thiên\nƯng thông báo"
+        assert final_document_cleanup(r3) == "Công ty TNHH Dịch vụ Kế Toán Thiên Ưng thông báo"
+
 

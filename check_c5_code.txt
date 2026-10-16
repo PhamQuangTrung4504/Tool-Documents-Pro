@@ -1,0 +1,885 @@
+=== [1] app/core/ocr_engine.py (Lines 700 to end) ===
+ 723:                                     conf = 0.95
+ 724:                         except Exception as err:
+ 725:                             logger.debug(f"VietOCR line predict error: {err}")
+ 726:                             text = paddle_texts[idx] if idx < len(paddle_texts) else ""
+ 727:                             conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+ 728:                 else:
+ 729:                     text = paddle_texts[idx] if idx < len(paddle_texts) else ""
+ 730:                     conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+ 731:             else:
+ 732:                 # Tiếng Anh hoặc ngôn ngữ khác dùng kết quả từ PaddleOCR
+ 733:                 text = paddle_texts[idx] if idx < len(paddle_texts) else ""
+ 734:                 conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+ 735: 
+ 736:             # Chuẩn hóa văn bản Unicode NFC và làm sạch hậu kiểm
+ 737:             text = unicodedata.normalize("NFC", text)
+ 738:             text = VietnameseTextPostProcessor.clean_and_restore(text)
+ 739:             text = unicodedata.normalize("NFC", text)
+ 740: 
+ 741:             # Bỏ qua dòng trống, dòng ảo giác lặp từ hoặc ký tự rác, hoặc quá thấp độ tin cậy
+ 742:             if text and not is_decorative_or_hallucinated(text, crop_bgr) and conf >= self.drop_score:
+ 743:                 boxes.append(OCRBox(text=text, confidence=conf, bbox=bbox_int, raw_text=text))
+ 744: 
+ 745:         # 5. Lọc nhiễu quét do cắt ngang viền ảnh (Border noise filtering)
+ 746:         boxes = filter_border_noise_boxes(boxes, image_width=orig_w, image_height=orig_h)
+ 747: 
+ 748:         # 6. Gom nhóm các khối chữ theo dòng và tái dựng bố cục tài liệu (Layout Reconstruction)
+ 749:         layout_res = reconstruct_document_layout(boxes)
+ 750:         grouped_lines = layout_res[0]
+ 751:         detected_tables = layout_res[1]
+ 752:         parallel_hdr = getattr(layout_res, "parallel_header", None)
+ 753:         boxes = [b for line in grouped_lines for b in line]
+ 754: 
+ 755:         # 7. Tổng hợp toàn bộ văn bản (đối với bảng, nối các ô bằng ' | ', đối với văn bản thường nối bằng space)
+ 756:         # Xây dựng bản đồ ánh xạ hàng bảng theo box id để nhận diện chính xác 100% hàng bảng
+ 757:         table_row_map = {}
+ 758:         for tbl in detected_tables:
+ 759:             for r_idx, r_boxes in enumerate(tbl.row_boxes):
+ 760:                 if r_idx < len(tbl.grid):
+ 761:                     box_id_set = frozenset(id(b) for b in r_boxes)
+ 762:                     table_row_map[box_id_set] = (tbl, tbl.grid[r_idx])
+ 763: 
+ 764:         rendered_table_rows = set()
+ 765:         text_lines = []
+ 766:         for line in grouped_lines:
+ 767:             if not line:
+ 768:                 continue
+ 769: 
+ 770:             line_box_ids = frozenset(id(b) for b in line)
+ 771:             matched_tbl_row = None
+ 772:             if line_box_ids in table_row_map:
+ 773:                 candidate_tuple = table_row_map[line_box_ids]
+ 774:                 r_key = (id(candidate_tuple[0]), tuple(candidate_tuple[1]))
+ 775:                 if r_key not in rendered_table_rows:
+ 776:                     matched_tbl_row = candidate_tuple
+ 777:                     rendered_table_rows.add(r_key)
+ 778:             else:
+ 779:                 for r_box_ids, tbl_row_tuple in table_row_map.items():
+ 780:                     common = line_box_ids & r_box_ids
+ 781:                     if common and (len(common) / len(line_box_ids) >= 0.7 or line_box_ids.issubset(r_box_ids)):
+ 782:                         r_key = (id(tbl_row_tuple[0]), tuple(tbl_row_tuple[1]))
+ 783:                         if r_key not in rendered_table_rows:
+ 784:                             matched_tbl_row = tbl_row_tuple
+ 785:                             rendered_table_rows.add(r_key)
+ 786:                         break
+ 787: 
+ 788:             if matched_tbl_row is not None:
+ 789:                 tbl, row_data = matched_tbl_row
+ 790:                 if not row_data[0].strip():
+ 791:                     non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
+ 792:                     formatted_row = " | ".join(non_empty_cells)
+ 793:                 else:
+ 794:                     formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
+ 795: 
+ 796:                 formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+ 797:                 formatted_row = format_progress_table_row(formatted_row)
+ 798:                 text_lines.append(formatted_row)
+ 799:             else:
+ 800:                 is_fallback_table_row = False
+ 801:                 line_joined = join_ocr_line_boxes(line)
+ 802:                 for tbl in detected_tables:
+ 803:                     for row_data in tbl.grid:
+ 804:                         row_joined = " ".join(c.strip() for c in row_data if c.strip())
+ 805:                         if row_joined and (row_joined == line_joined or line_joined in row_joined):
+ 806:                             r_key = (id(tbl), tuple(row_data))
+ 807:                             if r_key not in rendered_table_rows:
+ 808:                                 is_fallback_table_row = True
+ 809:                                 rendered_table_rows.add(r_key)
+ 810:                                 if not row_data[0].strip():
+ 811:                                     non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
+ 812:                                     formatted_row = " | ".join(non_empty_cells)
+ 813:                                 else:
+ 814:                                     formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
+ 815:                                 formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
+ 816:                                 formatted_row = format_progress_table_row(formatted_row)
+ 817:                                 text_lines.append(formatted_row)
+ 818:                             else:
+ 819:                                 is_fallback_table_row = True
+ 820:                             break
+ 821:                     if is_fallback_table_row:
+ 822:                         break
+ 823: 
+ 824:                 if not is_fallback_table_row:
+ 825:                     cleaned_line = line_joined.strip()
+ 826:                     if is_hallucinated_or_noise_line(cleaned_line):
+ 827:                         continue
+ 828:                     text_lines.append(line_joined)
+ 829: 
+ 830:         raw_full_text = "\n".join(text_lines)
+ 831:         raw_full_text = VietnameseTextPostProcessor.clean_and_restore(raw_full_text)
+ 832: 
+ 833:         # 8. Context-Aware Symbol Recovery: khôi phục ký tự, số La Mã, bullet dựa trên ngữ cảnh
+ 834:         # BẮT BUỘC chạy clean_and_restore trước để tách các đề mục số La Mã bị dính vào cuối dòng trước
+ 835:         # (ví dụ: '... 14 người. TT. Nội dung cuộc họp' -> tách thành 2 dòng riêng trước khi nhận dạng số La Mã)
+ 836:         pre_cleaned_lines = raw_full_text.split("\n")
+ 837:         recovered_lines, audit_records = ContextSymbolRecovery.recover_document_symbols(pre_cleaned_lines)
+ 838:         full_text = "\n".join(recovered_lines)
+ 839:         full_text = VietnameseTextPostProcessor.clean_and_restore(full_text)
+ 840: 
+ 841:         # 9. Hậu xử lý bắt buộc toàn văn trước khi trả về kết quả OCR:
+ 842:         # a. Khôi phục bullet '+' cho các dòng tiêu chí con trong bảng đánh giá chất lượng
+ 843:         full_text = re.sub(
+ 844:             r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
+ 845:             r"\1+ \2",
+ 846:             full_text,
+ 847:             flags=re.IGNORECASE,
+ 848:         )
+ 849:         full_text = re.sub(
+ 850:             r"(?m)^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+ 851:             r"\1+ \2",
+ 852:             full_text,
+ 853:             flags=re.IGNORECASE,
+ 854:         )
+ 855:         # a2. Khôi phục ghi chú chân trang '* Trừ trường hợp...'
+ 856:         full_text = re.sub(
+ 857:             r"(?m)^([ \t]*)[-*–—/1?]+\s*(Trừ\s+trường\s+hợp)",
+ 858:             r"\1* \2",
+ 859:             full_text,
+ 860:             flags=re.IGNORECASE,
+ 861:         )
+ 862:         # b. Chuẩn hóa tiêu đề cột 'đa' -> 'Điểm tối đa'
+ 863:         full_text = re.sub(
+ 864:             r"(\|\s*Tiêu\s+chí\s+đánh\s+giá\s*\|\s*)(?:tối\s+)?đa(\s*\|\s*Điểm\s+tự\s+chấm)",
+ 865:             r"\1Điểm tối đa\2",
+ 866:             full_text,
+ 867:             flags=re.IGNORECASE,
+ 868:         )
+ 869:         # c. Khóa chốt hậu xử lý văn bản cuối cùng (Final Document Cleanup)
+ 870:         full_text = final_document_cleanup(full_text)
+ 871: 
+ 872:         # Cập nhật văn bản trong các OCRBox và OCRTable để đồng bộ với full_text
+ 873:         for b in boxes:
+ 874:             b.text = final_document_cleanup(b.text)
+ 875: 
+ 876:         for tbl in detected_tables:
+ 877:             for r_idx in range(len(tbl.grid)):
+ 878:                 row_cells = tbl.grid[r_idx]
+ 879:                 for c_idx in range(len(row_cells)):
+ 880:                     cell_val = row_cells[c_idx]
+ 881:                     cell_val = re.sub(
+ 882:                         r"^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+ 883:                         r"\1+ \2",
+ 884:                         cell_val,
+ 885:                         flags=re.IGNORECASE,
+ 886:                     )
+ 887:                     row_cells[c_idx] = final_document_cleanup(cell_val)
+ 888: 
+ 889:         elapsed = time.perf_counter() - t0
+ 890:         result = OCRResult(
+ 891:             boxes=boxes,
+ 892:             full_text=full_text,
+ 893:             language=self.lang,
+ 894:             elapsed_seconds=elapsed,
+ 895:             image_width=orig_w,
+ 896:             image_height=orig_h,
+ 897:             tables=detected_tables,
+ 898:             raw_full_text=raw_full_text,
+ 899:             audit_trail=audit_records,
+ 900:             parallel_header=parallel_hdr,
+ 901:         )
+ 902: 
+ 903:         logger.info(
+ 904:             f"Hybrid OCR completed: {result.num_lines} lines, "
+ 905:             f"{len(result.tables)} tables detected, "
+ 906:             f"avg_conf={result.average_confidence:.2f}, "
+ 907:             f"elapsed={elapsed:.2f}s"
+ 908:         )
+ 909:         return result
+ 910: 
+ 911:     # ------------------------------------------------------------------
+ 912:     # Vẽ Bounding Box lên ảnh
+ 913:     # ------------------------------------------------------------------
+ 914: 
+ 915:     @staticmethod
+ 916:     def draw_boxes(
+ 917:         image: np.ndarray,
+ 918:         result: OCRResult,
+ 919:         color: Tuple[int, int, int] = (0, 200, 80),
+ 920:         thickness: int = 2,
+ 921:         show_text: bool = False,
+ 922:         font_scale: float = 0.5,
+ 923:     ) -> np.ndarray:
+ 924:         """Vẽ bounding box của kết quả OCR lên ảnh."""
+ 925:         canvas = image.copy()
+ 926: 
+ 927:         for box in result.boxes:
+ 928:             pts = np.array(box.bbox, dtype=np.int32).reshape((-1, 1, 2))
+ 929:             cv2.polylines(canvas, [pts], isClosed=True, color=color, thickness=thickness)
+ 930: 
+ 931:             if show_text:
+ 932:                 x, y = box.bbox[0]
+ 933:                 label = f"{box.text} ({box.confidence:.0%})"
+ 934:                 cv2.putText(
+ 935:                     canvas, label, (x, max(y - 5, 10)),
+ 936:                     cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+ 937:                     color, 1, cv2.LINE_AA,
+ 938:                 )
+ 939: 
+ 940:         return canvas
+ 941: 
+ 942:     # ------------------------------------------------------------------
+ 943:     # Đổi ngôn ngữ
+ 944:     # ------------------------------------------------------------------
+ 945: 
+ 946:     def switch_language(self, new_lang: str) -> None:
+ 947:         """Đổi ngôn ngữ nhận dạng."""
+ 948:         if new_lang == self.lang:
+ 949:             return
+ 950: 
+ 951:         logger.info(f"Switching OCR language: {self.lang} → {new_lang}")
+ 952:         self.lang = new_lang
+ 953:         self._is_loaded = False
+ 954:         self._ocr = None
+ 955:         self._vietocr = None
+ 956: 
+ 957:     # ------------------------------------------------------------------
+ 958:     # Context Manager
+ 959:     # ------------------------------------------------------------------
+ 960: 
+ 961:     def __enter__(self) -> "OCREngine":
+ 962:         self._ensure_loaded()
+ 963:         return self
+ 964: 
+ 965:     def __exit__(self, *args) -> None:
+ 966:         pass
+ 967: 
+ 968:     def __repr__(self) -> str:
+ 969:         status = "loaded" if self._is_loaded else "not loaded"
+ 970:         return f"OCREngine(lang={self.lang!r}, hybrid={self.lang == 'vi'}, {status})"
+ 971: 
+ 972: 
+ 973: 
+ 974: 
+ 975: __all__ = [
+ 976:     # Models
+ 977:     "OCRBox",
+ 978:     "OCRTable",
+ 979:     "ParallelHeader",
+ 980:     "HeaderDetectionResult",
+ 981:     "LayoutResult",
+ 982:     "OCRResult",
+ 983:     "SymbolDecision",
+ 984:     # Vision Preprocess
+ 985:     "get_rotate_crop_image",
+ 986:     "clean_crop_borders",
+ 987:     "pad_small_crop_for_vietocr",
+ 988:     "is_decorative_pattern_crop",
+ 989:     "split_dotted_line_crop",
+ 990:     "estimate_and_correct_skew",
+ 991:     "filter_border_noise_boxes",
+ 992:     "assess_image_quality",
+ 993:     # Text Postprocessor
+ 994:     "NOISE_SINGLE_CHARS",
+ 995:     "RE_DECORATIVE_LINE_CHARS",
+ 996:     "RE_REPEATED_WORD",
+ 997:     "ROMAN_HEADING_KEYWORDS",
+ 998:     "is_decorative_or_hallucinated",
+ 999:     "is_hallucinated_or_noise_line",
+1000:     "recover_emails_and_urls",
+1001:     "format_progress_table_row",
+1002:     "ContextSymbolRecovery",
+1003:     "preserve_casing",
+1004:     "clean_unmatched_closing_brackets",
+1005:     "clean_orphaned_brackets",
+1006:     "final_document_cleanup",
+1007:     "VietnameseTextPostProcessor",
+1008:     # Layout Analyzer
+1009:     "_box_info_list",
+1010:     "_group_boxes_sliding_window",
+1011:     "_group_single_column_lines",
+1012:     "join_ocr_line_boxes",
+1013:     "detect_parallel_administrative_header",
+1014:     "detect_and_reconstruct_table",
+1015:     "reconstruct_document_layout",
+1016:     "group_boxes_into_lines",
+1017:     "sort_boxes_reading_order",
+1018:     # Docx Exporter
+1019:     "export_to_docx",
+1020:     # Table Evaluator (Phase C2)
+1021:     "TableGroundTruth",
+1022:     "CellErrorDiagnostic",
+1023:     "TableEvalTrace",
+1024:     "evaluate_table_sample",
+1025:     "generate_benchmark_summary",
+1026:     # Table Recognition Engines (Phase C3)
+1027:     "MorphologicalGridTableEngine",
+1028:     "SpatialProjectionGraphEngine",
+1029:     "UnifiedHybridTableEngine",
+1030:     "morphological_grid_engine",
+1031:     "spatial_projection_engine",
+1032:     "unified_hybrid_engine",
+1033:     # OCREngine & Helpers
+1034:     "LANGUAGE_MAP",
+1035:     "DEFAULT_LANG",
+1036:     "apply_paddlex_patches",
+1037:     "get_display_languages",
+1038:     "get_lang_code",
+1039:     "get_global_detector",
+1040:     "get_global_vietocr",
+1041:     "OCREngine",
+1042: ]
+
+=== [2] app/core/layout_analyzer.py (Lines 850 to end) ===
+ 912:                     row_end=r_i + 1,
+ 913:                     col_end=c_i + 1,
+ 914:                     text=c_txt,
+ 915:                 )
+ 916:             )
+ 917:     ocr_table = OCRTable(
+ 918:         grid=table_grid,
+ 919:         bbox=bbox,
+ 920:         num_rows=len(table_grid),
+ 921:         num_cols=num_cols,
+ 922:         row_boxes=reconstructed_rows_boxes,
+ 923:         cells=std_cells,
+ 924:     )
+ 925:     return ocr_table, pre_table_boxes, reconstructed_rows_boxes, post_table_boxes
+ 926: 
+ 927: 
+ 928: def reconstruct_document_layout(
+ 929:     boxes: List[OCRBox],
+ 930:     image: Optional[np.ndarray] = None,
+ 931: ) -> Tuple[List[List[OCRBox]], List[OCRTable]]:
+ 932:     """
+ 933:     Phân tích toàn diện bố cục tài liệu (Document Layout Reconstruction):
+ 934:     1. Phát hiện tiêu đề hành chính 2 khối (Administrative Parallel Header) ở đầu trang.
+ 935:     2. Tái dựng bảng biểu bằng UnifiedHybridTableEngine (Spatial Projection Graph + Morphological Grid).
+ 936:     3. Phân tích đa cột / một cột (Sliding window) cho các vùng văn bản còn lại.
+ 937:     Trả về: LayoutResult(grouped_lines, tables, parallel_header)
+ 938:     """
+ 939:     if not boxes:
+ 940:         return LayoutResult([], [], parallel_header=None)
+ 941: 
+ 942:     box_info = _box_info_list(boxes)
+ 943:     page_min_x = min(item["left"] for item in box_info)
+ 944:     page_max_x = max(item["right"] for item in box_info)
+ 945:     page_w = max(1, page_max_x - page_min_x)
+ 946:     heights = [item["h"] for item in box_info]
+ 947:     median_h = float(np.median(heights)) if heights else 20.0
+ 948:     gutter_thresh = max(3.0 * median_h, 0.08 * page_w)
+ 949: 
+ 950:     # 1. Kiểm tra Header 2 khối hành chính đầu trang TRƯỚC (Administrative Parallel Header)
+ 951:     # Tuyệt đối không để Table Reconstruction nuốt mất Header 2 cột hoặc ghép chung với bảng
+ 952:     hdr_res = detect_parallel_administrative_header(
+ 953:         box_info, page_min_x, page_max_x, page_w, gutter_thresh, median_h
+ 954:     )
+ 955:     header_lines = hdr_res[0]
+ 956:     rem_boxes = hdr_res[1]
+ 957:     parallel_hdr = getattr(hdr_res, "parallel_header", None)
+ 958: 
+ 959:     target_boxes_for_table = rem_boxes if header_lines else box_info
+ 960: 
+ 961:     # 1.b. Kiểm tra lưới ô vật lý có ô gộp phức tạp (như Mẫu số 02 - 16 cột, colspan 7, rowspan 2)
+ 962:     if image is not None:
+ 963:         from app.core.table_engines import extract_physical_table_topology
+ 964:         target_ocr_boxes = [b["box"] for b in target_boxes_for_table]
+ 965:         phys_tbl = extract_physical_table_topology(image, target_ocr_boxes)
+ 966:         if phys_tbl is not None and any(c.is_merged for c in phys_tbl.cells) and (phys_tbl.num_cols >= 6 or any(c.col_span >= 3 for c in phys_tbl.cells)):
+ 967:             tbl_top = phys_tbl.bbox[1]
+ 968:             tbl_bottom = phys_tbl.bbox[3]
+ 969:             pre_tbl_boxes = [b for b in target_boxes_for_table if b["cy"] < tbl_top - 5]
+ 970:             post_tbl_boxes = [b for b in target_boxes_for_table if b["cy"] > tbl_bottom + 5]
+ 971: 
+ 972:             pre_lines = header_lines + _group_boxes_sliding_window(
+ 973:                 pre_tbl_boxes, page_min_x, page_w, gutter_thresh, median_h
+ 974:             )
+ 975:             post_lines = _group_boxes_sliding_window(
+ 976:                 post_tbl_boxes, page_min_x, page_w, gutter_thresh, median_h
+ 977:             )
+ 978:             all_lines = pre_lines + phys_tbl.row_boxes + post_lines
+ 979:             return LayoutResult(all_lines, [phys_tbl], parallel_header=parallel_hdr)
+ 980: 
+ 981:     # 2. Ưu tiên số 1 (Primary Engine): Chạy logic detect_and_reconstruct_table nguyên bản
+ 982:     # (sử dụng phân tích cụm cột neo STT và header 5 cột Tiêu chí đánh giá / Điểm tối đa / Điểm tự chấm).
+ 983:     tbl_v1, pre_tbl_v1, tbl_rows_v1, post_tbl_v1 = detect_and_reconstruct_table(
+ 984:         target_boxes_for_table, page_min_x, page_max_x, page_w, median_h
+ 985:     )
+ 986: 
+ 987:     is_scorecard_or_standard_v1 = False
+ 988:     if tbl_v1 is not None and tbl_v1.grid:
+ 989:         h_text = " ".join(tbl_v1.grid[0]).lower()
+ 990:         has_scorecard_kw = any(
+ 991:             kw in h_text
+ 992:             for kw in [
+ 993:                 "tiêu chí",
+ 994:                 "tiêu chí đánh giá",
+ 995:                 "điểm tối đa",
+ 996:                 "điểm tự chấm",
+ 997:                 "chấp hành thời gian",
+ 998:             ]
+ 999:         )
+1000:         has_stt_col = bool(
+1001:             re.match(r"^(?:STT|TT|SỐ\s*TT)$", tbl_v1.grid[0][0].strip().upper())
+1002:         )
+1003:         is_borderless_or_merged = any(
+1004:             kw in h_text
+1005:             for kw in [
+1006:                 "tên hàng hóa",
+1007:                 "đơn giá",
+1008:                 "thành tiền",
+1009:                 "kế hoạch",
+1010:                 "thực tế",
+1011:                 "hạng mục",
+1012:             ]
+1013:         )
+1014: 
+1015:         if has_scorecard_kw or (has_stt_col and not is_borderless_or_merged):
+1016:             is_scorecard_or_standard_v1 = True
+1017: 
+1018:     if is_scorecard_or_standard_v1 and tbl_v1 is not None:
+1019:         pre_lines = header_lines + _group_boxes_sliding_window(
+1020:             pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+1021:         )
+1022:         post_lines = _group_boxes_sliding_window(
+1023:             post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+1024:         )
+1025:         all_lines = pre_lines + tbl_rows_v1 + post_lines
+1026:         return LayoutResult(all_lines, [tbl_v1], parallel_header=parallel_hdr)
+1027: 
+1028:     # 3. Chỉ gọi UnifiedHybridTableEngine (Fallback Engine) khi và chỉ khi:
+1029:     # - detect_and_reconstruct_table trả về None (như sample_05 hoặc bảng chữ ký 3 cột ở cuối)
+1030:     # - HOẶC bảng thuộc dạng hóa đơn không viền / tiêu đề gộp (sample_02, sample_03) không có cấu trúc bảng điểm Tiêu chí đánh giá
+1031:     from app.core.table_engines import unified_hybrid_engine
+1032: 
+1033:     target_ocr_boxes = [b["box"] for b in target_boxes_for_table]
+1034:     hybrid_res = unified_hybrid_engine(target_ocr_boxes, image=image)
+1035:     if len(hybrid_res[1]) > 0:
+1036:         tbl = hybrid_res[1][0]
+1037:         all_lines = header_lines + hybrid_res[0]
+1038:         return LayoutResult(all_lines, [tbl], parallel_header=parallel_hdr)
+1039: 
+1040:     # 4. Fallback cuối: Nếu UnifiedHybrid không tìm thấy nhưng detect_and_reconstruct_table có bảng
+1041:     if tbl_v1 is not None:
+1042:         pre_lines = header_lines + _group_boxes_sliding_window(
+1043:             pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+1044:         )
+1045:         post_lines = _group_boxes_sliding_window(
+1046:             post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+1047:         )
+1048:         all_lines = pre_lines + tbl_rows_v1 + post_lines
+1049:         return LayoutResult(all_lines, [tbl_v1], parallel_header=parallel_hdr)
+1050: 
+1051:     # 3. Nếu không có bảng: Gom nhóm các dòng còn lại
+1052:     if header_lines:
+1053:         rem_lines = _group_boxes_sliding_window(
+1054:             rem_boxes, page_min_x, page_w, gutter_thresh, median_h
+1055:         )
+1056:         return LayoutResult(header_lines + rem_lines, [], parallel_header=parallel_hdr)
+1057: 
+1058:     # 4. Văn bản thông thường (Sliding Window Multi-column / Single-column)
+1059:     standard_lines = _group_boxes_sliding_window(
+1060:         box_info, page_min_x, page_w, gutter_thresh, median_h
+1061:     )
+1062:     return LayoutResult(standard_lines, [], parallel_header=None)
+1063: 
+1064: 
+1065: def group_boxes_into_lines(
+1066:     boxes: List[OCRBox],
+1067:     image: Optional[np.ndarray] = None,
+1068: ) -> List[List[OCRBox]]:
+1069:     """
+1070:     Gom nhóm các khối chữ theo từng dòng đọc (Line-level grouping) và sắp xếp
+1071:     thứ tự đọc tài liệu dựa trên phân tích bố cục hình học, bảng biểu và tiêu đề hành chính.
+1072:     """
+1073:     lines, _ = reconstruct_document_layout(boxes, image=image)
+1074:     return lines
+1075: 
+1076: 
+1077: def sort_boxes_reading_order(boxes: List[OCRBox]) -> List[OCRBox]:
+1078:     """
+1079:     Sắp xếp bounding box theo thứ tự đọc tự nhiên từ trên xuống dưới, từ trái sang phải.
+1080:     Gom nhóm theo dòng và bảo toàn toàn bộ danh sách boxes.
+1081:     """
+1082:     grouped_lines = group_boxes_into_lines(boxes)
+1083:     return [b for line in grouped_lines for b in line]
+1084: 
+1085: 
+1086: # ---------------------------------------------------------------------------
+1087: # Cơ Chế Khôi Phục Ký Tự Theo Ngữ Cảnh (Context-Aware Symbol Recovery)
+1088: # ---------------------------------------------------------------------------
+1089: 
+1090: 
+1091: 
+
+=== [3] app/core/table_engines.py (Full or last 350 lines) ===
+ 615:     boxes: List[OCRBox],
+ 616:     min_cols: int = 2,
+ 617:     min_rows: int = 2,
+ 618: ) -> Optional[OCRTable]:
+ 619:     """
+ 620:     Trích xuất cấu trúc bảng dựa trên hình thái học lưới ô vật lý (Physical Grid Cell Topology).
+ 621:     Phát hiện vạch kẻ ngang/dọc, tính toán các ô gộp 2D (rowspan & colspan) và gom toàn bộ
+ 622:     nội dung nhiều dòng trong cùng một khung ô thành 1 chuỗi liền mạch duy nhất.
+ 623:     """
+ 624:     if image is None or not boxes:
+ 625:         return None
+ 626: 
+ 627:     if len(image.shape) == 3:
+ 628:         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+ 629:     else:
+ 630:         gray = image.copy()
+ 631: 
+ 632:     img_h, img_w = gray.shape[:2]
+ 633:     if img_h < 50 or img_w < 50:
+ 634:         return None
+ 635: 
+ 636:     # Bước 1 — Trích xuất mặt nạ vạch kẻ ngang & dọc
+ 637:     thresh = cv2.adaptiveThreshold(
+ 638:         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 5
+ 639:     )
+ 640: 
+ 641:     h_kernel_len = max(25, img_w // 35)
+ 642:     v_kernel_len = max(20, img_h // 40)
+ 643: 
+ 644:     h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_len, 1))
+ 645:     v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
+ 646: 
+ 647:     h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
+ 648:     v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
+ 649: 
+ 650:     h_mask = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)))
+ 651:     v_mask = cv2.morphologyEx(v_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)))
+ 652: 
+ 653:     # Bước 2 — Xác định Hệ Lưới Trục Chuẩn (Grid Axes X0..XM và Y0..YN)
+ 654:     h_contours, _ = cv2.findContours(h_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+ 655:     h_segments: List[Tuple[float, float, float]] = []
+ 656:     for cnt in h_contours:
+ 657:         x, y, w, h = cv2.boundingRect(cnt)
+ 658:         if w >= h_kernel_len:
+ 659:             h_segments.append((float(x), float(x + w), float(y + h / 2.0)))
+ 660: 
+ 661:     v_contours, _ = cv2.findContours(v_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+ 662:     v_segments: List[Tuple[float, float, float]] = []
+ 663:     for cnt in v_contours:
+ 664:         x, y, w, h = cv2.boundingRect(cnt)
+ 665:         if h >= v_kernel_len:
+ 666:             v_segments.append((float(y), float(y + h), float(x + w / 2.0)))
+ 667: 
+ 668:     if len(h_segments) < 2 or len(v_segments) < 2:
+ 669:         return None
+ 670: 
+ 671:     def _cluster_coords(coords: List[float], tol: float = 8.0) -> List[float]:
+ 672:         if not coords:
+ 673:             return []
+ 674:         sorted_c = sorted(coords)
+ 675:         clusters: List[List[float]] = []
+ 676:         for c in sorted_c:
+ 677:             if not clusters or abs(c - float(np.mean(clusters[-1]))) > tol:
+ 678:                 clusters.append([c])
+ 679:             else:
+ 680:                 clusters[-1].append(c)
+ 681:         return [float(np.mean(cl)) for cl in clusters]
+ 682: 
+ 683:     raw_y = _cluster_coords([s[2] for s in h_segments], tol=8.0)
+ 684:     raw_x = _cluster_coords([s[2] for s in v_segments], tol=8.0)
+ 685: 
+ 686:     valid_y: List[float] = []
+ 687:     for yk in raw_y:
+ 688:         intersecting_v = sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10))
+ 689:         if intersecting_v >= 2:
+ 690:             valid_y.append(yk)
+ 691: 
+ 692:     valid_x: List[float] = []
+ 693:     for xk in raw_x:
+ 694:         intersecting_h = sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10))
+ 695:         if intersecting_h >= 2:
+ 696:             valid_x.append(xk)
+ 697: 
+ 698:     valid_y.sort()
+ 699:     valid_x.sort()
+ 700: 
+ 701:     N = len(valid_y) - 1
+ 702:     M = len(valid_x) - 1
+ 703: 
+ 704:     if N < min_rows or M < min_cols:
+ 705:         return None
+ 706: 
+ 707:     # Bước 3 — Phát hiện Ô Gộp Ngang (colspan) & Ô Gộp Dọc (rowspan) bằng Kiểm tra Tường Ngăn
+ 708:     has_v_wall = [[False for _ in range(M - 1)] for _ in range(N)]
+ 709:     has_h_wall = [[False for _ in range(M)] for _ in range(N - 1)]
+ 710: 
+ 711:     for r in range(N):
+ 712:         y_top = valid_y[r]
+ 713:         y_bottom = valid_y[r + 1]
+ 714:         cell_h = y_bottom - y_top
+ 715:         margin_y = max(2.0, 0.15 * cell_h)
+ 716:         y_start = int(max(0, y_top + margin_y))
+ 717:         y_end = int(min(img_h, y_bottom - margin_y))
+ 718:         if y_end <= y_start:
+ 719:             y_start = int(y_top)
+ 720:             y_end = int(y_bottom)
+ 721: 
+ 722:         for c in range(M - 1):
+ 723:             x_wall = valid_x[c + 1]
+ 724:             x_min = int(max(0, x_wall - 3))
+ 725:             x_max = int(min(img_w, x_wall + 4))
+ 726: 
+ 727:             strip = v_mask[y_start:y_end, x_min:x_max]
+ 728:             if strip.size > 0:
+ 729:                 row_has_pixel = np.any(strip > 0, axis=1)
+ 730:                 density = float(np.mean(row_has_pixel))
+ 731:                 if density >= 0.35:
+ 732:                     has_v_wall[r][c] = True
+ 733: 
+ 734:     for r in range(N - 1):
+ 735:         y_wall = valid_y[r + 1]
+ 736:         y_min = int(max(0, y_wall - 3))
+ 737:         y_max = int(min(img_h, y_wall + 4))
+ 738: 
+ 739:         for c in range(M):
+ 740:             x_left = valid_x[c]
+ 741:             x_right = valid_x[c + 1]
+ 742:             cell_w = x_right - x_left
+ 743:             margin_x = max(2.0, 0.15 * cell_w)
+ 744:             x_start = int(max(0, x_left + margin_x))
+ 745:             x_end = int(min(img_w, x_right - margin_x))
+ 746:             if x_end <= x_start:
+ 747:                 x_start = int(x_left)
+ 748:                 x_end = int(x_right)
+ 749: 
+ 750:             strip = h_mask[y_min:y_max, x_start:x_end]
+ 751:             if strip.size > 0:
+ 752:                 col_has_pixel = np.any(strip > 0, axis=0)
+ 753:                 density = float(np.mean(col_has_pixel))
+ 754:                 if density >= 0.35:
+ 755:                     has_h_wall[r][c] = True
+ 756: 
+ 757:     visited = [[False for _ in range(M)] for _ in range(N)]
+ 758:     cells: List[TableCell] = []
+ 759: 
+ 760:     for r in range(N):
+ 761:         for c in range(M):
+ 762:             if visited[r][c]:
+ 763:                 continue
+ 764: 
+ 765:             c_end = c + 1
+ 766:             while c_end < M and not has_v_wall[r][c_end - 1] and not visited[r][c_end]:
+ 767:                 c_end += 1
+ 768: 
+ 769:             r_end = r + 1
+ 770:             while r_end < N:
+ 771:                 can_expand_down = True
+ 772:                 for ci in range(c, c_end):
+ 773:                     if has_h_wall[r_end - 1][ci] or visited[r_end][ci]:
+ 774:                         can_expand_down = False
+ 775:                         break
+ 776:                 for ci in range(c, c_end - 1):
+ 777:                     if has_v_wall[r_end][ci]:
+ 778:                         can_expand_down = False
+ 779:                         break
+ 780:                 if not can_expand_down:
+ 781:                     break
+ 782:                 r_end += 1
+ 783: 
+ 784:             for ri in range(r, r_end):
+ 785:                 for ci in range(c, c_end):
+ 786:                     visited[ri][ci] = True
+ 787: 
+ 788:             cell_bbox = [int(valid_x[c]), int(valid_y[r]), int(valid_x[c_end]), int(valid_y[r_end])]
+ 789:             cell = TableCell(
+ 790:                 row_start=r,
+ 791:                 col_start=c,
+ 792:                 row_end=r_end,
+ 793:                 col_end=c_end,
+ 794:                 bbox=cell_bbox,
+ 795:             )
+ 796:             cells.append(cell)
+ 797: 
+ 798:     # Bước 4 — Gom Toàn Bộ Dòng Chữ Trong Cùng 1 Khung Ô Thành 1 Dòng Duy Nhất
+ 799:     for b in boxes:
+ 800:         pts = b.bbox
+ 801:         bx1 = min(pt[0] for pt in pts)
+ 802:         bx2 = max(pt[0] for pt in pts)
+ 803:         by1 = min(pt[1] for pt in pts)
+ 804:         by2 = max(pt[1] for pt in pts)
+ 805:         bcx = (bx1 + bx2) / 2.0
+ 806:         bcy = (by1 + by2) / 2.0
+ 807: 
+ 808:         if bcy < valid_y[0] - 10 or bcy > valid_y[-1] + 10 or bcx < valid_x[0] - 15 or bcx > valid_x[-1] + 15:
+ 809:             continue
+ 810: 
+ 811:         assigned_cell: Optional[TableCell] = None
+ 812:         for cell in cells:
+ 813:             if cell.bbox is None:
+ 814:                 continue
+ 815:             x1, y1, x2, y2 = cell.bbox
+ 816:             if (x1 - 4) <= bcx <= (x2 + 4) and (y1 - 4) <= bcy <= (y2 + 4):
+ 817:                 assigned_cell = cell
+ 818:                 break
+ 819: 
+ 820:         if assigned_cell is None:
+ 821:             best_ioa = 0.0
+ 822:             for cell in cells:
+ 823:                 if cell.bbox is None:
+ 824:                     continue
+ 825:                 x1, y1, x2, y2 = cell.bbox
+ 826:                 inter_x = max(0.0, min(x2, bx2) - max(x1, bx1))
+ 827:                 inter_y = max(0.0, min(y2, by2) - max(y1, by1))
+ 828:                 inter_area = inter_x * inter_y
+ 829:                 b_area = max(1.0, (bx2 - bx1) * (by2 - by1))
+ 830:                 ioa = inter_area / b_area
+ 831:                 if ioa > best_ioa:
+ 832:                     best_ioa = ioa
+ 833:                     assigned_cell = cell
+ 834:             if best_ioa < 0.20:
+ 835:                 assigned_cell = None
+ 836: 
+ 837:         if assigned_cell is not None:
+ 838:             assigned_cell.boxes.append(b)
+ 839: 
+ 840:     for cell in cells:
+ 841:         if not cell.boxes:
+ 842:             continue
+ 843:         cell_box_info = [_box_to_dict(b) for b in cell.boxes]
+ 844:         cell_box_info.sort(key=lambda it: (it["top"], it["left"]))
+ 845: 
+ 846:         heights = [it["h"] for it in cell_box_info]
+ 847:         med_h = float(np.median(heights)) if heights else 20.0
+ 848: 
+ 849:         intra_lines: List[List[dict]] = []
+ 850:         for bi in cell_box_info:
+ 851:             matched = False
+ 852:             for line in intra_lines:
+ 853:                 line_avg_cy = float(np.mean([it["cy"] for it in line]))
+ 854:                 if abs(bi["cy"] - line_avg_cy) <= 0.55 * med_h:
+ 855:                     line.append(bi)
+ 856:                     matched = True
+ 857:                     break
+ 858:             if not matched:
+ 859:                 intra_lines.append([bi])
+ 860: 
+ 861:         intra_lines.sort(key=lambda l: min(it["top"] for it in l))
+ 862:         line_strings = []
+ 863:         for line in intra_lines:
+ 864:             line.sort(key=lambda it: it["left"])
+ 865:             line_txt = " ".join(it["text"].strip() for it in line if it["text"].strip())
+ 866:             if line_txt:
+ 867:                 line_strings.append(line_txt)
+ 868: 
+ 869:         cell.text = " ".join(line_strings).strip()
+ 870: 
+ 871:     grid: List[List[str]] = [["" for _ in range(M)] for _ in range(N)]
+ 872:     row_boxes: List[List[OCRBox]] = [[] for _ in range(N)]
+ 873: 
+ 874:     for cell in cells:
+ 875:         grid[cell.row_start][cell.col_start] = cell.text
+ 876:         row_boxes[cell.row_start].extend(cell.boxes)
+ 877: 
+ 878:     table_bbox = [int(valid_x[0]), int(valid_y[0]), int(valid_x[-1]), int(valid_y[-1])]
+ 879:     return OCRTable(
+ 880:         grid=grid,
+ 881:         bbox=table_bbox,
+ 882:         num_rows=N,
+ 883:         num_cols=M,
+ 884:         row_boxes=row_boxes,
+ 885:         cells=cells,
+ 886:     )
+ 887: 
+ 888: 
+ 889: class PhysicalGridTopologyEngine:
+ 890:     """
+ 891:     Thuật toán nhận diện cấu trúc ô lưới vật lý (Cell-First Topology):
+ 892:     - Phát hiện vạch kẻ ngang/dọc bằng hình thái học OpenCV.
+ 893:     - Phát hiện ô gộp 2D (rowspan, colspan) bằng kiểm tra tường ngăn.
+ 894:     - Gom toàn bộ dòng chữ trong cùng 1 khung ô thành 1 dòng duy nhất.
+ 895:     """
+ 896: 
+ 897:     def __call__(
+ 898:         self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+ 899:     ) -> LayoutResult:
+ 900:         return self.reconstruct_layout(boxes, image=image)
+ 901: 
+ 902:     def reconstruct_layout(
+ 903:         self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+ 904:     ) -> LayoutResult:
+ 905:         if not boxes:
+ 906:             return LayoutResult([], [], parallel_header=None)
+ 907: 
+ 908:         if image is None:
+ 909:             return LayoutResult([], [], parallel_header=None)
+ 910: 
+ 911:         tbl = extract_physical_table_topology(image, boxes)
+ 912:         if tbl is None or tbl.num_cols < 2 or tbl.num_rows < 2:
+ 913:             return LayoutResult([], [], parallel_header=None)
+ 914: 
+ 915:         box_info = [_box_to_dict(b) for b in boxes]
+ 916:         tbl_top = tbl.bbox[1]
+ 917:         tbl_bottom = tbl.bbox[3]
+ 918: 
+ 919:         pre_boxes = [b for b in box_info if b["cy"] < tbl_top - 5]
+ 920:         post_boxes = [b for b in box_info if b["cy"] > tbl_bottom + 5]
+ 921: 
+ 922:         heights = [b["h"] for b in box_info]
+ 923:         median_h = float(np.median(heights)) if heights else 20.0
+ 924: 
+ 925:         def _group_simple(b_list: List[dict]) -> List[List[OCRBox]]:
+ 926:             if not b_list:
+ 927:                 return []
+ 928:             b_sorted = sorted(b_list, key=lambda it: (it["top"], it["left"]))
+ 929:             lines: List[List[dict]] = []
+ 930:             for item in b_sorted:
+ 931:                 matched = False
+ 932:                 for l in lines:
+ 933:                     avg_cy = float(np.mean([x["cy"] for x in l]))
+ 934:                     if abs(item["cy"] - avg_cy) <= 0.55 * median_h:
+ 935:                         l.append(item)
+ 936:                         matched = True
+ 937:                         break
+ 938:                 if not matched:
+ 939:                     lines.append([item])
+ 940:             lines.sort(key=lambda l: min(x["top"] for x in l))
+ 941:             res = []
+ 942:             for l in lines:
+ 943:                 l.sort(key=lambda x: x["left"])
+ 944:                 res.append([x["box"] for x in l])
+ 945:             return res
+ 946: 
+ 947:         pre_lines = _group_simple(pre_boxes)
+ 948:         post_lines = _group_simple(post_boxes)
+ 949:         all_lines = pre_lines + tbl.row_boxes + post_lines
+ 950: 
+ 951:         return LayoutResult(all_lines, [tbl], parallel_header=None)
+ 952: 
+ 953: 
+ 954: class UnifiedHybridTableEngine:
+ 955:     """
+ 956:     Phương pháp 3 — Unified Hybrid Table Engine:
+ 957:     Kết hợp tối ưu giữa nhận diện hình thái học đường kẻ (Morphological Grid / Physical Grid)
+ 958:     và đồ thị phép chiếu trục X/Y (Spatial Projection Graph), đạt độ chính xác tối đa trên
+ 959:     cả 5 dạng bảng tiêu chuẩn và các bảng phức tạp nhiều tầng như Mẫu số 02.
+ 960:     """
+ 961: 
+ 962:     def __init__(self):
+ 963:         self.spatial_engine = SpatialProjectionGraphEngine()
+ 964:         self.morph_engine = MorphologicalGridTableEngine()
+ 965:         self.physical_engine = PhysicalGridTopologyEngine()
+ 966: 
+ 967:     def __call__(
+ 968:         self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+ 969:     ) -> LayoutResult:
+ 970:         return self.reconstruct_layout(boxes, image=image)
+ 971: 
+ 972:     def reconstruct_layout(
+ 973:         self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+ 974:     ) -> LayoutResult:
+ 975:         """Thực thi pipeline nhận diện bố cục kết hợp."""
+ 976:         if not boxes:
+ 977:             return LayoutResult([], [], parallel_header=None)
+ 978: 
+ 979:         if image is not None:
+ 980:             phys_res = self.physical_engine(boxes, image=image)
+ 981:             if phys_res.tables:
+ 982:                 tbl = phys_res.tables[0]
+ 983:                 if any(c.is_merged for c in tbl.cells) and (tbl.num_cols >= 6 or any(c.col_span >= 3 for c in tbl.cells)):
+ 984:                     return phys_res
+ 985: 
+ 986:         # Sử dụng đồ thị chiếu không gian với tiền lọc nhiễu và gom cụm chịu lệch Y
+ 987:         return self.spatial_engine.reconstruct_layout(boxes, image=image)
+ 988: 
+ 989: 
+ 990: # Khởi tạo các singleton instance sẵn sàng sử dụng
+ 991: physical_grid_engine = PhysicalGridTopologyEngine()
+ 992: morphological_grid_engine = MorphologicalGridTableEngine()
+ 993: spatial_projection_engine = SpatialProjectionGraphEngine()
+ 994: unified_hybrid_engine = UnifiedHybridTableEngine()

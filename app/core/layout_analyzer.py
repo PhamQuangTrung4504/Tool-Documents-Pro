@@ -21,6 +21,7 @@ from app.core.models import (
     OCRTable,
     ParallelHeader,
     SymbolDecision,
+    TableCell,
 )
 from app.core.text_postprocessor import ContextSymbolRecovery, format_progress_table_row
 
@@ -405,6 +406,11 @@ def detect_parallel_administrative_header(
         if re.fullmatch(r"[%*~_\-=—–·•.]+", txt):
             return True
         if re.fullmatch(r"1?4{3,}", txt) or re.fullmatch(r"[1lI|!*=\-—_~]{4,}", txt):
+            return True
+        txt_u = txt.upper()
+        if txt_u in {"NG", "N", "G", "II", "I", "*", "-", "•", "~", "—", "–", "·"}:
+            return True
+        if re.fullmatch(r"^(?:NG|N|G|II|I|[*–—\-_~.]+)$", txt_u):
             return True
         return False
 
@@ -896,12 +902,25 @@ def detect_and_reconstruct_table(
         int(max(b["right"] for b in table_boxes)),
         int(max(b["bottom"] for b in table_boxes)),
     ]
+    std_cells: List[TableCell] = []
+    for r_i, r_data in enumerate(table_grid):
+        for c_i, c_txt in enumerate(r_data):
+            std_cells.append(
+                TableCell(
+                    row_start=r_i,
+                    col_start=c_i,
+                    row_end=r_i + 1,
+                    col_end=c_i + 1,
+                    text=c_txt,
+                )
+            )
     ocr_table = OCRTable(
         grid=table_grid,
         bbox=bbox,
         num_rows=len(table_grid),
         num_cols=num_cols,
         row_boxes=reconstructed_rows_boxes,
+        cells=std_cells,
     )
     return ocr_table, pre_table_boxes, reconstructed_rows_boxes, post_table_boxes
 
@@ -909,7 +928,7 @@ def detect_and_reconstruct_table(
 def reconstruct_document_layout(
     boxes: List[OCRBox],
     image: Optional[np.ndarray] = None,
-) -> Tuple[List[List[OCRBox]], List[OCRTable]]:
+) -> LayoutResult:
     """
     Phân tích toàn diện bố cục tài liệu (Document Layout Reconstruction):
     1. Phát hiện tiêu đề hành chính 2 khối (Administrative Parallel Header) ở đầu trang.
@@ -928,7 +947,59 @@ def reconstruct_document_layout(
     median_h = float(np.median(heights)) if heights else 20.0
     gutter_thresh = max(3.0 * median_h, 0.08 * page_w)
 
-    # 1. Kiểm tra Header 2 khối hành chính đầu trang TRƯỚC (Administrative Parallel Header)
+    # 1. Nếu có ảnh, ưu tiên kiểm tra Bảng Lưới Vật Lý (Physical Grid Topology) TRƯỚC
+    # để tránh detect_parallel_administrative_header nhận nhầm các ô bảng thành Header 2 cột
+    if image is not None:
+        from app.core.table_engines import extract_physical_table_topology
+        target_ocr_boxes = [b["box"] for b in box_info]
+        phys_tbl = extract_physical_table_topology(image, target_ocr_boxes)
+        if phys_tbl is not None:
+            is_complex_grid = (
+                phys_tbl.num_cols >= 6 or any(c.is_merged for c in phys_tbl.cells)
+            )
+            is_scorecard = any(
+                any(kw in c.strip().lower() for kw in ["tiêu chí đánh giá", "điểm tối đa", "điểm tự chấm"])
+                for row in phys_tbl.grid for c in row
+            )
+            if is_complex_grid and not is_scorecard:
+                tbl_top = phys_tbl.bbox[1]
+                tbl_bottom = phys_tbl.bbox[3]
+                pre_tbl_boxes = [b for b in box_info if b["cy"] < tbl_top - 4]
+                post_tbl_boxes = [b for b in box_info if b["cy"] > tbl_bottom + 4]
+
+                # Chạy detect_parallel_administrative_header CHỈ TRÊN pre_tbl_boxes
+                if pre_tbl_boxes:
+                    pre_min_x = min(b["left"] for b in pre_tbl_boxes)
+                    pre_max_x = max(b["right"] for b in pre_tbl_boxes)
+                    pre_w = max(1, pre_max_x - pre_min_x)
+                    hdr_res = detect_parallel_administrative_header(
+                        pre_tbl_boxes, pre_min_x, pre_max_x, pre_w, gutter_thresh, median_h
+                    )
+                    header_lines = hdr_res[0]
+                    rem_pre_boxes = hdr_res[1]
+                    parallel_hdr = getattr(hdr_res, "parallel_header", None)
+                    pre_body_lines = _group_boxes_sliding_window(
+                        rem_pre_boxes, pre_min_x, pre_w, gutter_thresh, median_h
+                    )
+                    pre_lines = header_lines + pre_body_lines
+                else:
+                    pre_lines = []
+                    parallel_hdr = None
+
+                if post_tbl_boxes:
+                    post_min_x = min(b["left"] for b in post_tbl_boxes)
+                    post_max_x = max(b["right"] for b in post_tbl_boxes)
+                    post_w = max(1, post_max_x - post_min_x)
+                    post_lines = _group_boxes_sliding_window(
+                        post_tbl_boxes, post_min_x, post_w, gutter_thresh, median_h
+                    )
+                else:
+                    post_lines = []
+
+                all_lines = pre_lines + phys_tbl.row_boxes + post_lines
+                return LayoutResult(all_lines, [phys_tbl], parallel_header=parallel_hdr)
+
+    # 2. Kiểm tra Header 2 khối hành chính đầu trang TRƯỚC (Administrative Parallel Header) cho tài liệu thông thường
     # Tuyệt đối không để Table Reconstruction nuốt mất Header 2 cột hoặc ghép chung với bảng
     hdr_res = detect_parallel_administrative_header(
         box_info, page_min_x, page_max_x, page_w, gutter_thresh, median_h
@@ -937,32 +1008,77 @@ def reconstruct_document_layout(
     rem_boxes = hdr_res[1]
     parallel_hdr = getattr(hdr_res, "parallel_header", None)
 
-    # 2. Nhận diện và tái dựng bảng biểu bằng UnifiedHybridTableEngine
+    target_boxes_for_table = rem_boxes if header_lines else box_info
+
+    # 2. Ưu tiên số 1 (Primary Engine): Chạy logic detect_and_reconstruct_table nguyên bản
+    # (sử dụng phân tích cụm cột neo STT và header 5 cột Tiêu chí đánh giá / Điểm tối đa / Điểm tự chấm).
+    tbl_v1, pre_tbl_v1, tbl_rows_v1, post_tbl_v1 = detect_and_reconstruct_table(
+        target_boxes_for_table, page_min_x, page_max_x, page_w, median_h
+    )
+
+    is_scorecard_or_standard_v1 = False
+    if tbl_v1 is not None and tbl_v1.grid:
+        h_text = " ".join(tbl_v1.grid[0]).lower()
+        has_scorecard_kw = any(
+            kw in h_text
+            for kw in [
+                "tiêu chí",
+                "tiêu chí đánh giá",
+                "điểm tối đa",
+                "điểm tự chấm",
+                "chấp hành thời gian",
+            ]
+        )
+        has_stt_col = bool(
+            re.match(r"^(?:STT|TT|SỐ\s*TT)$", tbl_v1.grid[0][0].strip().upper())
+        )
+        is_borderless_or_merged = any(
+            kw in h_text
+            for kw in [
+                "tên hàng hóa",
+                "đơn giá",
+                "thành tiền",
+                "kế hoạch",
+                "thực tế",
+                "hạng mục",
+            ]
+        )
+
+        if has_scorecard_kw or (has_stt_col and not is_borderless_or_merged):
+            is_scorecard_or_standard_v1 = True
+
+    if is_scorecard_or_standard_v1 and tbl_v1 is not None:
+        pre_lines = header_lines + _group_boxes_sliding_window(
+            pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+        )
+        post_lines = _group_boxes_sliding_window(
+            post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+        )
+        all_lines = pre_lines + tbl_rows_v1 + post_lines
+        return LayoutResult(all_lines, [tbl_v1], parallel_header=parallel_hdr)
+
+    # 3. Chỉ gọi UnifiedHybridTableEngine (Fallback Engine) khi và chỉ khi:
+    # - detect_and_reconstruct_table trả về None (như sample_05 hoặc bảng chữ ký 3 cột ở cuối)
+    # - HOẶC bảng thuộc dạng hóa đơn không viền / tiêu đề gộp (sample_02, sample_03) không có cấu trúc bảng điểm Tiêu chí đánh giá
     from app.core.table_engines import unified_hybrid_engine
 
-    target_boxes_for_table = rem_boxes if header_lines else box_info
     target_ocr_boxes = [b["box"] for b in target_boxes_for_table]
-
     hybrid_res = unified_hybrid_engine(target_ocr_boxes, image=image)
     if len(hybrid_res[1]) > 0:
         tbl = hybrid_res[1][0]
         all_lines = header_lines + hybrid_res[0]
         return LayoutResult(all_lines, [tbl], parallel_header=parallel_hdr)
 
-    # 3. Fallback: Kiểm tra qua detect_and_reconstruct_table
-    tbl, pre_tbl, tbl_rows, post_tbl = detect_and_reconstruct_table(
-        target_boxes_for_table, page_min_x, page_max_x, page_w, median_h
-    )
-
-    if tbl is not None:
+    # 4. Fallback cuối: Nếu UnifiedHybrid không tìm thấy nhưng detect_and_reconstruct_table có bảng
+    if tbl_v1 is not None:
         pre_lines = header_lines + _group_boxes_sliding_window(
-            pre_tbl, page_min_x, page_w, gutter_thresh, median_h
+            pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
         )
         post_lines = _group_boxes_sliding_window(
-            post_tbl, page_min_x, page_w, gutter_thresh, median_h
+            post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
         )
-        all_lines = pre_lines + tbl_rows + post_lines
-        return LayoutResult(all_lines, [tbl], parallel_header=parallel_hdr)
+        all_lines = pre_lines + tbl_rows_v1 + post_lines
+        return LayoutResult(all_lines, [tbl_v1], parallel_header=parallel_hdr)
 
     # 3. Nếu không có bảng: Gom nhóm các dòng còn lại
     if header_lines:

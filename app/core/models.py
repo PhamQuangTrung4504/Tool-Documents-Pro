@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
     "OCRBox",
+    "TableCell",
     "OCRTable",
     "ParallelHeader",
     "HeaderDetectionResult",
@@ -58,6 +59,31 @@ class OCRBox:
 
 
 @dataclass
+class TableCell:
+    """Đại diện cho 1 ô vật lý trong bảng, hỗ trợ ô gộp 2D (rowspan & colspan)."""
+
+    row_start: int
+    col_start: int
+    row_end: int      # exclusive (row_span = row_end - row_start)
+    col_end: int      # exclusive (col_span = col_end - col_start)
+    text: str = ""
+    bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] của khung ô vật lý
+    boxes: List[OCRBox] = field(default_factory=list)
+
+    @property
+    def row_span(self) -> int:
+        return max(1, self.row_end - self.row_start)
+
+    @property
+    def col_span(self) -> int:
+        return max(1, self.col_end - self.col_start)
+
+    @property
+    def is_merged(self) -> bool:
+        return self.row_span > 1 or self.col_span > 1
+
+
+@dataclass
 class OCRTable:
     """Bảng biểu đã được tái dựng cấu trúc hàng và cột."""
 
@@ -66,6 +92,7 @@ class OCRTable:
     num_rows: int = 0
     num_cols: int = 0
     row_boxes: List[List[OCRBox]] = field(default_factory=list)  # Danh sách box cho từng hàng
+    cells: List[TableCell] = field(default_factory=list)         # Danh sách ô vật lý (kèm rowspan/colspan)
 
 
 @dataclass
@@ -78,32 +105,52 @@ class ParallelHeader:
     right_boxes: List[OCRBox] = field(default_factory=list)
 
 
-class HeaderDetectionResult(tuple):
+class HeaderDetectionResult(Tuple[List[List[OCRBox]], List[dict]]):
     """
     Kết quả phát hiện header 2 khối song song.
     Kế thừa tuple (grouped_lines, remaining) để tương thích 100% với code giải nén 2 phần tử:
     header_lines, rem = detect_parallel_administrative_header(...)
     đồng thời lưu thuộc tính parallel_header.
     """
-    def __new__(cls, grouped_lines, remaining, parallel_header=None):
-        return super().__new__(cls, (grouped_lines, remaining))
+    parallel_header: Optional[ParallelHeader]
 
-    def __init__(self, grouped_lines, remaining, parallel_header=None):
-        self.parallel_header = parallel_header
+    def __new__(
+        cls,
+        grouped_lines: List[List[OCRBox]],
+        remaining: List[dict],
+        parallel_header: Optional[ParallelHeader] = None,
+    ) -> HeaderDetectionResult:
+        inst = super().__new__(cls, (grouped_lines, remaining))
+        inst.parallel_header = parallel_header
+        return inst
 
 
-class LayoutResult(tuple):
+class LayoutResult(Tuple[List[List[OCRBox]], List[OCRTable]]):
     """
     Kết quả tái dựng bố cục tài liệu.
     Kế thừa tuple (grouped_lines, tables) để tương thích 100% với code giải nén 2 phần tử:
     grouped_lines, tables = reconstruct_document_layout(...)
     đồng thời lưu thuộc tính parallel_header.
     """
-    def __new__(cls, grouped_lines, tables, parallel_header=None):
-        return super().__new__(cls, (grouped_lines, tables))
+    parallel_header: Optional[ParallelHeader]
 
-    def __init__(self, grouped_lines, tables, parallel_header=None):
-        self.parallel_header = parallel_header
+    def __new__(
+        cls,
+        grouped_lines: List[List[OCRBox]],
+        tables: List[OCRTable],
+        parallel_header: Optional[ParallelHeader] = None,
+    ) -> LayoutResult:
+        inst = super().__new__(cls, (grouped_lines, tables))
+        inst.parallel_header = parallel_header
+        return inst
+
+    @property
+    def grouped_lines(self) -> List[List[OCRBox]]:
+        return self[0]
+
+    @property
+    def tables(self) -> List[OCRTable]:
+        return self[1]
 
 
 @dataclass

@@ -25,6 +25,7 @@ from app.core.models import (
     OCRTable,
     ParallelHeader,
     SymbolDecision,
+    TableCell,
 )
 from app.core.text_postprocessor import ContextSymbolRecovery
 
@@ -33,9 +34,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "MorphologicalGridTableEngine",
     "SpatialProjectionGraphEngine",
+    "PhysicalGridTopologyEngine",
     "UnifiedHybridTableEngine",
+    "extract_physical_table_topology",
+    "split_table_crossing_boxes",
     "morphological_grid_engine",
     "spatial_projection_engine",
+    "physical_grid_engine",
     "unified_hybrid_engine",
 ]
 
@@ -512,12 +517,26 @@ class SpatialProjectionGraphEngine:
             int(max(b["bottom"] for b in boxes)),
         ]
 
+        std_cells: List[TableCell] = []
+        for r_i, r_data in enumerate(table_grid):
+            for c_i, c_txt in enumerate(r_data):
+                std_cells.append(
+                    TableCell(
+                        row_start=r_i,
+                        col_start=c_i,
+                        row_end=r_i + 1,
+                        col_end=c_i + 1,
+                        text=c_txt,
+                    )
+                )
+
         ocr_table = OCRTable(
             grid=table_grid,
             bbox=table_bbox,
             num_rows=len(table_grid),
             num_cols=num_cols,
             row_boxes=table_row_boxes,
+            cells=std_cells,
         )
 
         return ocr_table, table_row_boxes
@@ -592,16 +611,581 @@ class MorphologicalGridTableEngine:
         return self._fallback_engine(boxes, image=image)
 
 
+def extract_physical_table_topology(
+    image: np.ndarray,
+    boxes: List[OCRBox],
+    min_cols: int = 2,
+    min_rows: int = 2,
+) -> Optional[OCRTable]:
+    """
+    Trích xuất cấu trúc bảng dựa trên hình thái học lưới ô vật lý (Physical Grid Cell Topology).
+    Phát hiện vạch kẻ ngang/dọc, tính toán các ô gộp 2D (rowspan & colspan) và gom toàn bộ
+    nội dung nhiều dòng trong cùng một khung ô thành 1 chuỗi liền mạch duy nhất.
+    """
+    if image is None or not boxes:
+        return None
+
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
+
+    img_h, img_w = gray.shape[:2]
+    if img_h < 50 or img_w < 50:
+        return None
+
+    # Bước 1 — Trích xuất mặt nạ vạch kẻ ngang & dọc
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 5
+    )
+
+    h_kernel_len = max(20, img_w // 45)
+    v_kernel_len = max(18, img_h // 45)
+
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_len, 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
+
+    h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
+    v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
+
+    h_mask = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)))
+    v_mask = cv2.morphologyEx(v_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)))
+
+    # Cô lập Khung Bảng Vật Lý Lớn Nhất (Largest Connected Grid ROI)
+    grid_mask = cv2.bitwise_or(h_mask, v_mask)
+    grid_conn = cv2.morphologyEx(grid_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+    grid_contours, _ = cv2.findContours(grid_conn, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    table_roi: Optional[Tuple[int, int, int, int]] = None
+    best_area = 0.0
+    for cnt in grid_contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w >= int(0.35 * img_w) and h >= int(0.12 * img_h):
+            area = float(w * h)
+            if area > best_area:
+                best_area = area
+                table_roi = (x, y, w, h)
+
+    if table_roi is None:
+        return None
+
+    gx, gy, gw, gh = table_roi
+    roi_x1, roi_y1 = max(0, gx - 5), max(0, gy - 5)
+    roi_x2, roi_y2 = min(img_w, gx + gw + 5), min(img_h, gy + gh + 5)
+
+    # Bước 2 — Xác định Hệ Lưới Trục Chuẩn (Grid Axes X0..XM và Y0..YN)
+    h_contours, _ = cv2.findContours(h_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    h_segments: List[Tuple[float, float, float]] = []
+    for cnt in h_contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w >= h_kernel_len:
+            seg_cx = float(x + w / 2.0)
+            seg_cy = float(y + h / 2.0)
+            if roi_x1 <= seg_cx <= roi_x2 and roi_y1 <= seg_cy <= roi_y2:
+                h_segments.append((float(x), float(x + w), seg_cy))
+
+    v_contours, _ = cv2.findContours(v_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    v_segments: List[Tuple[float, float, float]] = []
+    for cnt in v_contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if h >= v_kernel_len:
+            seg_cx = float(x + w / 2.0)
+            seg_cy = float(y + h / 2.0)
+            if roi_x1 <= seg_cx <= roi_x2 and roi_y1 <= seg_cy <= roi_y2:
+                v_segments.append((float(y), float(y + h), seg_cx))
+
+    if len(h_segments) < 2 or len(v_segments) < 2:
+        return None
+
+    def _cluster_coords(coords: List[float], tol: float = 8.0) -> List[float]:
+        if not coords:
+            return []
+        sorted_c = sorted(coords)
+        clusters: List[List[float]] = []
+        for c in sorted_c:
+            if not clusters or abs(c - float(np.mean(clusters[-1]))) > tol:
+                clusters.append([c])
+            else:
+                clusters[-1].append(c)
+        return [float(np.mean(cl)) for cl in clusters]
+
+    raw_y = _cluster_coords([s[2] for s in h_segments], tol=8.0)
+    raw_x = _cluster_coords([s[2] for s in v_segments], tol=8.0)
+
+    valid_y: List[float] = []
+    for yk in raw_y:
+        intersecting_v = sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10))
+        if intersecting_v >= 2:
+            valid_y.append(yk)
+
+    valid_x: List[float] = []
+    for xk in raw_x:
+        intersecting_h = sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10))
+        if intersecting_h >= 2:
+            valid_x.append(xk)
+
+    valid_y.sort()
+    valid_x.sort()
+
+    N = len(valid_y) - 1
+    M = len(valid_x) - 1
+
+    if N < min_rows or M < min_cols:
+        return None
+
+    # Bước 3 — Phát hiện Ô Gộp Ngang (colspan) & Ô Gộp Dọc (rowspan) bằng Kiểm tra Tường Ngăn
+    has_v_wall = [[False for _ in range(M - 1)] for _ in range(N)]
+    has_h_wall = [[False for _ in range(M)] for _ in range(N - 1)]
+
+    for r in range(N):
+        y_top = valid_y[r]
+        y_bottom = valid_y[r + 1]
+        cell_h = y_bottom - y_top
+        margin_y = max(2.0, 0.15 * cell_h)
+        y_start = int(max(0, y_top + margin_y))
+        y_end = int(min(img_h, y_bottom - margin_y))
+        if y_end <= y_start:
+            y_start = int(y_top)
+            y_end = int(y_bottom)
+
+        for c in range(M - 1):
+            x_wall = valid_x[c + 1]
+            x_min = int(max(0, x_wall - 5))
+            x_max = int(min(img_w, x_wall + 6))
+
+            strip = v_mask[y_start:y_end, x_min:x_max]
+            if strip.size > 0:
+                row_has_pixel = np.any(strip > 0, axis=1)
+                density = float(np.mean(row_has_pixel))
+                if density >= 0.25:
+                    has_v_wall[r][c] = True
+
+    for r in range(N - 1):
+        y_wall = valid_y[r + 1]
+        y_min = int(max(0, y_wall - 5))
+        y_max = int(min(img_h, y_wall + 6))
+
+        for c in range(M):
+            x_left = valid_x[c]
+            x_right = valid_x[c + 1]
+            cell_w = x_right - x_left
+            margin_x = max(2.0, 0.15 * cell_w)
+            x_start = int(max(0, x_left + margin_x))
+            x_end = int(min(img_w, x_right - margin_x))
+            if x_end <= x_start:
+                x_start = int(x_left)
+                x_end = int(x_right)
+
+            strip = h_mask[y_min:y_max, x_start:x_end]
+            if strip.size > 0:
+                col_has_pixel = np.any(strip > 0, axis=0)
+                density = float(np.mean(col_has_pixel))
+                if density >= 0.25:
+                    has_h_wall[r][c] = True
+
+    visited = [[False for _ in range(M)] for _ in range(N)]
+    cells: List[TableCell] = []
+
+    for r in range(N):
+        for c in range(M):
+            if visited[r][c]:
+                continue
+
+            c_end = c + 1
+            while c_end < M and not has_v_wall[r][c_end - 1] and not visited[r][c_end]:
+                c_end += 1
+
+            r_end = r + 1
+            while r_end < N:
+                can_expand_down = True
+                for ci in range(c, c_end):
+                    if has_h_wall[r_end - 1][ci] or visited[r_end][ci]:
+                        can_expand_down = False
+                        break
+                for ci in range(c, c_end - 1):
+                    if has_v_wall[r_end][ci]:
+                        can_expand_down = False
+                        break
+                if not can_expand_down:
+                    break
+                r_end += 1
+
+            for ri in range(r, r_end):
+                for ci in range(c, c_end):
+                    visited[ri][ci] = True
+
+            cell_bbox = [int(valid_x[c]), int(valid_y[r]), int(valid_x[c_end]), int(valid_y[r_end])]
+            cell = TableCell(
+                row_start=r,
+                col_start=c,
+                row_end=r_end,
+                col_end=c_end,
+                bbox=cell_bbox,
+            )
+            cells.append(cell)
+
+    # Bước 4 — Gom Toàn Bộ Dòng Chữ Trong Cùng 1 Khung Ô Thành 1 Dòng Duy Nhất
+    for b in boxes:
+        pts = b.bbox
+        bx1 = min(pt[0] for pt in pts)
+        bx2 = max(pt[0] for pt in pts)
+        by1 = min(pt[1] for pt in pts)
+        by2 = max(pt[1] for pt in pts)
+        bcx = (bx1 + bx2) / 2.0
+        bcy = (by1 + by2) / 2.0
+
+        if bcy < valid_y[0] - 10 or bcy > valid_y[-1] + 10 or bcx < valid_x[0] - 15 or bcx > valid_x[-1] + 15:
+            continue
+
+        assigned_cell: Optional[TableCell] = None
+        for cell in cells:
+            if cell.bbox is None:
+                continue
+            x1, y1, x2, y2 = cell.bbox
+            if (x1 - 4) <= bcx <= (x2 + 4) and (y1 - 4) <= bcy <= (y2 + 4):
+                assigned_cell = cell
+                break
+
+        if assigned_cell is None:
+            best_ioa = 0.0
+            for cell in cells:
+                if cell.bbox is None:
+                    continue
+                x1, y1, x2, y2 = cell.bbox
+                inter_x = max(0.0, min(x2, bx2) - max(x1, bx1))
+                inter_y = max(0.0, min(y2, by2) - max(y1, by1))
+                inter_area = inter_x * inter_y
+                b_area = max(1.0, (bx2 - bx1) * (by2 - by1))
+                ioa = inter_area / b_area
+                if ioa > best_ioa:
+                    best_ioa = ioa
+                    assigned_cell = cell
+            if best_ioa < 0.20:
+                assigned_cell = None
+
+        if assigned_cell is None and (valid_y[0] - 6 <= bcy <= valid_y[-1] + 6 and valid_x[0] - 10 <= bcx <= valid_x[-1] + 10):
+            min_dist = float("inf")
+            for cell in cells:
+                if cell.bbox is None:
+                    continue
+                cx1, cy1, cx2, cy2 = cell.bbox
+                ccx = (cx1 + cx2) / 2.0
+                ccy = (cy1 + cy2) / 2.0
+                dist = (bcx - ccx) ** 2 + (bcy - ccy) ** 2
+                if dist < min_dist:
+                    min_dist = dist
+                    assigned_cell = cell
+
+        if assigned_cell is not None:
+            assigned_cell.boxes.append(b)
+
+    for cell in cells:
+        if not cell.boxes:
+            continue
+        cell_box_info = [_box_to_dict(b) for b in cell.boxes]
+        cell_box_info.sort(key=lambda it: (it["top"], it["left"]))
+
+        heights = [it["h"] for it in cell_box_info]
+        med_h = float(np.median(heights)) if heights else 20.0
+
+        intra_lines: List[List[dict]] = []
+        for bi in cell_box_info:
+            matched = False
+            for line in intra_lines:
+                line_avg_cy = float(np.mean([it["cy"] for it in line]))
+                if abs(bi["cy"] - line_avg_cy) <= 0.55 * med_h:
+                    line.append(bi)
+                    matched = True
+                    break
+            if not matched:
+                intra_lines.append([bi])
+
+        intra_lines.sort(key=lambda l: min(it["top"] for it in l))
+        line_strings = []
+        for line in intra_lines:
+            line.sort(key=lambda it: it["left"])
+            line_txt = " ".join(it["text"].strip() for it in line if it["text"].strip())
+            if line_txt:
+                line_strings.append(line_txt)
+
+        cell.text = " ".join(line_strings).strip()
+
+    grid: List[List[str]] = [["" for _ in range(M)] for _ in range(N)]
+    row_boxes: List[List[OCRBox]] = [[] for _ in range(N)]
+
+    for cell in cells:
+        grid[cell.row_start][cell.col_start] = cell.text
+        row_boxes[cell.row_start].extend(cell.boxes)
+
+    for r in range(N):
+        row_boxes[r].sort(key=lambda b: min(pt[0] for pt in b.bbox))
+
+    table_bbox = [int(valid_x[0]), int(valid_y[0]), int(valid_x[-1]), int(valid_y[-1])]
+    return OCRTable(
+        grid=grid,
+        bbox=table_bbox,
+        num_rows=N,
+        num_cols=M,
+        row_boxes=row_boxes,
+        cells=cells,
+    )
+
+
+def split_table_crossing_boxes(
+    boxes: List[OCRBox],
+    image: Optional[np.ndarray],
+    vietocr_model: Any = None,
+) -> List[OCRBox]:
+    """
+    Tách các OCRBox bị DBNet gộp ngang xuyên qua vạch kẻ dọc của bảng:
+    - Nếu ảnh có lưới bảng vật lý và các đường kẻ dọc valid_x.
+    - Với các box nằm trong bảng mà [bx1, bx2] cắt ngang qua vạch kẻ dọc (bx1 < x_wall - 6 và bx2 > x_wall + 6)
+      và tại x_wall có vạch dọc thực sự (density >= 0.25):
+      Tách box tại x_wall thành các sub-crops riêng biệt và nhận dạng lại bằng VietOCR.
+    """
+    if image is None or not boxes:
+        return boxes
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    img_h, img_w = gray.shape[:2]
+
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 5
+    )
+
+    h_kernel_len = max(20, img_w // 45)
+    v_kernel_len = max(18, img_h // 45)
+
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_len, 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
+
+    h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
+    v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
+
+    h_mask = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)))
+    v_mask = cv2.morphologyEx(v_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)))
+
+    grid_mask = cv2.bitwise_or(h_mask, v_mask)
+    grid_conn = cv2.morphologyEx(grid_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+    grid_contours, _ = cv2.findContours(grid_conn, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    table_roi: Optional[Tuple[int, int, int, int]] = None
+    best_area = 0.0
+    for cnt in grid_contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w >= int(0.35 * img_w) and h >= int(0.12 * img_h):
+            area = float(w * h)
+            if area > best_area:
+                best_area = area
+                table_roi = (x, y, w, h)
+
+    if table_roi is None:
+        return boxes
+
+    gx, gy, gw, gh = table_roi
+    roi_x1, roi_y1 = max(0, gx - 5), max(0, gy - 5)
+    roi_x2, roi_y2 = min(img_w, gx + gw + 5), min(img_h, gy + gh + 5)
+
+    v_contours, _ = cv2.findContours(v_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    v_segments: List[Tuple[float, float, float]] = []
+    for cnt in v_contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if h >= v_kernel_len:
+            seg_cx = float(x + w / 2.0)
+            seg_cy = float(y + h / 2.0)
+            if roi_x1 <= seg_cx <= roi_x2 and roi_y1 <= seg_cy <= roi_y2:
+                v_segments.append((float(y), float(y + h), seg_cx))
+
+    if len(v_segments) < 2:
+        return boxes
+
+    def _cluster_coords(coords: List[float], tol: float = 8.0) -> List[float]:
+        if not coords:
+            return []
+        sorted_c = sorted(coords)
+        clusters: List[List[float]] = []
+        for c in sorted_c:
+            if not clusters or abs(c - float(np.mean(clusters[-1]))) > tol:
+                clusters.append([c])
+            else:
+                clusters[-1].append(c)
+        return [float(np.mean(cl)) for cl in clusters]
+
+    raw_x = _cluster_coords([s[2] for s in v_segments], tol=8.0)
+    valid_x = sorted(raw_x)
+    if len(valid_x) < 2:
+        return boxes
+
+    from PIL import Image
+    from app.core.vision_preprocess import clean_crop_borders, pad_small_crop_for_vietocr
+    from app.core.text_postprocessor import VietnameseTextPostProcessor
+    import unicodedata
+
+    new_boxes: List[OCRBox] = []
+    for b in boxes:
+        pts = b.bbox
+        bx1 = min(pt[0] for pt in pts)
+        bx2 = max(pt[0] for pt in pts)
+        by1 = min(pt[1] for pt in pts)
+        by2 = max(pt[1] for pt in pts)
+        bcy = (by1 + by2) / 2.0
+
+        if not (roi_y1 <= bcy <= roi_y2 and bx1 >= roi_x1 - 10 and bx2 <= roi_x2 + 10):
+            new_boxes.append(b)
+            continue
+
+        crossing_walls: List[int] = []
+        for xw in valid_x:
+            if bx1 < xw - 6 and bx2 > xw + 6:
+                x_min = int(max(0, xw - 5))
+                x_max = int(min(img_w, xw + 6))
+                y_start = int(max(0, by1))
+                y_end = int(min(img_h, by2))
+                if y_end > y_start:
+                    strip = v_mask[y_start:y_end, x_min:x_max]
+                    if strip.size > 0:
+                        density = float(np.mean(np.any(strip > 0, axis=1)))
+                        if density >= 0.25:
+                            crossing_walls.append(int(round(xw)))
+
+        if not crossing_walls:
+            new_boxes.append(b)
+            continue
+
+        x_splits = sorted(set([int(bx1)] + crossing_walls + [int(bx2)]))
+        sub_boxes_for_b: List[OCRBox] = []
+
+        for k in range(len(x_splits) - 1):
+            sub_x1 = x_splits[k]
+            sub_x2 = x_splits[k + 1]
+            sub_w = sub_x2 - sub_x1
+            sub_h = by2 - by1
+            if sub_w < 8 or sub_h < 6:
+                continue
+
+            sub_bbox = [
+                [sub_x1, by1],
+                [sub_x2, by1],
+                [sub_x2, by2],
+                [sub_x1, by2],
+            ]
+
+            sub_crop = image[max(0, by1):min(img_h, by2), max(0, sub_x1):min(img_w, sub_x2)]
+            if sub_crop.size == 0:
+                continue
+
+            sub_crop = clean_crop_borders(sub_crop)
+            sub_text = ""
+            sub_conf = b.confidence
+
+            if vietocr_model is not None:
+                try:
+                    padded_crop = pad_small_crop_for_vietocr(sub_crop)
+                    crop_rgb = cv2.cvtColor(padded_crop, cv2.COLOR_BGR2RGB)
+                    crop_pil = Image.fromarray(crop_rgb)
+                    pred_res = vietocr_model.predict(crop_pil, return_prob=True)
+                    if isinstance(pred_res, tuple):
+                        sub_text = (pred_res[0] or "").strip()
+                        sub_conf = float(pred_res[1]) if pred_res[1] is not None else b.confidence
+                    else:
+                        sub_text = str(pred_res).strip()
+                except Exception as exc:
+                    logger.debug(f"Failed to recognize sub-crop: {exc}")
+                    sub_text = ""
+
+            sub_text = unicodedata.normalize("NFC", sub_text)
+            sub_text = VietnameseTextPostProcessor.clean_and_restore(sub_text)
+
+            if sub_text:
+                sub_boxes_for_b.append(
+                    OCRBox(text=sub_text, confidence=sub_conf, bbox=sub_bbox, raw_text=sub_text)
+                )
+
+        if sub_boxes_for_b:
+            new_boxes.extend(sub_boxes_for_b)
+        else:
+            new_boxes.append(b)
+
+    return new_boxes
+
+
+class PhysicalGridTopologyEngine:
+    """
+    Thuật toán nhận diện cấu trúc ô lưới vật lý (Cell-First Topology):
+    - Phát hiện vạch kẻ ngang/dọc bằng hình thái học OpenCV.
+    - Phát hiện ô gộp 2D (rowspan, colspan) bằng kiểm tra tường ngăn.
+    - Gom toàn bộ dòng chữ trong cùng 1 khung ô thành 1 dòng duy nhất.
+    """
+
+    def __call__(
+        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+    ) -> LayoutResult:
+        return self.reconstruct_layout(boxes, image=image)
+
+    def reconstruct_layout(
+        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+    ) -> LayoutResult:
+        if not boxes:
+            return LayoutResult([], [], parallel_header=None)
+
+        if image is None:
+            return LayoutResult([], [], parallel_header=None)
+
+        tbl = extract_physical_table_topology(image, boxes)
+        if tbl is None or tbl.num_cols < 2 or tbl.num_rows < 2:
+            return LayoutResult([], [], parallel_header=None)
+
+        box_info = [_box_to_dict(b) for b in boxes]
+        tbl_top = tbl.bbox[1]
+        tbl_bottom = tbl.bbox[3]
+
+        pre_boxes = [b for b in box_info if b["cy"] < tbl_top - 5]
+        post_boxes = [b for b in box_info if b["cy"] > tbl_bottom + 5]
+
+        heights = [b["h"] for b in box_info]
+        median_h = float(np.median(heights)) if heights else 20.0
+
+        def _group_simple(b_list: List[dict]) -> List[List[OCRBox]]:
+            if not b_list:
+                return []
+            b_sorted = sorted(b_list, key=lambda it: (it["top"], it["left"]))
+            lines: List[List[dict]] = []
+            for item in b_sorted:
+                matched = False
+                for l in lines:
+                    avg_cy = float(np.mean([x["cy"] for x in l]))
+                    if abs(item["cy"] - avg_cy) <= 0.55 * median_h:
+                        l.append(item)
+                        matched = True
+                        break
+                if not matched:
+                    lines.append([item])
+            lines.sort(key=lambda l: min(x["top"] for x in l))
+            res = []
+            for l in lines:
+                l.sort(key=lambda x: x["left"])
+                res.append([x["box"] for x in l])
+            return res
+
+        pre_lines = _group_simple(pre_boxes)
+        post_lines = _group_simple(post_boxes)
+        all_lines = pre_lines + tbl.row_boxes + post_lines
+
+        return LayoutResult(all_lines, [tbl], parallel_header=None)
+
+
 class UnifiedHybridTableEngine:
     """
     Phương pháp 3 — Unified Hybrid Table Engine:
-    Kết hợp tối ưu giữa nhận diện hình thái học đường kẻ (Morphological Grid) và đồ thị
-    phép chiếu trục X/Y (Spatial Projection Graph), đạt độ chính xác tối đa trên cả 5 dạng bảng tiêu chuẩn.
+    Kết hợp tối ưu giữa nhận diện hình thái học đường kẻ (Morphological Grid / Physical Grid)
+    và đồ thị phép chiếu trục X/Y (Spatial Projection Graph), đạt độ chính xác tối đa trên
+    cả 5 dạng bảng tiêu chuẩn và các bảng phức tạp nhiều tầng như Mẫu số 02.
     """
 
     def __init__(self):
         self.spatial_engine = SpatialProjectionGraphEngine()
         self.morph_engine = MorphologicalGridTableEngine()
+        self.physical_engine = PhysicalGridTopologyEngine()
 
     def __call__(
         self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
@@ -615,11 +1199,19 @@ class UnifiedHybridTableEngine:
         if not boxes:
             return LayoutResult([], [], parallel_header=None)
 
+        if image is not None:
+            phys_res = self.physical_engine(boxes, image=image)
+            if phys_res.tables:
+                tbl = phys_res.tables[0]
+                if any(c.is_merged for c in tbl.cells) and (tbl.num_cols >= 6 or any(c.col_span >= 3 for c in tbl.cells)):
+                    return phys_res
+
         # Sử dụng đồ thị chiếu không gian với tiền lọc nhiễu và gom cụm chịu lệch Y
         return self.spatial_engine.reconstruct_layout(boxes, image=image)
 
 
 # Khởi tạo các singleton instance sẵn sàng sử dụng
+physical_grid_engine = PhysicalGridTopologyEngine()
 morphological_grid_engine = MorphologicalGridTableEngine()
 spatial_projection_engine = SpatialProjectionGraphEngine()
 unified_hybrid_engine = UnifiedHybridTableEngine()
