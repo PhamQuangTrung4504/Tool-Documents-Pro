@@ -35,6 +35,8 @@ __all__ = [
     "estimate_and_correct_skew",
     "filter_border_noise_boxes",
     "assess_image_quality",
+    "compensate_illumination",
+    "robust_binarization",
 ]
 
 def get_rotate_crop_image(
@@ -616,6 +618,77 @@ def assess_image_quality(img_bgr: np.ndarray) -> Dict[str, Any]:
         "contrast_span": contrast_span,
         "is_clean_document": is_clean,
     }
+
+
+def compensate_illumination(image: np.ndarray) -> np.ndarray:
+    """
+    Khử bất đồng nhất ánh sáng & làm phẳng nền (Illumination Compensation / Shading Correction):
+    - Dùng phép mở hình thái học (morphological opening) với kernel kích thước lớn
+      (kernel_size = max(31, max(h, w) // 20) | 1) trên ảnh để ước lượng lớp nền (background).
+    - Làm phẳng nền bằng shading correction: norm = (gray / bg * 255), loại bỏ bóng đổ,
+      góc tối và hiện tượng giấy ố vàng/lệch màu.
+    - Hỗ trợ cả ảnh 1 kênh (Grayscale) và 3 kênh (BGR/BGRA).
+    """
+    if image is None or image.size == 0:
+        return image
+
+    h, w = image.shape[:2]
+    kernel_sz = max(31, max(h, w) // 20)
+    if kernel_sz % 2 == 0:
+        kernel_sz += 1
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_sz, kernel_sz))
+
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        # Xử lý trên kênh L của không gian màu LAB để bù sáng tự nhiên
+        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+        l_chan, a_chan, b_chan = cv2.split(lab)
+        bg = cv2.morphologyEx(l_chan, cv2.MORPH_OPEN, kernel)
+        bg_f = bg.astype(np.float32) + 1e-5
+        l_f = l_chan.astype(np.float32)
+        norm_l = np.clip((l_f / bg_f) * 255.0, 0, 255).astype(np.uint8)
+        merged = cv2.merge([norm_l, a_chan, b_chan])
+        return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+    elif len(image.shape) == 3 and image.shape[2] == 4:
+        bgr = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        return compensate_illumination(bgr)
+    else:
+        bg = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+        bg_f = bg.astype(np.float32) + 1e-5
+        img_f = image.astype(np.float32)
+        norm = np.clip((img_f / bg_f) * 255.0, 0, 255).astype(np.uint8)
+        return norm
+
+
+def robust_binarization(image: np.ndarray) -> np.ndarray:
+    """
+    Tầng nhị phân hóa thích ứng nâng cao (Robust Binarization):
+    Kết hợp giữa Otsu cục bộ, Sauvola/Niblack thích ứng và Adaptive Thresholding có kiểm soát biên,
+    giúp giữ lại các nét chữ mờ trên ảnh chụp kém chất lượng mà không làm gãy nét.
+    """
+    if image is None or image.size == 0:
+        return image
+
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
+
+    # Áp dụng làm phẳng ánh sáng trước
+    comp = compensate_illumination(gray)
+
+    # Adaptive Gaussian Thresholding với kiểm soát biên
+    bw_adapt = cv2.adaptiveThreshold(
+        comp, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
+    )
+
+    # Otsu Thresholding toàn cục trên ảnh đã bù sáng
+    _, bw_otsu = cv2.threshold(comp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Kết hợp: bitwise_and giữa adapt và otsu để giữ trọn vẹn nét chữ đen
+    combined = cv2.bitwise_and(bw_adapt, bw_otsu)
+    return combined
+
 
 
 # ---------------------------------------------------------------------------

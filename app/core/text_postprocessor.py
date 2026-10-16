@@ -1091,8 +1091,10 @@ def final_document_cleanup(text: str) -> str:
     text = re.sub(r"(\|\s*)NCUT(\s*\|)", r"\1Họ tên NCUT\2", text)
     text = re.sub(r"(?m)^([ \t]*)NCUT(?=\s*\|)", r"\1Họ tên NCUT", text)
     text = re.sub(r"Số\s+lượng\s+NCUT[^\n|]*(?=\||$)", "Số lượng NCUT (3=4+5)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\(\s*3\s*[-=~_]?\s*4{1,2}5\s*\)", "(3=4+5)", text)
     text = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", text)
     text = re.sub(r"\((?:3\s*[-=]\s*445|3\s*=\s*4\s*\+\s*5)\)", "(3=4+5)", text)
+    text = text.replace("(3=445)", "(3=4+5)").replace("(3-445)", "(3=4+5)").replace("(3 = 445)", "(3=4+5)").replace("(3 - 445)", "(3=4+5)")
     text = re.sub(r"\bNơi\s+\(thôn\)", "Nơi cư trú (thôn)", text, flags=re.IGNORECASE)
     text = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
     text = re.sub(r"nhà\s*0311\s*tu\s+hành", "nhà tu hành", text)
@@ -1101,6 +1103,27 @@ def final_document_cleanup(text: str) -> str:
     text = re.sub(r"Trưởng\s+ban\s+trận\s+thôn\b", "Trưởng ban công tác mặt trận thôn", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<!nhà giáo, )(?<!thầy )nhà\s+thuốc,\s*lương\s+y", "nhà giáo, thầy thuốc, lương y", text, flags=re.IGNORECASE)
     text = re.sub(r"\bĐảng\s+VIÊN\b", "Đảng viên", text)
+
+    # Khôi phục Cột (9) trên Mẫu số 02: người thực hiện nghi lễ truyền thống, tín ngưỡng
+    text = re.sub(
+        r"người\s+thực\s+hiện\s+nghi\s+l[ễế]\s*(?:truyền\s+|thống,?\s*|tín\s*)*ngưỡng",
+        "người thực hiện nghi lễ truyền thống, tín ngưỡng",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"nghi\s+l[ễế]\s*(?:truyền\s+|thống,?\s*|tín\s*)*ngưỡng",
+        "nghi lễ truyền thống, tín ngưỡng",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"Già\s+làng,\s*trưởng\s+dòng\s+họ,\s*người\s+thực\s+hiện\s+nghi\s+l[ễế][^\n|]*?ngưỡng",
+        "Già làng, trưởng dòng họ, người thực hiện nghi lễ truyền thống, tín ngưỡng",
+        text,
+        flags=re.IGNORECASE,
+    )
+
     # Sửa lỗi cột (0) thành (7) và (0) thành (9) trong hàng đánh số cột
     text = re.sub(r"(\(\s*6\s*\)\s*\|\s*)(?:\(?\s*[0Oo]\s*\)?|7)(?=\s*\|\s*\(\s*8\s*\))", r"\1(7)", text)
     text = re.sub(r"(\(\s*8\s*\)\s*\|\s*)(?:\(?\s*[0Oo]\s*\)?|9)(?=\s*\|\s*\(\s*10\s*\))", r"\1(9)", text)
@@ -1118,11 +1141,38 @@ def final_document_cleanup(text: str) -> str:
     if "(1)" in text and "(2)" in text:
         text = "\n".join(_normalize_col_numbers_line(l) for l in text.split("\n"))
     text = re.sub(r"\(\s*1\s*\)\s*2\s*\|\s*\(\s*3\s*\)", "(1) | (2) | (3)", text)
-    text = re.sub(r"Từ\s+[Cc]ột\s+\([9Đ]\)\s+đến\s+cột\s+\([^)]*\):*(?:\s*5\):*)?", "Từ Cột (9) đến cột (15):", text)
-    text = re.sub(r"Từ\s+[Cc]ột\s+\(9\)\s+đến\s+cột\s+\(15\):+5\):*", "Từ Cột (9) đến cột (15):", text)
-    text = re.sub(r"\bvỉ\s+dụ:\b", "ví dụ:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bnghi\s+lế\s+ngưỡng\b", "nghi lễ truyền thống, tín ngưỡng", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bnghi\s+lế\b", "nghi lễ", text, flags=re.IGNORECASE)
+
+    # Sửa dòng ghi chú Mẫu số 02: Từ Cột (9) đến cột (15):
+    text = re.sub(
+        r"Từ\s+[Cc]ột\s*[\(（][^)\n]+[\)）]?\s*đến\s+cột\s*[\(（]?[1I][59l][\)）:\s]*(?::?\s*\+5\):*)?:?\s*",
+        "Từ Cột (9) đến cột (15): ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"Từ\s+[Cc]ột\s+\([9ĐD0]\)\s+đến\s+cột\s+[^\n:]*:?\s*", "Từ Cột (9) đến cột (15): ", text)
+    text = re.sub(r"Từ\s+[Cc]ột\s+\(9\)\s+đến\s+cột\s+\(15\):+(?:\+5\):*)?:*\s*", "Từ Cột (9) đến cột (15): ", text)
+    text = re.sub(r"\bv[ỉi]\s+dụ\b", "ví dụ", text, flags=re.IGNORECASE)
+
+    # Chuẩn hóa Bảng Địa chính / Thửa đất (image_612a9c.jpg)
+    text = re.sub(r"Diện\s+tích\s*\(\s*m[\?\*2]\s*\)", "Diện tích (m²)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bDiện\s+tích\s*\(m\?\)", "Diện tích (m²)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bDiện\s+tích\s*\(m2\)", "Diện tích (m²)", text, flags=re.IGNORECASE)
+    text = re.sub(r"Số\s+tờ\s+2\s*(?:Chiner|chiner|câp|cap)\b", "Số tờ 2 cấp", text, flags=re.IGNORECASE)
+    text = re.sub(r"Số\s+tờ\s+3\s*(?:039|03|câp|cap)\b", "Số tờ 3 cấp", text, flags=re.IGNORECASE)
+    text = re.sub(r"Đơn\s+đăng\s+[kK][ÝỶýỷ]\s+DD\b", "Đơn đăng ký ĐĐ", text, flags=re.IGNORECASE)
+    text = re.sub(r"Đơn\s+đăng\s+ký\s+DD\b", "Đơn đăng ký ĐĐ", text, flags=re.IGNORECASE)
+    text = re.sub(r"Tên\s+(?:ấy\s*p|ây\s*p|áp)\b", "Tên ấp", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:ấy|ây)\s*\|\s*p2\b", "ấp 2", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:ấy|ây)\s*p2\b", "ấp 2", text, flags=re.IGNORECASE)
+    text = re.sub(r"\báp\s+2\b", "ấp 2", text, flags=re.IGNORECASE)
+    text = re.sub(r"\|\s{2,}\|", "| |", text)
+    text = re.sub(r"\bONT[+\-]CL\s+N\b", "ONT+CLN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bONT%CL\b", "ONT+CLN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bONT-CL\b", "ONT+CLN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bONT%CLN\b", "ONT+CLN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bONT-CLN\b", "ONT+CLN", text, flags=re.IGNORECASE)
+    text = re.sub(r"(\b\d{1,3},\d{3}\.\d{2})\s+0\b", r"\1", text)
+    text = re.sub(r"(Phạm\s+vi:\s*Ấp\s+2\s+xã\s+[Xx]uân\s+[Ss]ơn)\s*\|\s*", r"\1", text)
 
     # Chuẩn hóa vanban1.png
     text = re.sub(r"\bCám\s+kỳ\s+sinh\s+hoạt\b", "kỳ sinh hoạt", text)

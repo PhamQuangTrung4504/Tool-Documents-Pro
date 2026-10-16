@@ -340,3 +340,58 @@ class TestC5PhysicalGridTopologyEngine:
         raw_text_2 = "Trưởng ban công tác mặt trận thôn, Bí t"
         cleaned_2 = final_document_cleanup(raw_text_2)
         assert cleaned_2 == "Trưởng ban công tác mặt trận thôn, Bí thư Chi bộ"
+
+    def test_09_cadastral_land_table_normalization_rules(self):
+        """Xác minh chuẩn hóa các lỗi trên Bảng danh sách thửa đất (image_612a9c.jpg)."""
+        assert final_document_cleanup("Diện tích (m?)") == "Diện tích (m²)"
+        assert final_document_cleanup("Diện tích (m2)") == "Diện tích (m²)"
+        assert final_document_cleanup("Số tờ 2 Chiner") == "Số tờ 2 cấp"
+        assert final_document_cleanup("Số tờ 3 039") == "Số tờ 3 cấp"
+        assert final_document_cleanup("Đơn đăng KỶ DD") == "Đơn đăng ký ĐĐ"
+        assert final_document_cleanup("Tên ấy p") == "Tên ấp"
+        assert final_document_cleanup("1862 | 2 | 148 | 186 | 60 | 33 | 7,975.90 | ONT-CL | | ấy | p2") == "1862 | 2 | 148 | 186 | 60 | 33 | 7,975.90 | ONT+CLN | | ấp 2"
+        assert final_document_cleanup("ONT+CL N") == "ONT+CLN"
+        assert final_document_cleanup("ONT-CL") == "ONT+CLN"
+        assert final_document_cleanup("ONT%CLN") == "ONT+CLN"
+        assert final_document_cleanup("7,975.90 0") == "7,975.90"
+        assert final_document_cleanup("Phạm vi: Ấp 2 xã Xuân Sơn |") == "Phạm vi: Ấp 2 xã Xuân Sơn"
+
+    def test_10_mau_so_02_col3_col9_note_normalization(self):
+        """Xác minh chuẩn hóa Cột (3), Cột (9) và dòng Ghi chú trên Mẫu số 02."""
+        assert final_document_cleanup("Số lượng NCUT (3=445)") == "Số lượng NCUT (3=4+5)"
+        assert final_document_cleanup("(3-445)") == "(3=4+5)"
+        assert final_document_cleanup("(3 = 445)") == "(3=4+5)"
+        assert final_document_cleanup("Già làng, trưởng dòng họ, người thực hiện nghi lễ ngưỡng") == "Già làng, trưởng dòng họ, người thực hiện nghi lễ truyền thống, tín ngưỡng"
+        assert final_document_cleanup("người thực hiện nghi lễ ngưỡng") == "người thực hiện nghi lễ truyền thống, tín ngưỡng"
+        assert final_document_cleanup("- Từ Cột (Đ) đến cột (19: Ghi cụ thể thành phần của NCUT") == "- Từ Cột (9) đến cột (15): Ghi cụ thể thành phần của NCUT"
+        assert final_document_cleanup("Từ Cột (9) đến cột (15):+5): Ghi cụ thể") == "Từ Cột (9) đến cột (15): Ghi cụ thể"
+
+    def test_11_docx_export_mau_so_02_top_right(self, tmp_path: Path):
+        """Xác minh Mẫu số 02 được đưa lên góc trên bên phải trang Word và không in lặp lại."""
+        from app.core.docx_exporter import export_to_docx
+        from app.core.models import OCRResult, OCRTable, ParallelHeader
+        import docx
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        result = OCRResult(
+            full_text="Mẫu số 02\nỦY BAN NHÂN DÂN XÃ\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nDANH SÁCH",
+            boxes=[],
+            parallel_header=ParallelHeader(
+                left_lines=["ỦY BAN NHÂN DÂN XÃ"],
+                right_lines=["CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"],
+            ),
+        )
+
+        out_docx = tmp_path / "test_mau_so_02.docx"
+        assert export_to_docx(result, str(out_docx)) is True
+        doc = docx.Document(str(out_docx))
+
+        # Đoạn văn bản đầu tiên phải là 'Mẫu số 02', căn phải và in đậm
+        p0 = doc.paragraphs[0]
+        assert p0.text.strip() == "Mẫu số 02"
+        assert p0.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+        assert any(r.bold for r in p0.runs)
+
+        # 'Mẫu số 02' không được in lặp lại ở các đoạn văn tiếp theo
+        other_paras = [p.text.strip() for p in doc.paragraphs[1:]]
+        assert "Mẫu số 02" not in other_paras

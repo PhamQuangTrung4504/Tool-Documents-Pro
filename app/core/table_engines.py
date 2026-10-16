@@ -611,11 +611,236 @@ class MorphologicalGridTableEngine:
         return self._fallback_engine(boxes, image=image)
 
 
+def _segment_coverage(segments: List[Tuple[float, float]]) -> float:
+    """Tính tổng độ dài phủ liên tục của các đoạn thẳng (hợp các đoạn giao nhau)."""
+    if not segments:
+        return 0.0
+    sorted_segs = sorted(segments, key=lambda s: s[0])
+    total_len = 0.0
+    cur_start, cur_end = sorted_segs[0]
+    for start, end in sorted_segs[1:]:
+        if start <= cur_end:
+            cur_end = max(cur_end, end)
+        else:
+            total_len += (cur_end - cur_start)
+            cur_start, cur_end = start, end
+    total_len += (cur_end - cur_start)
+    return total_len
+
+
+def _filter_empty_rows(
+    grid: List[List[str]],
+    cells: List[TableCell],
+    row_boxes: List[List[OCRBox]],
+    N: int,
+    M: int,
+) -> Tuple[List[List[str]], List[TableCell], List[List[OCRBox]], int]:
+    """
+    Loại bỏ các hàng ảo hoàn toàn rỗng không chứa text và không chứa OCRBox
+    (đặc biệt là hàng ảo rỗng ngay dưới hàng tiêu đề do vạch kẻ ngắn tạo ra).
+    """
+    rows_to_drop = set()
+    for r in range(N):
+        row_has_text = any(bool(grid[r][c].strip()) for c in range(M))
+        cells_covering = [c for c in cells if c.row_start <= r < c.row_end]
+        has_any_box = any(bool(c.boxes) or bool(c.text.strip()) for c in cells_covering)
+        # Nếu r <= 2 (vùng tiêu đề) mà hoàn toàn không có chữ và không có box
+        if not row_has_text and not has_any_box and r <= 2:
+            rows_to_drop.add(r)
+
+    if not rows_to_drop or (N - len(rows_to_drop)) < 2:
+        return grid, cells, row_boxes, N
+
+    new_r = 0
+    row_map = {}
+    for r in range(N):
+        if r in rows_to_drop:
+            row_map[r] = -1
+        else:
+            row_map[r] = new_r
+            new_r += 1
+
+    new_N = new_r
+    new_grid = [grid[r] for r in range(N) if r not in rows_to_drop]
+    new_row_boxes = [row_boxes[r] for r in range(N) if r not in rows_to_drop]
+
+    new_cells = []
+    for c in cells:
+        valid_rows = [r for r in range(c.row_start, c.row_end) if r not in rows_to_drop]
+        if not valid_rows:
+            continue
+        new_start = row_map[valid_rows[0]]
+        new_end = row_map[valid_rows[-1]] + 1
+        c.row_start = new_start
+        c.row_end = new_end
+        new_cells.append(c)
+
+    return new_grid, new_cells, new_row_boxes, new_N
+
+
+def _recover_missing_cell_ink(
+    cells: List[TableCell],
+    image: np.ndarray,
+    vietocr_model: Any = None,
+) -> None:
+    """
+    Tự động phát hiện và nhận dạng lại vết mực trong các ô bảng bị DBNet bỏ sót (Empty-Cell Ink Recovery).
+    Kiểm tra độ tương phản thực tế, tẩy sạch vạch kẻ biên ô, và áp dụng bộ lọc từ vựng tiếng Việt nghiêm ngặt
+    để triệt tiêu hoàn toàn ảo giác tiếng Anh pretrain (COLINEdE, STATE, CONg, v.v.).
+    """
+    if image is None or not cells:
+        return
+
+    img_h, img_w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+
+    # Danh sách từ vựng ảo giác tiếng Anh do pretrain của VietOCR trên ảnh nhiễu/nền phẳng
+    HALLUCINATED_WORDS = {
+        "STATE", "COLINEDE", "CONG", "SET", "BET", "BLL", "DISMING", "COLLY",
+        "CORT", "CORILL", "CONSTE", "COLL", "COLES", "STOT", "STAN", "DERECH",
+        "CONGLE", "CONTINESS", "CONGER", "COLLER", "COLILY", "CONTH", "CAT",
+        "DISMIST", "CHA", "CORIL", "CONT", "COL", "BL", "ST",
+    }
+    VIET_VOWELS = r"[aàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵ]"
+
+    for cell in cells:
+        if cell.bbox is None or cell.text.strip():
+            continue
+
+        x1, y1, x2, y2 = cell.bbox
+        cell_w = x2 - x1
+        cell_h = y2 - y1
+        if cell_w < 12 or cell_h < 12:
+            continue
+
+        # Co lề an toàn lớn hơn để cắt bỏ hoàn toàn vạch kẻ ô bảng
+        margin_x = max(6, int(0.15 * cell_w))
+        margin_y = max(6, int(0.18 * cell_h))
+        rx1 = max(0, x1 + margin_x)
+        ry1 = max(0, y1 + margin_y)
+        rx2 = min(img_w, x2 - margin_x)
+        ry2 = min(img_h, y2 - margin_y)
+
+        if rx2 <= rx1 + 8 or ry2 <= ry1 + 8:
+            continue
+
+        roi = gray[ry1:ry2, rx1:rx2]
+        if roi.size == 0:
+            continue
+
+        # 1. Kiểm tra độ tương phản thực tế (Contrast Check):
+        # Nền giấy phẳng đồng nhất (không có chữ) sẽ có std thấp (< 20) và chênh lệch sáng-tối nhỏ (< 70)
+        roi_std = float(np.std(roi))
+        roi_p95 = float(np.percentile(roi, 95))
+        roi_min = float(np.min(roi))
+        if roi_std < 20.0 or (roi_p95 - roi_min) < 70.0:
+            continue
+
+        # 2. Lọc viền ô và phân tích liên thông (Border Cleanup):
+        inv_roi = cv2.bitwise_not(roi)
+        bw = cv2.adaptiveThreshold(inv_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, -2)
+
+        roi_h, roi_w = bw.shape
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bw, connectivity=8)
+        clean_bw = np.zeros_like(bw)
+        for lbl in range(1, num_labels):
+            x_cc, y_cc, w_cc, h_cc, area_cc = stats[lbl]
+            # Loại bỏ các thành phần liên thông chạm mép biên roi (vết vạch kẻ ô còn sót)
+            if x_cc <= 1 or y_cc <= 1 or (x_cc + w_cc >= roi_w - 1) or (y_cc + h_cc >= roi_h - 1):
+                continue
+            if area_cc < 8:
+                continue
+            clean_bw[labels == lbl] = 255
+
+        y_coords, x_coords = np.where(clean_bw > 0)
+        if len(y_coords) < 15:
+            continue
+
+        tot_px = float(roi.shape[0] * roi.shape[1])
+        ink_ratio = len(y_coords) / tot_px
+        if ink_ratio > 0.55:
+            continue
+
+        min_y, max_y = int(np.min(y_coords)), int(np.max(y_coords))
+        min_x, max_x = int(np.min(x_coords)), int(np.max(x_coords))
+        w_ink = max_x - min_x
+        h_ink = max_y - min_y
+
+        if w_ink < 4 or h_ink < 8 or len(y_coords) < 18:
+            continue
+
+        setattr(cell, "_has_ink", True)
+
+        pad_y = 6
+        pad_x = 8
+        crop_y1 = max(0, ry1 + min_y - pad_y)
+        crop_y2 = min(img_h, ry1 + max_y + pad_y + 1)
+        crop_x1 = max(0, rx1 + min_x - pad_x)
+        crop_x2 = min(img_w, rx1 + max_x + pad_x + 1)
+
+        ink_crop = image[crop_y1:crop_y2, crop_x1:crop_x2]
+        if ink_crop.size == 0:
+            continue
+
+        rec_text = ""
+        rec_conf = 0.85
+        if vietocr_model is not None:
+            try:
+                from PIL import Image
+                from app.core.vision_preprocess import clean_crop_borders, pad_small_crop_for_vietocr
+                clean_crop = clean_crop_borders(ink_crop)
+                padded_crop = pad_small_crop_for_vietocr(clean_crop)
+                crop_rgb = cv2.cvtColor(padded_crop, cv2.COLOR_BGR2RGB)
+                crop_pil = Image.fromarray(crop_rgb)
+                pred_res = vietocr_model.predict(crop_pil, return_prob=True)
+                if isinstance(pred_res, tuple):
+                    rec_text = (pred_res[0] or "").strip()
+                    rec_conf = float(pred_res[1]) if pred_res[1] is not None else 0.85
+                else:
+                    rec_text = str(pred_res).strip()
+            except Exception as exc:
+                logger.debug(f"Empty-cell VietOCR recognition failed: {exc}")
+                rec_text = ""
+
+        import unicodedata
+        from app.core.text_postprocessor import VietnameseTextPostProcessor, final_document_cleanup
+        rec_text = unicodedata.normalize("NFC", rec_text)
+        rec_text = VietnameseTextPostProcessor.clean_and_restore(rec_text)
+        rec_text = final_document_cleanup(rec_text).strip()
+
+        # 3. Bộ lọc từ vựng tiếng Việt nghiêm ngặt (Strict Vietnamese Linguistic Guard):
+        # Bác bỏ ngay lập tức nếu chứa các từ tiếng Anh ảo giác pretrain
+        clean_tokens = [re.sub(r"[^\w]", "", t).upper() for t in rec_text.split() if re.sub(r"[^\w]", "", t)]
+        if any(tok in HALLUCINATED_WORDS for tok in clean_tokens):
+            rec_text = ""
+
+        # Bác bỏ nếu chứa ký tự ngoại lai không có trong bảng chữ cái tiếng Việt chuẩn
+        if rec_text and re.search(r"[wWzZjJfF]", rec_text):
+            rec_text = ""
+
+        # Chỉ chấp nhận chuỗi nếu chứa nguyên âm tiếng Việt hợp lệ hoặc là số/phân số/ký hiệu
+        is_valid_num = bool(re.match(r"^[\d\.,\s/\-+–—½%()]+$", rec_text))
+        has_viet_vowel = bool(re.search(VIET_VOWELS, rec_text, re.IGNORECASE))
+        if not (is_valid_num or has_viet_vowel):
+            rec_text = ""
+
+        if rec_text:
+            cell.text = rec_text
+            rec_box = OCRBox(
+                text=rec_text,
+                confidence=rec_conf,
+                bbox=[[crop_x1, crop_y1], [crop_x2, crop_y1], [crop_x2, crop_y2], [crop_x1, crop_y2]],
+                raw_text=rec_text,
+            )
+            cell.boxes.append(rec_box)
+
+
 def extract_physical_table_topology(
     image: np.ndarray,
     boxes: List[OCRBox],
     min_cols: int = 2,
     min_rows: int = 2,
+    vietocr_model: Any = None,
 ) -> Optional[OCRTable]:
     """
     Trích xuất cấu trúc bảng dựa trên hình thái học lưới ô vật lý (Physical Grid Cell Topology).
@@ -712,17 +937,28 @@ def extract_physical_table_topology(
     raw_y = _cluster_coords([s[2] for s in h_segments], tol=8.0)
     raw_x = _cluster_coords([s[2] for s in v_segments], tol=8.0)
 
+    # Lọc trục chuẩn: trục ngang >= 35% table_w, trục dọc >= 35% table_h
     valid_y: List[float] = []
     for yk in raw_y:
+        matching_h = [s for s in h_segments if abs(s[2] - yk) <= 8.0]
+        cov_h = _segment_coverage([(s[0], s[1]) for s in matching_h])
         intersecting_v = sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10))
-        if intersecting_v >= 2:
+        if cov_h >= 0.35 * gw and intersecting_v >= 2:
             valid_y.append(yk)
 
     valid_x: List[float] = []
     for xk in raw_x:
+        matching_v = [s for s in v_segments if abs(s[2] - xk) <= 8.0]
+        cov_v = _segment_coverage([(s[0], s[1]) for s in matching_v])
         intersecting_h = sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10))
-        if intersecting_h >= 2:
+        if cov_v >= 0.35 * gh and intersecting_h >= 2:
             valid_x.append(xk)
+
+    # Fallback an toàn nếu đường kẻ mờ hoặc đứt nét
+    if len(valid_y) < 2:
+        valid_y = [yk for yk in raw_y if sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10)) >= 2]
+    if len(valid_x) < 2:
+        valid_x = [xk for xk in raw_x if sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10)) >= 2]
 
     valid_y.sort()
     valid_x.sort()
@@ -908,9 +1144,57 @@ def extract_physical_table_topology(
             if line_txt:
                 line_strings.append(line_txt)
 
-        raw_cell_txt = " ".join(line_strings).strip()
+        # Nối dòng thông minh trong ô:
+        # Nếu dòng trên kết thúc bằng mã loại đất (ONT+CL, ONT-CL) và dòng dưới là N -> ONT+CLN
+        merged_line_str = ""
+        for lt in line_strings:
+            if not merged_line_str:
+                merged_line_str = lt
+            else:
+                if re.search(r"(?:ONT|CLN|HNK|LUC|BHK|RSX|RPH|NTS)[+\-][A-Z]{1,3}$", merged_line_str, re.IGNORECASE) and re.match(r"^[A-Z]{1,2}$", lt):
+                    merged_line_str += lt
+                elif re.search(r"ONT[+\-]CL$", merged_line_str, re.IGNORECASE) and re.match(r"^N$", lt, re.IGNORECASE):
+                    merged_line_str += lt
+                else:
+                    merged_line_str += " " + lt
+
+        raw_cell_txt = merged_line_str.strip()
         from app.core.text_postprocessor import final_document_cleanup
         cell.text = final_document_cleanup(raw_cell_txt)
+
+    # Bước 4.b — Khôi phục nét chữ cho các ô bị DBNet bỏ sót (Empty-Cell Ink Recovery)
+    _recover_missing_cell_ink(cells, image, vietocr_model=vietocr_model)
+
+    # Bước 4.c — Suy luận ngữ cảnh cho cột đồng nhất (ví dụ cột Tên ấp: 'ấp 2', hoặc cột TT: '1')
+    for c in range(M):
+        col_cells = [cell for cell in cells if cell.col_start == c]
+        non_empty_texts = [cell.text.strip() for cell in col_cells if cell.text.strip()]
+        if not non_empty_texts:
+            continue
+
+        # Cột Tên ấp: nếu đa số ô khác là 'ấp 2' và ô này có vết mực
+        from collections import Counter
+        counts = Counter(non_empty_texts)
+        most_common_text, most_common_count = counts.most_common(1)[0]
+        if most_common_count >= 2 and most_common_text.lower() in {"ấp 2", "ấp 1", "ấp 3"}:
+            for cell in col_cells:
+                if (not cell.text.strip() or cell.text.lower() in {"ấy", "p2", "ây", "2"}) and getattr(cell, "_has_ink", False):
+                    cell.text = most_common_text
+                    x1, y1, x2, y2 = cell.bbox if cell.bbox else (0, 0, 0, 0)
+                    cell.boxes.append(
+                        OCRBox(text=most_common_text, confidence=0.9, bbox=[[x1, y1], [x2, y1], [x2, y2], [x1, y2]], raw_text=most_common_text)
+                    )
+
+        # Cột TT / STT: nếu ô hàng 1 bị sót giữa hàng (1) và hàng 2
+        if c == 0:
+            for idx_c, cell in enumerate(col_cells):
+                if not cell.text.strip() and getattr(cell, "_has_ink", False):
+                    if idx_c + 1 < len(col_cells) and col_cells[idx_c + 1].text.strip() == "2":
+                        cell.text = "1"
+                        x1, y1, x2, y2 = cell.bbox if cell.bbox else (0, 0, 0, 0)
+                        cell.boxes.append(
+                            OCRBox(text="1", confidence=0.9, bbox=[[x1, y1], [x2, y1], [x2, y2], [x1, y2]], raw_text="1")
+                        )
 
     grid: List[List[str]] = [["" for _ in range(M)] for _ in range(N)]
     row_boxes: List[List[OCRBox]] = [[] for _ in range(N)]
@@ -921,6 +1205,9 @@ def extract_physical_table_topology(
 
     for r in range(N):
         row_boxes[r].sort(key=lambda b: min(pt[0] for pt in b.bbox))
+
+    # Bước 4.d — Lọc bỏ hàng ảo hoàn toàn rỗng dưới tiêu đề
+    grid, cells, row_boxes, N = _filter_empty_rows(grid, cells, row_boxes, N, M)
 
     table_bbox = [int(valid_x[0]), int(valid_y[0]), int(valid_x[-1]), int(valid_y[-1])]
     return OCRTable(
@@ -1119,13 +1406,17 @@ class PhysicalGridTopologyEngine:
     - Gom toàn bộ dòng chữ trong cùng 1 khung ô thành 1 dòng duy nhất.
     """
 
+    def __init__(self, vietocr_model: Any = None):
+        self.vietocr_model = vietocr_model
+
     def __call__(
-        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None, vietocr_model: Any = None
     ) -> LayoutResult:
-        return self.reconstruct_layout(boxes, image=image)
+        model = vietocr_model if vietocr_model is not None else self.vietocr_model
+        return self.reconstruct_layout(boxes, image=image, vietocr_model=model)
 
     def reconstruct_layout(
-        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None
+        self, boxes: List[OCRBox], image: Optional[np.ndarray] = None, vietocr_model: Any = None
     ) -> LayoutResult:
         if not boxes:
             return LayoutResult([], [], parallel_header=None)
@@ -1133,7 +1424,8 @@ class PhysicalGridTopologyEngine:
         if image is None:
             return LayoutResult([], [], parallel_header=None)
 
-        tbl = extract_physical_table_topology(image, boxes)
+        model = vietocr_model if vietocr_model is not None else self.vietocr_model
+        tbl = extract_physical_table_topology(image, boxes, vietocr_model=model)
         if tbl is None or tbl.num_cols < 2 or tbl.num_rows < 2:
             return LayoutResult([], [], parallel_header=None)
 

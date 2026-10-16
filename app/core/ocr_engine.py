@@ -56,6 +56,7 @@ from app.core.vision_preprocess import (
     adaptive_safe_crop_padding,
     assess_image_quality,
     clean_crop_borders,
+    compensate_illumination,
     estimate_and_correct_skew,
     filter_border_noise_boxes,
     get_rotate_crop_image,
@@ -509,7 +510,13 @@ class OCREngine:
 
             return image
 
-        # Trường hợp 2: Ảnh chụp tối / Bóng đổ / Mờ
+        # Trường hợp 2: Ảnh chụp tối / Bóng đổ / Mờ / Giấy ố vàng
+        # Khử bất đồng nhất ánh sáng & làm phẳng nền giấy
+        try:
+            image = compensate_illumination(image)
+        except Exception as e_ill:
+            logger.debug(f"Illumination compensation failed: {e_ill}")
+
         shortest_side = min(img_h, img_w)
         if shortest_side < min_side:
             scale_up = min(2.0, float(min_side) / max(1, shortest_side))
@@ -544,6 +551,142 @@ class OCREngine:
                 image = cv2.bilateralFilter(image, d=5, sigmaColor=50, sigmaSpace=50)
 
         return image
+
+    @staticmethod
+    def _merge_horizontally_adjacent_subboxes(
+        polygons: List[List[List[float]]],
+        paddle_texts: List[str],
+        paddle_scores: List[float],
+        img_bgr: np.ndarray,
+    ) -> Tuple[List[List[List[float]]], List[str], List[float]]:
+        """
+        Gộp các sub-box nằm ngang kề sát nhau trên cùng 1 dòng trước khi đưa vào VietOCR
+        (Intra-Cell Horizontal Box Merging):
+        - Nếu 2 box nằm trên cùng dòng ngang (overlap_y >= 0.55 và abs(cy1 - cy2) <= 0.45 * min_h).
+        - Khoảng cách ngang rất nhỏ (-4px <= gap_x <= max(14px, 0.85 * min_h)).
+        - Giữa chúng KHÔNG CÓ vạch kẻ dọc phân tách cột trên v_mask.
+        -> Gộp 2 box thành 1 box duy nhất để VietOCR đọc nguyên cụm (ví dụ 'ấp' + '2' -> 'ấp 2').
+        """
+        if len(polygons) <= 1:
+            return polygons, paddle_texts, paddle_scores
+
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if len(img_bgr.shape) == 3 else img_bgr
+        img_h, img_w = gray.shape[:2]
+        inv_gray = cv2.bitwise_not(gray)
+        bw = cv2.adaptiveThreshold(inv_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, -2)
+        v_kernel_len = max(12, int(img_h / 45))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
+        v_mask = cv2.morphologyEx(bw, cv2.MORPH_OPEN, v_kernel)
+
+        boxes_info = []
+        for i, poly in enumerate(polygons):
+            pts = poly[:4]
+            x_min = min(p[0] for p in pts)
+            x_max = max(p[0] for p in pts)
+            y_min = min(p[1] for p in pts)
+            y_max = max(p[1] for p in pts)
+            txt = paddle_texts[i] if i < len(paddle_texts) else ""
+            sc = paddle_scores[i] if i < len(paddle_scores) else 0.8
+            boxes_info.append({
+                "poly": poly,
+                "text": txt,
+                "score": sc,
+                "x_min": x_min, "x_max": x_max,
+                "y_min": y_min, "y_max": y_max,
+                "w": x_max - x_min, "h": y_max - y_min,
+                "cy": (y_min + y_max) / 2.0,
+            })
+
+        boxes_info.sort(key=lambda b: (b["y_min"], b["x_min"]))
+
+        merged_any = True
+        while merged_any:
+            merged_any = False
+            new_boxes = []
+            skip_indices = set()
+
+            for i in range(len(boxes_info)):
+                if i in skip_indices:
+                    continue
+                b1 = boxes_info[i]
+                merge_target = None
+
+                for j in range(i + 1, len(boxes_info)):
+                    if j in skip_indices:
+                        continue
+                    b2 = boxes_info[j]
+
+                    if b2["y_min"] - b1["y_max"] > max(15.0, b1["h"]):
+                        break
+
+                    min_h = min(b1["h"], b2["h"])
+                    if min_h <= 2.0:
+                        continue
+                    y_overlap = max(0.0, min(b1["y_max"], b2["y_max"]) - max(b1["y_min"], b2["y_min"]))
+                    vert_overlap_ratio = y_overlap / min_h
+                    cy_diff = abs(b1["cy"] - b2["cy"])
+
+                    if vert_overlap_ratio >= 0.55 and cy_diff <= 0.45 * min_h:
+                        if b1["x_min"] <= b2["x_min"]:
+                            left_b, right_b = b1, b2
+                        else:
+                            left_b, right_b = b2, b1
+
+                        gap_x = right_b["x_min"] - left_b["x_max"]
+                        max_gap = max(14.0, 0.85 * min_h)
+
+                        if -4.0 <= gap_x <= max_gap:
+                            chk_x1 = int(max(0, left_b["x_max"] - 2))
+                            chk_x2 = int(min(img_w, right_b["x_min"] + 2))
+                            chk_y1 = int(max(0, min(left_b["y_min"], right_b["y_min"])))
+                            chk_y2 = int(min(img_h, max(left_b["y_max"], right_b["y_max"])))
+
+                            has_vert_wall = False
+                            if chk_x2 > chk_x1 and chk_y2 > chk_y1:
+                                strip = v_mask[chk_y1:chk_y2, chk_x1:chk_x2]
+                                if strip.size > 0:
+                                    row_has_v = np.any(strip > 0, axis=1)
+                                    if float(np.mean(row_has_v)) >= 0.35:
+                                        has_vert_wall = True
+
+                            if not has_vert_wall:
+                                merge_target = j
+                                break
+
+                if merge_target is not None:
+                    b2 = boxes_info[merge_target]
+                    skip_indices.add(merge_target)
+                    merged_any = True
+                    mx_min = min(b1["x_min"], b2["x_min"])
+                    mx_max = max(b1["x_max"], b2["x_max"])
+                    my_min = min(b1["y_min"], b2["y_min"])
+                    my_max = max(b1["y_max"], b2["y_max"])
+                    new_poly = [
+                        [float(mx_min), float(my_min)],
+                        [float(mx_max), float(my_min)],
+                        [float(mx_max), float(my_max)],
+                        [float(mx_min), float(my_max)],
+                    ]
+                    comb_text = f"{b1['text']} {b2['text']}".strip()
+                    comb_score = min(b1["score"], b2["score"])
+                    new_boxes.append({
+                        "poly": new_poly,
+                        "text": comb_text,
+                        "score": comb_score,
+                        "x_min": mx_min, "x_max": mx_max,
+                        "y_min": my_min, "y_max": my_max,
+                        "w": mx_max - mx_min, "h": my_max - my_min,
+                        "cy": (my_min + my_max) / 2.0,
+                    })
+                else:
+                    new_boxes.append(b1)
+
+            boxes_info = new_boxes
+
+        out_polys = [b["poly"] for b in boxes_info]
+        out_texts = [b["text"] for b in boxes_info]
+        out_scores = [b["score"] for b in boxes_info]
+        return out_polys, out_texts, out_scores
 
     # ------------------------------------------------------------------
     # Nhận dạng chính (Hybrid Pipeline)
@@ -658,6 +801,11 @@ class OCREngine:
             except Exception as exc_raw:
                 logger.error(f"Detection fallback failed: {exc_raw}")
 
+        # 3.b. Gộp các sub-box nằm ngang kề sát nhau trên cùng 1 ô / dòng
+        polygons, paddle_texts, paddle_scores = self._merge_horizontally_adjacent_subboxes(
+            polygons, paddle_texts, paddle_scores, processed_image
+        )
+
         # 4. Text Recognition: Sử dụng VietOCR cho tiếng Việt hoặc PaddleOCR
         boxes: List[OCRBox] = []
         use_vietocr = (self.lang == "vi" and self._vietocr is not None)
@@ -758,7 +906,7 @@ class OCREngine:
         boxes = split_table_crossing_boxes(boxes, image=image, vietocr_model=self._vietocr)
 
         # 6. Gom nhóm các khối chữ theo dòng và tái dựng bố cục tài liệu (Layout Reconstruction)
-        layout_res = reconstruct_document_layout(boxes, image=image)
+        layout_res = reconstruct_document_layout(boxes, image=image, vietocr_model=self._vietocr)
         grouped_lines = layout_res[0]
         detected_tables = layout_res[1]
         parallel_hdr = getattr(layout_res, "parallel_header", None)
@@ -965,6 +1113,32 @@ class OCREngine:
                     if "học vấn" in c_clean.lower():
                         c_clean = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", c_clean, flags=re.IGNORECASE)
                 c.text = c_clean
+
+        # Đồng bộ hóa triệt để 100% giữa full_text (Giao diện App) và tbl.grid (File Word)
+        full_text = re.sub(
+            r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
+            r"\1+ \2",
+            full_text,
+            flags=re.IGNORECASE,
+        )
+        full_text = re.sub(
+            r"(?m)^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
+            r"\1+ \2",
+            full_text,
+            flags=re.IGNORECASE,
+        )
+        sync_lines = []
+        for ln in full_text.splitlines():
+            ln_s = ln.strip()
+            if re.search(r"\|\s*0[1-9]\b", ln_s):
+                if ln_s.startswith(("- ", "– ", "— ", "* ", "• ", "~ ")):
+                    indent = ln[:len(ln) - len(ln_s)]
+                    ln = indent + "+ " + ln_s[2:].strip()
+                elif ln_s.startswith(("-", "–", "—", "*", "•", "~")) and not ln_s.startswith("+"):
+                    indent = ln[:len(ln) - len(ln_s)]
+                    ln = indent + "+ " + ln_s[1:].strip()
+            sync_lines.append(ln)
+        full_text = "\n".join(sync_lines)
 
         # Khóa chốt bảo đảm full_text luôn được xử lý qua final_document_cleanup sau cùng
         full_text = final_document_cleanup(full_text)

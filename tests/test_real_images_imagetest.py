@@ -120,6 +120,18 @@ class TestRealImagesImageTestE2E:
             main_table = doc.tables[1]
             col7_texts = [main_table.cell(r, 6).text.strip() for r in range(len(main_table.rows))]
             assert "(7)" in col7_texts, f"Cột 7 phải chứa (7), nhận được: {col7_texts}"
+            assert any("(3=4+5)" in c.text for row in main_table.rows for c in row.cells), "Bảng phải chứa công thức (3=4+5)"
+            assert any("người thực hiện nghi lễ truyền thống, tín ngưỡng" in c.text for row in main_table.rows for c in row.cells), "Cột (9) phải khôi phục đầy đủ cụm từ"
+
+        # Kiểm tra công thức và cụm từ trong full_text
+        assert "(3=4+5)" in full_text, "full_text phải chứa (3=4+5) thay vì (3=445)"
+        assert "người thực hiện nghi lễ truyền thống, tín ngưỡng" in full_text, "Cột (9) trong full_text phải khôi phục đầy đủ"
+        assert "Từ Cột (9) đến cột (15):" in full_text, "Ghi chú phải sửa thành Từ Cột (9) đến cột (15):"
+
+        # Kiểm tra Mẫu số 02 nằm trên cùng bên phải
+        if doc.paragraphs:
+            assert doc.paragraphs[0].text.strip() == "Mẫu số 02"
+            assert doc.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT
 
     def test_03_vanban1_bien_ban_sinh_hoat_chi_bo(self, ocr_engine: OCREngine, spell_checker: VietnameseSpellChecker, tmp_path: Path):
         """Kiểm tra vanban1.png: Biên bản sinh hoạt chi bộ định kỳ tháng 10 năm 2026."""

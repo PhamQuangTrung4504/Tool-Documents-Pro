@@ -23,7 +23,7 @@
         },
         "error_count": 0,
         "failure_modes": [],
-        "elapsed_ms": 10.19
+        "elapsed_ms": 10.79
       },
       {
         "sample_id": "sample_02_borderless_financial",
@@ -37,7 +37,7 @@
         },
         "error_count": 0,
         "failure_modes": [],
-        "elapsed_ms": 8.02
+        "elapsed_ms": 7.9
       },
       {
         "sample_id": "sample_03_merged_cells_header",
@@ -51,7 +51,7 @@
         },
         "error_count": 0,
         "failure_modes": [],
-        "elapsed_ms": 26.0
+        "elapsed_ms": 17.95
       },
       {
         "sample_id": "sample_04_dense_7cols",
@@ -65,7 +65,7 @@
         },
         "error_count": 0,
         "failure_modes": [],
-        "elapsed_ms": 13.43
+        "elapsed_ms": 10.0
       },
       {
         "sample_id": "sample_05_noisy_broken_grid",
@@ -79,7 +79,7 @@
         },
         "error_count": 0,
         "failure_modes": [],
-        "elapsed_ms": 5.86
+        "elapsed_ms": 5.33
       }
     ]
   },
@@ -87,7 +87,7 @@
     {
       "sample_id": "sample_01_bordered_admin",
       "category": "bordered",
-      "elapsed_ms": 10.19,
+      "elapsed_ms": 10.79,
       "metrics": {
         "table_detected_exact": 1.0,
         "row_count_accuracy": 1.0,
@@ -215,7 +215,7 @@
     {
       "sample_id": "sample_02_borderless_financial",
       "category": "borderless",
-      "elapsed_ms": 8.02,
+      "elapsed_ms": 7.9,
       "metrics": {
         "table_detected_exact": 1.0,
         "row_count_accuracy": 1.0,
@@ -319,7 +319,7 @@
     {
       "sample_id": "sample_03_merged_cells_header",
       "category": "merged_cells",
-      "elapsed_ms": 26.0,
+      "elapsed_ms": 17.95,
       "metrics": {
         "table_detected_exact": 1.0,
         "row_count_accuracy": 1.0,
@@ -404,7 +404,7 @@
     {
       "sample_id": "sample_04_dense_7cols",
       "category": "multi_column_dense",
-      "elapsed_ms": 13.43,
+      "elapsed_ms": 10.0,
       "metrics": {
         "table_detected_exact": 1.0,
         "row_count_accuracy": 1.0,
@@ -519,7 +519,7 @@
     {
       "sample_id": "sample_05_noisy_broken_grid",
       "category": "noisy_scan",
-      "elapsed_ms": 5.86,
+      "elapsed_ms": 5.33,
       "metrics": {
         "table_detected_exact": 1.0,
         "row_count_accuracy": 1.0,

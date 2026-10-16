@@ -10,7 +10,7 @@ và tái dựng cấu trúc bảng biểu hoàn chỉnh từ danh sách bounding
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -942,6 +942,7 @@ def detect_and_reconstruct_table(
 def reconstruct_document_layout(
     boxes: List[OCRBox],
     image: Optional[np.ndarray] = None,
+    vietocr_model: Any = None,
 ) -> LayoutResult:
     """
     Phân tích toàn diện bố cục tài liệu (Document Layout Reconstruction):
@@ -966,7 +967,7 @@ def reconstruct_document_layout(
     if image is not None:
         from app.core.table_engines import extract_physical_table_topology
         target_ocr_boxes = [b["box"] for b in box_info]
-        phys_tbl = extract_physical_table_topology(image, target_ocr_boxes)
+        phys_tbl = extract_physical_table_topology(image, target_ocr_boxes, vietocr_model=vietocr_model)
         if phys_tbl is not None:
             is_complex_grid = (
                 phys_tbl.num_cols >= 6 or any(c.is_merged for c in phys_tbl.cells)

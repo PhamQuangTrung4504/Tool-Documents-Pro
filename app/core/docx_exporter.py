@@ -11,7 +11,7 @@ Module xuất kết quả nhận dạng OCR ra định dạng Microsoft Word (.d
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 from loguru import logger
 
 from app.core.models import OCRResult, OCRTable, ParallelHeader
@@ -68,12 +68,39 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
         font.size = Pt(12)
         font.color.rgb = RGBColor(0, 0, 0)
 
-        # 1. Nếu có parallel_header (Tiêu đề 2 khối song song), tạo bảng 1 hàng 2 cột không viền ở đầu trang Word
+        # 1. Trích xuất dòng 'Mẫu số ...' nếu có ở phần đầu để đặt trên cùng, góc phải ngoài bảng (Nghị định 30/2020/NĐ-CP)
         header_rendered = False
         hdr_lines_set = set()
+        form_code_pattern = r"^\s*Mẫu\s+số\s*[:\.]?\s*\d+"
+        form_code_line: Optional[str] = None
+
+        for l in result.lines[:8]:
+            if re.search(form_code_pattern, l.strip(), re.IGNORECASE):
+                form_code_line = l.strip()
+                break
+        if not form_code_line and result.parallel_header:
+            for l in result.parallel_header.left_lines + result.parallel_header.right_lines:
+                if re.search(form_code_pattern, l.strip(), re.IGNORECASE):
+                    form_code_line = l.strip()
+                    break
+
+        if form_code_line:
+            p_form = doc.add_paragraph()
+            p_form.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            p_form.paragraph_format.space_before = Pt(0)
+            p_form.paragraph_format.space_after = Pt(2)
+            run_form = p_form.add_run(form_code_line)
+            run_form.font.name = "Times New Roman"
+            run_form.font.size = Pt(11)
+            run_form.bold = True
+            hdr_lines_set.add(re.sub(r"\s+", " ", form_code_line.lower()))
+
+        # Nếu có parallel_header (Tiêu đề 2 khối song song), tạo bảng 1 hàng 2 cột không viền ở đầu trang Word
         if result.parallel_header and (result.parallel_header.left_lines or result.parallel_header.right_lines):
             hdr = result.parallel_header
-            hdr_lines_set = set(re.sub(r"\s+", " ", l.strip().lower()) for l in (hdr.left_lines + hdr.right_lines) if l.strip())
+            for l in (hdr.left_lines + hdr.right_lines):
+                if l.strip():
+                    hdr_lines_set.add(re.sub(r"\s+", " ", l.strip().lower()))
 
             hdr_table: Any = doc.add_table(rows=1, cols=2)
             hdr_table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -92,7 +119,7 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             valid_left_lines = [
                 re.sub(r"^\d+\s+(CỘNG\s+HÒA|ĐỘC\s+LẬP|ĐẢNG\s+CỘNG\s+SẢN|ỦY\s+BAN)", r"\1", l.strip(), flags=re.IGNORECASE)
                 for l in hdr.left_lines
-                if l.strip() and not re.match(r"^\d{1,2}$", l.strip())
+                if l.strip() and not re.match(r"^\d{1,2}$", l.strip()) and not re.search(form_code_pattern, l.strip(), re.IGNORECASE)
             ]
             align_left = WD_ALIGN_PARAGRAPH.LEFT if has_wide_table else WD_ALIGN_PARAGRAPH.CENTER
             cell_left = hdr_table.cell(0, 0)
@@ -110,7 +137,7 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             valid_right_lines = [
                 re.sub(r"^\d+\s+(CỘNG\s+HÒA|ĐỘC\s+LẬP|ĐẢNG\s+CỘNG\s+SẢN)", r"\1", l.strip(), flags=re.IGNORECASE)
                 for l in hdr.right_lines
-                if l.strip() and not re.match(r"^\d{1,2}$", l.strip())
+                if l.strip() and not re.match(r"^\d{1,2}$", l.strip()) and not re.search(form_code_pattern, l.strip(), re.IGNORECASE)
             ]
             align_right = WD_ALIGN_PARAGRAPH.RIGHT if has_wide_table else WD_ALIGN_PARAGRAPH.CENTER
             cell_right = hdr_table.cell(0, 1)
@@ -212,12 +239,45 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                     if col_idx == 8 and s in {"0", "(0)", "O", "(O)", "o", "(o)", "9", "( 0 )", "( 9 )"}:
                         return "(9)"
                     # Chuẩn hóa công thức Số lượng NCUT (3=4+5)
-                    if "NCUT" in s or ("3" in s and "4" in s and "5" in s):
+                    if "NCUT" in s or ("3" in s and "4" in s and "5" in s) or "(3=" in s or "(3-" in s:
+                        s = re.sub(r"\(\s*3\s*[-=~_]?\s*4{1,2}5\s*\)", "(3=4+5)", s)
                         s = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", s)
                         s = re.sub(r"Số\s+lượng\s+NCUT[^\n|]*(?=\||$)", "Số lượng NCUT (3=4+5)", s, flags=re.IGNORECASE)
+                        s = s.replace("(3=445)", "(3=4+5)").replace("(3-445)", "(3=4+5)")
+                    # Khôi phục Cột (9): nghi lễ truyền thống, tín ngưỡng
+                    if "nghi lễ" in s.lower() or "nghi lế" in s.lower():
+                        s = re.sub(
+                            r"người\s+thực\s+hiện\s+nghi\s+l[ễế]\s*(?:truyền\s+|thống,?\s*|tín\s*)*ngưỡng",
+                            "người thực hiện nghi lễ truyền thống, tín ngưỡng",
+                            s,
+                            flags=re.IGNORECASE,
+                        )
+                        s = re.sub(
+                            r"nghi\s+l[ễế]\s*(?:truyền\s+|thống,?\s*|tín\s*)*ngưỡng",
+                            "nghi lễ truyền thống, tín ngưỡng",
+                            s,
+                            flags=re.IGNORECASE,
+                        )
                     # Khôi phục dấu gạch chéo trong Trình độ học vấn/chuyên môn
                     if "học vấn" in s.lower():
                         s = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", s, flags=re.IGNORECASE)
+
+                # Chuẩn hóa chung cho mọi bảng (kể cả bảng địa chính)
+                if "diện tích" in s.lower():
+                    s = re.sub(r"Diện\s+tích\s*\(\s*m[\?\*2]\s*\)", "Diện tích (m²)", s, flags=re.IGNORECASE)
+                if "số tờ" in s.lower():
+                    s = re.sub(r"Số\s+tờ\s+2\s*(?:Chiner|chiner|câp|cap)\b", "Số tờ 2 cấp", s, flags=re.IGNORECASE)
+                    s = re.sub(r"Số\s+tờ\s+3\s*(?:039|03|câp|cap)\b", "Số tờ 3 cấp", s, flags=re.IGNORECASE)
+                if "đơn đăng" in s.lower():
+                    s = re.sub(r"Đơn\s+đăng\s+[kK][ÝỶýỷ]\s+DD\b", "Đơn đăng ký ĐĐ", s, flags=re.IGNORECASE)
+                if "tên" in s.lower() and ("ấy" in s.lower() or "áp" in s.lower()):
+                    s = re.sub(r"Tên\s+(?:ấy\s*p|ây\s*p|áp)\b", "Tên ấp", s, flags=re.IGNORECASE)
+                if s in {"ấy", "p2", "ây", "áp 2"}:
+                    s = "ấp 2"
+                if "ont" in s.lower():
+                    s = re.sub(r"\bONT[+\-]CL\s*N\b", "ONT+CLN", s, flags=re.IGNORECASE)
+                    s = re.sub(r"\bONT[%\-]CLN?\b", "ONT+CLN", s, flags=re.IGNORECASE)
+                s = re.sub(r"(\b\d{1,3},\d{3}\.\d{2})\s+0\b", r"\1", s)
                 return s
 
             has_merged_cells = bool(tbl.cells and any(c.is_merged for c in tbl.cells))
@@ -279,6 +339,10 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
         for line in lines:
             line_str = line.strip()
             if not line_str:
+                continue
+
+            # Bỏ qua dòng Mẫu số nếu đã được hiển thị trên đầu trang Word
+            if form_code_line and re.search(form_code_pattern, line_str, re.IGNORECASE):
                 continue
 
             line_clean = re.sub(r"\s+", " ", line_str.lower())
