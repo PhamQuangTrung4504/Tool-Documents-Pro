@@ -1,0 +1,130 @@
+================================================================================
+BÁO CÁO KIỂM THỬ E2E 4 ẢNH THẬT (ASSETS/IMAGETEST/) - 2026-10-16 11:13:07
+================================================================================
+
+--------------------------------------------------------------------------------
+ẢNH: bang1.png (1074x705 px)
+Thời gian xử lý: 62.75s
+Số lượng OCRBox: 39
+Số lượng Bảng phát hiện: 1
+  * Bảng 1: 13 hàng x 5 cột | Ô gộp (merged cells): 0
+Lỗi chính tả (Spell Checker): 0
+Xuất DOCX: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\logs\imagetest_docx\bang1.docx (Success=True)
+
+--- NỘI DUNG VĂN BẢN NHẬN DẠNG ĐẦY ĐỦ (FULL_TEXT) ---
+BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG SINH HOẠT CHI BỘ VĂN PHÒNG HĐND VÀ UBND XÃ
+THÁNG 10 NĂM 2026
+(Ban hành kèm theo Công văn số 355-CV/ĐU ngày 29/12/2025 của Ban Thường vụ Đảng ủy)
+STT | Tiêu chí đánh giá | Điểm tối đa | Điểm tự chấm | Ghi chú
+1 | Chấp hành thời gian, thời lượng sinh hoạt | 05 | 05
++ Chi bộ dưới 30 đảng viên ít nhất 90 phút; chi bộ trên 30 đảng viên ít nhất 120 phút | 05 | 05
++ Thời gian sinh hoạt chi bộ ít hơn quy định 15 phút | 04
++ Thời gian sinh hoạt chi bộ ít hơn quy định 15 - 30 phút | 03
++ Thời gian sinh hoạt chi bộ chỉ bằng ½ so với quy định | 02
++ Thời gian sinh hoạt chi bộ dưới ½ so với quy định | 01
+2 | Tỷ lệ đảng viên dự sinh hoạt chi bộ | 05 | 05
++ Từ 90% trở lên | 04 | 04
++ Từ 75% đến dưới 90% | 03
++ Từ 65% đến dưới 75% | 02
++ Dưới 60% hoặc có đảng viên vắng không có lý do | 01
++ Không có đảng viên vắng mặt có lý do quá 03 lần liên tiếp trong năm | 01 | 01
+* Trừ trường hợp được miễn công tác, sinh hoạt đảng theo quy định và đảng viên trong lực lượng vũ trang thực hiện nhiệm vụ đặc biệt
+--- HẾT NỘI DUNG VĂN BẢN ---
+
+--------------------------------------------------------------------------------
+ẢNH: bang2.png (1123x761 px)
+Thời gian xử lý: 63.74s
+Số lượng OCRBox: 92
+Số lượng Bảng phát hiện: 1
+  * Bảng 1: 7 hàng x 16 cột | Ô gộp (merged cells): 9
+Lỗi chính tả (Spell Checker): 2
+  Các lỗi chính tả:
+    - Từ: 'vỉ' (Gợi ý: ví, tỉ, vị)
+    - Từ: 'dụ' (Gợi ý: du, cụ, dê)
+Xuất DOCX: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\logs\imagetest_docx\bang2.docx (Success=True)
+
+--- NỘI DUNG VĂN BẢN NHẬN DẠNG ĐẦY ĐỦ (FULL_TEXT) ---
+Mẫu số 02
+ỦY BAN NHÂN DÂN XÃ...
+CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Độc lập - Tự do - Hạnh phúc
+DANH SÁCH
+Công nhận người có uy tín trong vùng đồng bào dân tộc thiểu số
+(Ban hành kèm theo Quyết định số /QĐ-UBND ngày tháng năm của Chủ tịch UBND xã.....)
+II. | Họ tên NCUT | Số lượng NCUT (3=4+5) | Năm sinh | Dân tộc | Nơi cư trú (thôn) | Trình độ học vấn/chuyên môn | Thành phần người có uy tín | Ghi chú
+Nam | Nữ | Già làng, trưởng dòng họ, người thực hiện nghi lễ ngưỡng | Chức sắc, chức việc, nhà tu hành | Cán bộ, công chức, viên chức, bộ đội, công an đã nghỉ hưu | Bí thư chi bộ, Trưởng thôn, Trưởng ban công tác mặt trận thôn, Tổ trường Tổ bảo vệ an ninh, trật tự, Thôn đội trường | Nhân sỹ, trí thức, doanh nhân, nghệ nhân, nhà giáo, thầy thuốc, lương y, công nhân, nông dân, phụ nữ, thanh niên | Đảng viên | Thành phần khác
+(1) | (2) | (3) | (4) | (5) | (6) | (7) | (8) | (9) | (10) | (11) | (12) | (13) | (14) | (15) | (16)
+2
+Tổng cộng
+Ghi chú:
+- Cột (8): Ghi cụ thể trình độ học vấn (Tiểu học, THCS, THPT)/trình độ chuyên môn (Trung cấp, Cao đẳng, Đại học.
+- Từ Cột (Đ) đến cột (19: Ghi cụ thể thành phần của NCUT, vỉ dụ: Già làng, Trưởng thôn, Trưởng ban công tác mặt trận thôn, Bí thư Chi bộ
+--- HẾT NỘI DUNG VĂN BẢN ---
+
+--------------------------------------------------------------------------------
+ẢNH: vanban1.png (555x787 px)
+Thời gian xử lý: 565.01s
+Số lượng OCRBox: 34
+Số lượng Bảng phát hiện: 0
+Lỗi chính tả (Spell Checker): 0
+Xuất DOCX: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\logs\imagetest_docx\vanban1.docx (Success=True)
+
+--- NỘI DUNG VĂN BẢN NHẬN DẠNG ĐẦY ĐỦ (FULL_TEXT) ---
+ĐẢNG ỦY XÃ PHƯỚC HẢI
+CHI BỘ VĂN PHÒNG HĐND
+VÀ UBND XÃ
+Số 01-BB/CB
+ĐẢNG CỘNG SẢN VIỆT NAM
+Phước Hải, ngày 05 tháng 10 năm 2026
+BIÊN BẢN
+sinh hoạt chi bộ định kỳ tháng 10 năm 2026
+Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026, tại Phòng họp UBND xã, Chi bộ Văn phòng HĐND và UBND xã đã tổ chức sinh hoạt chi bộ định kỳ tháng 10 năm 2026.
+I. NỘI DUNG, CHƯƠNG TRÌNH SINH HOẠT CHI BỘ
+1. Tuyên bố lý do, giới thiệu đại biểu:
+- Lý do: Tổ chức sinh hoạt chi bộ định kỳ tháng 10 năm 2026.
+- Giới thiệu đại biểu: không có.
+2. Chủ trì: Đồng chí Lê Văn Điền, Bí thư chi bộ.
+3. Thư ký: Đồng chí Nguyễn Văn Thắng, Chi ủy viên Chi bộ.
+4. Đồng chí Lê Văn Điền thông tin tình hình đảng viên dự sinh hoạt:
+Tổng số đảng viên chi bộ: 14 đồng chí (14 chính thức, 0 dự bị), trong đó:
+- Miễn sinh hoạt: 0 đồng chí.
+- Đảng viên bị đình chỉ sinh hoạt: 0 đồng chí.
+- Có mặt: 14 đồng chí.
+- Vắng mặt: 0 đồng chí.
+5. Đồng chí Lê Thụy Thúy Phượng thông báo tình hình thu, nộp đảng phí; 14/14 đảng viên thực hiện nộp đảng phí đầy đủ theo quy định
+6. Đồng chí Lê Văn Điền thông qua nội dung, chương trình sinh hoạt chi bộ định kỳ tháng 10 năm 2026
+II. TIẾN HÀNH SINH HOẠT
+1. Đồng chí Lê Văn Điền, Bí thư Chi bộ quán triệt mục đích, yêu cầu của kỳ sinh hoạt; thông tin các nội dung đã được Chi ủy chuẩn bị và những vấn đề trọng tâm cần tập trung thảo luận, quyết nghị.
+2. Đồng chí Trần Thanh, Phó Bí thư chi bộ thông tin sinh hoạt chi bộ tháng 10 năm 2026; triển khai các văn bản cấp trên
+- Công văn số 1225-CV/ĐU ngày 21/9/2026 của Đảng ủy xã về việc tăng
+--- HẾT NỘI DUNG VĂN BẢN ---
+
+--------------------------------------------------------------------------------
+ẢNH: vanban2.png (987x1200 px)
+Thời gian xử lý: 148.26s
+Số lượng OCRBox: 47
+Số lượng Bảng phát hiện: 1
+  * Bảng 1: 21 hàng x 9 cột | Ô gộp (merged cells): 21
+Lỗi chính tả (Spell Checker): 0
+Xuất DOCX: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\logs\imagetest_docx\vanban2.docx (Success=True)
+
+--- NỘI DUNG VĂN BẢN NHẬN DẠNG ĐẦY ĐỦ (FULL_TEXT) ---
+CÔNG TY TNHH DỊCH VỤ KẾ TOÁN THIÊN ƯNG | CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Số: 01/2026/BBLYK | Độc lập - Tự do - Hạnh phúc
+Hà Nội, ngày 02 tháng 01 năm 2026
+BIÊN BẢN Hôm nay, vào lúc 8 giờ 30 ngày 02 tháng 01 năm 2026, tại trụ sở Công Ty TNHH Dịch Vụ Kế Toán Thiên Ưng Dưới sự chủ trì của Ban chấp hành Công đoàn cơ sở và đại diện lãnh đạo công ty, tổ chức cuộc họp toàn thể cản bộ, công nhân viên và người lao động để lấy ý kiến đóng góp về nội dung Nội quy lao động năm 2026
+I. Thành phần tham dự
+1. Đại diện Công ty: Ông/Bà: Hoàng Trung Thật, Chức vụ: Giám đốc
+2. Đại diện tập thế người lao động:
+Ông/Bà: Nguyễn Thị Lan. Chức vụ: Chủ tịch công đoàn
+3. Tập thể người lao động: Tổng số cán bộ, công nhân viên và lao động của doanh nghiệp: 14 người.
+II. Nội dung cuộc họp 1, Ông/Bà Nguyễn Thị Lan thay mặt Ban Giám đốc và toàn thể người lao động đọc nội quy lao động.
+2. Phương thức lấy ý kiến: - Lấy ý kiến toàn thể cán bộ, công nhân viên và lao động thông qua chữ ký.....X - Lấy ý kiến toàn thể cán bộ, công nhân viên và lao động thông qua biểu quyết: (Đánh dấu X vào nội dung được chọn)
+3. Số người tán thành nội dung nội quy lao động:....14...... người Tỷ lệ:..100...%
+4. Số người không tán thành nội dung Nội quy lao động:.....0.... người Tỷ lệ:...0...%
+5. Những điều khoản không tán thành: Không có
+III. Kết luận Sau khi nghe ý kiến của các bên, Ông Hoàng Trung Thật đại diện Công ty kết luận các nội dung sau: - Ghi nhận, xem xét lại các điều khoản không tán thành và lý do đề có sự chính sửa phù hợp, đúng pháp luật.
+- Yêu cầu các cá nhân, cơ quan có trách nhiệm xây dựng Nội quy lao động đối chiếu các quy định của pháp luật có liên quan, soạn thảo các tài liệu, hồ sơ cần thiết trình Giám đốc ký ban hành.
+Cuộc họp kết thúc vào 11 giờ 30 cùng ngày, Biên bản này đã được đọc lại cho những người tham dự nghe, hiểu rõ, đồng ý ký tên Biên bản được lập thành 02 bản có giá trị như nhau, 01 bản kèm theo hồ sơ đăng ký Nội quy lao động, 01 bản lưu tại hồ sơ Công ty.
+Giám đốc (Ký, ghi rõ họ tên, đóng dấu) | Chủ tịch BCH Công đoàn (Xác nhận, ký, ghi rõ họ tên) | Người ghi biên bản (Ký, ghi rõ họ tên)
+--- HẾT NỘI DUNG VĂN BẢN ---

@@ -853,9 +853,11 @@ class OCREngine:
                 is_fallback_table_row = False
                 line_joined = join_ocr_line_boxes(line)
                 for tbl in detected_tables:
+                    if id(tbl) in phys_merged_tables:
+                        continue
                     for row_data in tbl.grid:
                         row_joined = " ".join(c.strip() for c in row_data if c.strip())
-                        if row_joined and (row_joined == line_joined or line_joined in row_joined):
+                        if row_joined and (row_joined == line_joined or (len(line_joined) >= 15 and line_joined in row_joined)):
                             r_key = (id(tbl), tuple(row_data))
                             if r_key not in rendered_table_rows:
                                 is_fallback_table_row = True
@@ -938,6 +940,11 @@ class OCREngine:
                         flags=re.IGNORECASE,
                     )
                     row_cells[c_idx] = final_document_cleanup(cell_val)
+            for c in tbl.cells:
+                c.text = final_document_cleanup(c.text)
+
+        # Khóa chốt bảo đảm full_text luôn được xử lý qua final_document_cleanup sau cùng
+        full_text = final_document_cleanup(full_text)
 
         elapsed = time.perf_counter() - t0
         result = OCRResult(

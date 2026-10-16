@@ -842,7 +842,7 @@ def extract_physical_table_topology(
             if cell.bbox is None:
                 continue
             x1, y1, x2, y2 = cell.bbox
-            if (x1 - 4) <= bcx <= (x2 + 4) and (y1 - 4) <= bcy <= (y2 + 4):
+            if (x1 - 8) <= bcx <= (x2 + 8) and (y1 - 8) <= bcy <= (y2 + 8):
                 assigned_cell = cell
                 break
 
@@ -860,10 +860,10 @@ def extract_physical_table_topology(
                 if ioa > best_ioa:
                     best_ioa = ioa
                     assigned_cell = cell
-            if best_ioa < 0.20:
+            if best_ioa < 0.15:
                 assigned_cell = None
 
-        if assigned_cell is None and (valid_y[0] - 6 <= bcy <= valid_y[-1] + 6 and valid_x[0] - 10 <= bcx <= valid_x[-1] + 10):
+        if assigned_cell is None and (valid_y[0] - 10 <= bcy <= valid_y[-1] + 10 and valid_x[0] - 12 <= bcx <= valid_x[-1] + 12):
             min_dist = float("inf")
             for cell in cells:
                 if cell.bbox is None:
@@ -908,7 +908,9 @@ def extract_physical_table_topology(
             if line_txt:
                 line_strings.append(line_txt)
 
-        cell.text = " ".join(line_strings).strip()
+        raw_cell_txt = " ".join(line_strings).strip()
+        from app.core.text_postprocessor import final_document_cleanup
+        cell.text = final_document_cleanup(raw_cell_txt)
 
     grid: List[List[str]] = [["" for _ in range(M)] for _ in range(N)]
     row_boxes: List[List[OCRBox]] = [[] for _ in range(N)]

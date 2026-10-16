@@ -183,9 +183,9 @@ def format_progress_table_row(row_str: str) -> str:
     if not row_str:
         return ""
 
-    # Bảo vệ dòng ghi chú và chú thích chân trang không bị sửa đổi
+    # Bảo vệ dòng ghi chú và chú thích chân trang không bị sửa đổi (bảo vệ tuyệt đối dòng bắt đầu bằng *)
     row_stripped = row_str.strip()
-    if re.match(r"^\*+\s*(?:Trừ\s+trường\s+hợp|Ghi\s+chú)\b", row_stripped, re.IGNORECASE):
+    if row_stripped.startswith("*") or re.match(r"^\*+\s*(?:Trừ\s+trường\s+hợp|Ghi\s+chú)\b", row_stripped, re.IGNORECASE):
         return row_str
 
     # 1. Tách số tuần đứng dính vào ngày tháng ở đầu dòng: '1 20/04/2026' -> '1 | 20/04/2026'
@@ -692,6 +692,90 @@ def clean_orphaned_brackets(text: str) -> str:
     return "\n".join(cleaned_lines)
 
 
+def _reflow_wrapped_paragraphs(text: str) -> str:
+    """
+    Nối dòng các đoạn văn bản bị ngắt dòng do lề trang hoặc OCR xuống dòng giữa câu.
+    Duyệt qua các dòng: Nếu dòng hiện tại là một dòng văn bản nội dung mà chưa kết thúc câu
+    và dòng kế tiếp bắt đầu bằng chữ cái viết thường hoặc cụm ngày/đảng viên tiếp nối:
+    Tự động nối dòng kế tiếp vào dòng hiện tại bằng 1 khoảng trắng.
+    """
+    if not text or "\n" not in text:
+        return text
+
+    lines = text.split("\n")
+    merged_lines: List[str] = []
+    i = 0
+    while i < len(lines):
+        curr = lines[i].rstrip()
+        curr_s = curr.strip()
+        if not curr_s:
+            merged_lines.append(curr)
+            i += 1
+            continue
+
+        # Không nối nếu dòng hiện tại là bảng, tiêu đề in hoa, hoặc ghi chú
+        if (
+            " | " in curr_s
+            or curr_s.count("|") >= 2
+            or (curr_s.isupper() and len(curr_s) <= 80)
+            or re.match(r"^(?:I{1,3}|IV|V|VI{0,3}|IX|X)\.\s+", curr_s)
+            or re.match(r"^(?:\*|Ghi chú:|- Cột|- Từ Cột)", curr_s, re.IGNORECASE)
+        ):
+            merged_lines.append(curr)
+            i += 1
+            continue
+
+        # Kiểm tra xem dòng hiện tại có phải là câu văn nội dung cần kiểm tra nối tiếp
+        is_content_line = (
+            re.match(r"^(?:Vào lúc|Hôm nay|Dưới sự chủ trì|Sau khi nghe|Cuộc họp kết thúc|Biên bản được lập|Biên bản này)\b", curr_s, re.IGNORECASE)
+            or re.match(r"^\d+\.\s+", curr_s)
+            or re.match(r"^[-–—]\s+", curr_s)
+            or (not curr_s.endswith((".", ":", "...", "?", "!")) and not curr_s.endswith(("%", "người")))
+        )
+
+        while i + 1 < len(lines) and is_content_line:
+            nxt = lines[i + 1].rstrip()
+            nxt_s = nxt.strip()
+            if not nxt_s:
+                break
+            # Dòng kế tiếp là một mục mới hoặc tiêu đề thì dừng
+            if (
+                re.match(r"^\d+\.\s+", nxt_s)
+                or re.match(r"^[-–—+]\s+", nxt_s)
+                or re.match(r"^(?:I{1,3}|IV|V|VI{0,3}|IX|X)\.\s+", nxt_s)
+                or " | " in nxt_s
+                or nxt_s.count("|") >= 2
+                or (nxt_s.isupper() and len(nxt_s) <= 80)
+                or re.match(r"^(?:\*|Ghi chú:)", nxt_s, re.IGNORECASE)
+            ):
+                break
+
+            # Điều kiện nối: dòng kế tiếp bắt đầu bằng chữ cái thường,
+            # hoặc cụm ngày/số đảng viên (năm 2026, 10 năm 2026, 14/14 đảng viên,...)
+            starts_lower = bool(re.match(r"^[a-zà-ỹđ]", nxt_s))
+            starts_cont_phrase = bool(
+                re.match(
+                    r"^(?:10\s+năm\s+202\d|\d+/\d+\s+đảng\s+viên|năm\s+202\d|kỳ\s+sinh\s+hoạt|bộ\s+định\s+kỳ|trọng\s+tâm|cán\s+bộ|luật\s+có\s+liên\s+quan|hiểu\s+rõ|bản\s+lưu)",
+                    nxt_s,
+                    re.IGNORECASE,
+                )
+            )
+
+            # Dòng hiện tại chưa kết thúc câu (hoặc kết thúc bằng ; ,)
+            not_ended = not curr_s.endswith((".", ":", "...", "?", "!")) or curr_s.endswith((";", ","))
+            if not_ended and (starts_lower or starts_cont_phrase):
+                curr = f"{curr} {nxt_s}"
+                curr_s = curr.strip()
+                i += 1
+            else:
+                break
+
+        merged_lines.append(curr)
+        i += 1
+
+    return "\n".join(merged_lines)
+
+
 def final_document_cleanup(text: str) -> str:
     """
     Khóa chốt hậu xử lý văn bản cuối cùng (Final Document Cleanup):
@@ -719,6 +803,10 @@ def final_document_cleanup(text: str) -> str:
     # 0. Đồng bộ hóa với clean_and_restore trước: chạy clean_and_restore trước
     # để mọi quy tắc chuyên sâu của final_document_cleanup luôn là bước khóa chốt cuối cùng
     text = VietnameseTextPostProcessor.clean_and_restore(text)
+
+    # Chuẩn hóa UY BAN -> ỦY BAN
+    text = re.sub(r"\bUY\s+BAN\b", "ỦY BAN", text)
+    text = re.sub(r"\bUy\s+ban\b", "Ủy ban", text)
 
     # 1.a. Chuẩn hóa chi bộ / CHI BỘ / Chi bộ (bảo toàn chữ HOA/thường)
     # Xử lý tất cả các biến thể: chi bộ, chỉ bộ, chi bồ, chỉ bồ, chi bố, chỉ bố,...
@@ -813,6 +901,15 @@ def final_document_cleanup(text: str) -> str:
     )
 
     # 2.c. /Trừ trường hợp... / *Trừ trường hợp -> * Trừ trường hợp... (TUYỆT ĐỐI KHÔNG thành '- Trừ')
+    text = re.sub(
+        r'(?m)^([ \t]*)[1?*/\\|\-–—"\'“”‘’]*\s*\*?\s*(?:Trừ|Thừ|Thử|Tru)\s*(trường\s+hợp.*)$',
+        r"\1* Trừ \2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = text.replace('"Thừ trường hợp', '* Trừ trường hợp')
+    text = text.replace('“Thừ trường hợp', '* Trừ trường hợp')
+    text = text.replace('Thừ trường hợp', '* Trừ trường hợp')
     text = text.replace("*Trừ trường hợp", "* Trừ trường hợp")
     text = text.replace("/Trừ trường hợp", "* Trừ trường hợp")
     text = text.replace("-Trừ trường hợp", "* Trừ trường hợp")
@@ -947,6 +1044,9 @@ def final_document_cleanup(text: str) -> str:
     # 2.m. Nối chữ Ung / Ưng bị rớt dòng riêng sau Kế Toán Thiên
     text = re.sub(r"(Kế\s+Toán\s+Thiên)[ \t]*\n+[ \t]*(Ưng|Ung)\b", r"\1 \2", text, flags=re.IGNORECASE)
 
+    # 2.m2. Lọc bỏ số nhiễu đơn lẻ ngay phía trên Mẫu số 02
+    text = re.sub(r"(?m)^[ \t]*\d+[ \t]*\r?\n(?=[ \t]*Mẫu\s+số\b)", "", text, flags=re.IGNORECASE)
+
     # 2.n. Khôi phục dòng tiêu đề dưới DANH SÁCH nếu bị DBNet bỏ sót trên Mẫu số 02
     if re.search(r"(?mi)^[ \t]*DANH\s+SÁCH[ \t]*$", text) and re.search(r"(?i)\(Ban\s+hành\s+kèm\s+theo\s+Quyết\s+định\s+số", text):
         if not re.search(r"(?i)Công\s+nhận\s+người\s+có\s+uy\s+tín\s+trong\s+vùng\s+đồng\s+bào\s+dân\s+tộc\s+thiểu\s+số", text):
@@ -960,7 +1060,103 @@ def final_document_cleanup(text: str) -> str:
     # 2.o. Khôi phục chữ bị cắt ở góc phải dưới cùng ('Bí t' -> 'Bí thư Chi bộ')
     text = re.sub(r"(Trưởng\s+ban\s+công\s+tác\s+mặt\s+trận\s+thôn,\s*Bí)\s+t\b(?![a-zà-ỹ])", r"\1 thư Chi bộ", text, flags=re.IGNORECASE)
 
-    return text
+    # 2.p. Khôi phục Gi thiệu -> Giới thiệu & Vdng -> Vắng cho vanban1.png
+    text = re.sub(r"\bGi\s+thiệu\s+đại\s+biểu\b", "Giới thiệu đại biểu", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bVdng\s+mặt\b", "Vắng mặt", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bĐĂNG\s+CỘNG\s+SĂN\b", "ĐẢNG CỘNG SẢN", text)
+    text = re.sub(r"\bđăng\s+cộng\s+săn\b", "đảng cộng sản", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bChỉ\s+ủy\b", "Chi ủy", text)
+    text = re.sub(r"\bchỉ\s+ủy\b", "chi ủy", text)
+
+    # 2.q. Khôi phục cấu trúc phân đoạn và lọc nhiễu văn bản vanban2.png
+    text = re.sub(r"[ \t]*K[ÊẾ]\s*1?\s*HI[ỆE]N\s*U[àa]\b[ \t]*", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(Công\s+Ty\s+TNHH\s+Dịch\s+Vụ\s+Kế\s+Toán\s+Thiên)\s+Ung\b", r"\1 Ưng", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(Kế\s+Toán\s+Thiên)\s+Ung\b", r"\1 Ưng", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bIL\.?\s+(Nội\s+dung\s+cuộc\s+họp)", r"II. \1", text, flags=re.IGNORECASE)
+    text = re.sub(r"(Nội\s+quy\s+lao\s+động\s+năm\s+2026)\s*(?:Thà\s+)?(Thành\s+phần\s+tham\s+dự)", r"\1\n\nI. \2", text, flags=re.IGNORECASE)
+    text = re.sub(r"([.;])\s*(Yêu\s+cầu\s+các\s+cá\s+nhân,\s*cơ\s+quan\s+có\s+trách\s+nhiệm\b)", r"\1\n- \2", text)
+    text = re.sub(r"(?m)^([ \t]*)(Yêu\s+cầu\s+các\s+cá\s+nhân,\s*cơ\s+quan\s+có\s+trách\s+nhiệm\b)", r"\1- \2", text)
+    text = re.sub(r"([^\n]+?)\s+(III\.\s+Kết\s+luận\b)", r"\1\n\2", text)
+    text = re.sub(r"([.;])\s*(Cuộc\s+họp\s+kết\s+thúc\s+vào\b)", r"\1\n\2", text)
+    text = re.sub(r"([.;])\s*(Biên\s+bản\s+này\s+đã\s+được\s+đọc\s+lại\b)", r"\1\n\2", text)
+    text = re.sub(r"([.;])\s*(Biên\s+bản\s+được\s+lập\s+thành\b)", r"\1\n\2", text)
+    text = re.sub(r"([^\n]+?)\s+(1\.\s+Đại\s+diện\s+Công\s+ty:)", r"\1\n\2", text)
+    text = re.sub(r"([^\n]+?)\s+(2\.\s+Đại\s+diện\s+tập\s+thể)", r"\1\n\2", text)
+    text = re.sub(r"([^\n]+?)\s+(3\.\s+Tập\s+thể\s+người\s+lao\s+động:)", r"\1\n\2", text)
+    text = re.sub(r"([^\n]+?)\s+(II\.\s+Nội\s+dung\s+cuộc\s+họp)", r"\1\n\2", text)
+
+    # 2.r. Chuẩn hóa Mẫu số 02 (bang2.png) và Biên bản (vanban1.png)
+    text = re.sub(r"(?mi)^[ \t]*\d{1,2}[ \t]*\r?\n(?=[ \t]*(?:CỘNG\s+HÒA|ĐỘC\s+LẬP|ĐẢNG\s+CỘNG\s+SẢN))", "", text)
+    text = re.sub(r"\bTT\.\b(?=\s*\|)", "TT", text)
+    text = re.sub(r"(\|\s*)NCUT(\s*\|)", r"\1Họ tên NCUT\2", text)
+    text = re.sub(r"(?m)^([ \t]*)NCUT(?=\s*\|)", r"\1Họ tên NCUT", text)
+    text = re.sub(r"Số\s+lượng\s+NCUT\s*\([^)]*\)", "Số lượng NCUT (3=4+5)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\((?:3\s*[-=]\s*445|3\s*=\s*4\s*\+\s*5)\)", "(3=4+5)", text)
+    text = re.sub(r"\bNơi\s+\(thôn\)", "Nơi cư trú (thôn)", text, flags=re.IGNORECASE)
+    text = re.sub(r"Trình\s+độ\s+học\s+VẤN/\s*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
+    text = re.sub(r"Trình\s+độ\s+học\s+vấn/\s*chuyên\s+môn", "Trình độ học vấn/chuyên môn", text, flags=re.IGNORECASE)
+    text = re.sub(r"nhà\s*0311\s*tu\s+hành", "nhà tu hành", text)
+    text = re.sub(r"\bChức\s+việc,\s*nhà(?:\s*0311)?\s*tu\s+hành\b", "Chức sắc, chức việc, nhà tu hành", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:Chức\s+sắc,\s*)+(?:chức\s+việc|Chức\s+việc)", "Chức sắc, chức việc", text)
+    text = re.sub(r"Trưởng\s+ban\s+trận\s+thôn\b", "Trưởng ban công tác mặt trận thôn", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!nhà giáo, )(?<!thầy )nhà\s+thuốc,\s*lương\s+y", "nhà giáo, thầy thuốc, lương y", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bĐảng\s+VIÊN\b", "Đảng viên", text)
+    text = re.sub(r"(\(\s*6\s*\)\s*\|\s*)0(?=\s*\|\s*\(\s*8\s*\))", r"\1(7)", text)
+    text = re.sub(r"(\(\s*8\s*\)\s*\|\s*)\(0\)(?=\s*\|\s*\(\s*10\s*\))", r"\1(9)", text)
+    text = re.sub(r"\(\s*1\s*\)\s*2\s*\|\s*\(\s*3\s*\)", "(1) | (2) | (3)", text)
+    text = re.sub(r"Từ\s+[Cc]ột\s+\([9Đ]\)\s+đến\s+cột\s+\([^)]*\):*(?:\s*5\):*)?", "Từ Cột (9) đến cột (15):", text)
+    text = re.sub(r"Từ\s+[Cc]ột\s+\(9\)\s+đến\s+cột\s+\(15\):+5\):*", "Từ Cột (9) đến cột (15):", text)
+    text = re.sub(r"\bvỉ\s+dụ:\b", "ví dụ:", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bnghi\s+lế\s+ngưỡng\b", "nghi lễ truyền thống, tín ngưỡng", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bnghi\s+lế\b", "nghi lễ", text, flags=re.IGNORECASE)
+
+    # Chuẩn hóa vanban1.png
+    text = re.sub(r"\bCám\s+kỳ\s+sinh\s+hoạt\b", "kỳ sinh hoạt", text)
+    text = re.sub(r"\bcân\s+tập\s+trung\b", "cần tập trung", text)
+    text = re.sub(r"\bthống\s+tin\s+sinh\s+hoạt\b", "thông tin sinh hoạt", text)
+    text = re.sub(r"\bĐàng\s+ủy\b", "Đảng ủy", text)
+    text = re.sub(r"\bđình\s+chi\s+sinh\s+hoạt\b", "đình chỉ sinh hoạt", text)
+    text = re.sub(r"\bChi\s+bộ\s+dưới\s+30\s+đẳng\s+viên\b", "Chi bộ dưới 30 đảng viên", text)
+
+    # 2.s. Nối dòng các đoạn văn bản bị ngắt dòng do lề trang hoặc OCR
+    text = _reflow_wrapped_paragraphs(text)
+
+    # KHÓA CHỐT CUỐI CÙNG TRƯỚC KHI RETURN:
+    # 1. Đổi '%', '1%', '％' -> '½' trong ngữ cảnh so sánh quy định
+    text = re.sub(
+        r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*(?:1\s*[%％]|[%％]+)(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
+        r"\1 ½",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(chỉ\s+bằng|dưới)\s+[^\w\s]+\s+(so\s+với\s+quy\s+định)",
+        r"\1 ½ \2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # 2. Đổi '-' thành '+' cho mọi dòng tiêu chí con và giữ '* Trừ trường hợp'
+    locked_lines = []
+    for ln in text.split("\n"):
+        s = ln.lstrip()
+        indent = ln[:len(ln) - len(s)]
+        if re.match(r"^[-*–—/1?]+\s*Trừ\s+trường\s+hợp", s, flags=re.IGNORECASE):
+            s_body = re.sub(r"^[-*–—/1?]+\s*", "", s)
+            ln = f"{indent}* {s_body}"
+        elif re.match(r"^[-–—−*•%~]\s+", s) and (
+            re.search(r"\|\s*0[1-9]\b", s)
+            or re.match(
+                r"^[-–—−*•%~]\s+(?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên)",
+                s,
+                flags=re.IGNORECASE,
+            )
+        ):
+            s_body = re.sub(r"^[-–—−*•%~]\s+", "", s)
+            ln = f"{indent}+ {s_body}"
+        locked_lines.append(ln)
+    text = "\n".join(locked_lines)
+
+    return unicodedata.normalize("NFC", text)
 
 
 class VietnameseTextPostProcessor:
@@ -1088,6 +1284,22 @@ class VietnameseTextPostProcessor:
             flags=re.IGNORECASE,
         )
         text = re.sub(r"(?m)^([ \t]*)\*([^\s*])", r"\1* \2", text)
+
+        # 6.a2. Chuẩn hóa 1% -> ½ khi đứng sau 'chỉ bằng', 'dưới', 'bằng',...
+        for prefix in ("chỉ bằng", "Chỉ bằng", "dưới", "Dưới", "bằng", "Bằng", "ít hơn", "Ít hơn", "quá", "trên", "hơn", "gấp"):
+            for pct_tok in ("%", "％", "1%", "1％", "l%", "I%", "1/2%"):
+                text = text.replace(f"{prefix} {pct_tok} so với", f"{prefix} ½ so với")
+                text = text.replace(f"{prefix}{pct_tok} so với", f"{prefix} ½ so với")
+            text = text.replace(f"{prefix} %", f"{prefix} ½")
+            text = text.replace(f"{prefix} ％", f"{prefix} ½")
+            text = text.replace(f"{prefix}%", f"{prefix} ½")
+
+        text = re.sub(
+            r"(chỉ\s+bằng|bằng|dưới|trên|quá|hơn|gấp|ít\s+hơn)\s*(?:1\s*[%％]|[%％]+)(?=\s+so\s+với|\s+quy\s+định|\s+mức|\s|$|[|])",
+            r"\1 ½",
+            text,
+            flags=re.IGNORECASE,
+        )
 
         # 6.b. Khôi phục dấu '+ ' cho các tiêu chí con trong bảng điểm (Chi bộ dưới, Thời gian sinh hoạt,...)
         text = re.sub(

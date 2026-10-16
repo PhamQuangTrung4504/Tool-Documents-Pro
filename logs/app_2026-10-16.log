@@ -41,3 +41,97 @@
 2026-10-16 08:23:10 | INFO     | app.core.ocr_engine:clear_cache:409 | OCREngine cache cleared.
 2026-10-16 08:23:10 | INFO     | app.ui.main_window:closeEvent:1415 | MainWindow closed.
 2026-10-16 08:23:10 | INFO     | __main__:main:117 | Application exited with code 0.
+2026-10-16 09:46:31 | INFO     | __main__:main:71 | ============================================================
+2026-10-16 09:46:31 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-16 09:46:31 | INFO     | __main__:main:73 | ============================================================
+2026-10-16 09:46:31 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-16 09:46:31 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-16 09:46:34 | INFO     | app.ui.main_window:__init__:544 | MainWindow initialized.
+2026-10-16 09:46:34 | INFO     | __main__:main:131 | Application window opened.
+2026-10-16 09:46:47 | INFO     | app.ui.main_window:_load_image_from_clipboard:922 | Image loaded from clipboard ((767, 571, 3))
+2026-10-16 09:46:49 | INFO     | app.core.ocr_engine:get_global_detector:278 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-16 09:46:51 | INFO     | app.core.ocr_engine:get_global_detector:314 | PaddleOCR detector singleton initialized successfully.
+2026-10-16 09:46:53 | INFO     | app.core.ocr_engine:get_global_vietocr:338 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-16 09:46:59 | INFO     | app.core.ocr_engine:get_global_vietocr:345 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-16 09:46:59 | INFO     | app.core.ocr_engine:_ensure_loaded:450 | Hybrid OCR engines ready in 9.94s.
+2026-10-16 09:46:59 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 09:47:35 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-16 09:50:10 | INFO     | app.core.ocr_engine:recognize:956 | Hybrid OCR completed: 31 lines, 0 tables detected, avg_conf=0.95, elapsed=191.35s
+2026-10-16 09:50:10 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 31 lines, avg_conf=0.95
+2026-10-16 09:56:13 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 09:56:28 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-16 09:58:43 | INFO     | app.core.ocr_engine:recognize:956 | Hybrid OCR completed: 31 lines, 0 tables detected, avg_conf=0.95, elapsed=150.52s
+2026-10-16 09:58:43 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 31 lines, avg_conf=0.95
+2026-10-16 10:02:25 | DEBUG    | app.core.spell_corrector:_load_datasets:413 | Loaded 7698 syllables from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_syllables.txt
+2026-10-16 10:02:25 | DEBUG    | app.core.spell_corrector:_load_datasets:433 | Loaded 72535 words from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_words.txt
+2026-10-16 10:02:25 | DEBUG    | app.core.spell_corrector:_load_datasets:491 | Loaded 82834 English words from symspellpy.
+2026-10-16 10:02:25 | INFO     | app.ui.main_window:_on_spell_check_finished:1227 | Spell check finished: 0 suspicious tokens found.
+2026-10-16 10:03:06 | INFO     | app.ui.main_window:_load_image_from_path:890 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang2.png ((761, 1123, 3))
+2026-10-16 10:03:08 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:03:43 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 95 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:04:19 | INFO     | app.core.ocr_engine:recognize:956 | Hybrid OCR completed: 16 lines, 1 tables detected, avg_conf=0.95, elapsed=71.24s
+2026-10-16 10:04:19 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 16 lines, avg_conf=0.95
+2026-10-16 10:06:21 | INFO     | app.ui.main_window:_on_spell_check_finished:1235 | Spell check finished: 2 suspicious tokens highlighted.
+2026-10-16 10:06:36 | INFO     | app.ui.main_window:_load_image_from_path:890 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban2.png ((1200, 987, 3))
+2026-10-16 10:06:38 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:07:08 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 46 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:08:43 | INFO     | app.core.ocr_engine:recognize:956 | Hybrid OCR completed: 15 lines, 1 tables detected, avg_conf=0.95, elapsed=124.97s
+2026-10-16 10:08:43 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 15 lines, avg_conf=0.95
+2026-10-16 10:08:49 | INFO     | app.ui.main_window:_on_spell_check_finished:1235 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-16 10:13:56 | INFO     | __main__:main:71 | ============================================================
+2026-10-16 10:13:56 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-16 10:13:56 | INFO     | __main__:main:73 | ============================================================
+2026-10-16 10:13:56 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-16 10:13:56 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-16 10:13:59 | INFO     | app.ui.main_window:__init__:544 | MainWindow initialized.
+2026-10-16 10:13:59 | INFO     | __main__:main:131 | Application window opened.
+2026-10-16 10:14:09 | INFO     | app.ui.main_window:_load_image_from_clipboard:922 | Image loaded from clipboard ((767, 553, 3))
+2026-10-16 10:14:14 | INFO     | app.core.ocr_engine:get_global_detector:278 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-16 10:14:16 | INFO     | app.core.ocr_engine:get_global_detector:314 | PaddleOCR detector singleton initialized successfully.
+2026-10-16 10:14:18 | INFO     | app.core.ocr_engine:get_global_vietocr:338 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-16 10:14:22 | INFO     | app.core.ocr_engine:get_global_vietocr:345 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-16 10:14:22 | INFO     | app.core.ocr_engine:_ensure_loaded:450 | Hybrid OCR engines ready in 8.31s.
+2026-10-16 10:14:22 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:14:43 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:16:07 | INFO     | app.core.ocr_engine:recognize:958 | Hybrid OCR completed: 32 lines, 0 tables detected, avg_conf=0.95, elapsed=105.39s
+2026-10-16 10:16:07 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 32 lines, avg_conf=0.95
+2026-10-16 10:17:18 | INFO     | app.core.docx_exporter:export_to_docx:239 | DOCX exported successfully: C:/Users/pqtru/OneDrive/Desktop/552.docx
+2026-10-16 10:17:18 | INFO     | app.ui.main_window:_on_export_docx:1159 | Result exported to DOCX: C:/Users/pqtru/OneDrive/Desktop/552.docx
+2026-10-16 10:18:19 | INFO     | app.ui.main_window:_load_image_from_clipboard:922 | Image loaded from clipboard ((726, 1115, 3))
+2026-10-16 10:18:20 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:18:43 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 96 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:19:15 | INFO     | app.core.ocr_engine:recognize:958 | Hybrid OCR completed: 15 lines, 1 tables detected, avg_conf=0.95, elapsed=54.96s
+2026-10-16 10:19:15 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 15 lines, avg_conf=0.95
+2026-10-16 10:19:22 | DEBUG    | app.core.spell_corrector:_load_datasets:413 | Loaded 7698 syllables from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_syllables.txt
+2026-10-16 10:19:22 | DEBUG    | app.core.spell_corrector:_load_datasets:433 | Loaded 72535 words from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_words.txt
+2026-10-16 10:19:22 | DEBUG    | app.core.spell_corrector:_load_datasets:491 | Loaded 82834 English words from symspellpy.
+2026-10-16 10:19:22 | INFO     | app.ui.main_window:_on_spell_check_finished:1235 | Spell check finished: 1 suspicious tokens highlighted.
+2026-10-16 10:20:13 | INFO     | app.core.docx_exporter:export_to_docx:239 | DOCX exported successfully: C:/Users/pqtru/OneDrive/Desktop/5523.docx
+2026-10-16 10:20:13 | INFO     | app.ui.main_window:_on_export_docx:1159 | Result exported to DOCX: C:/Users/pqtru/OneDrive/Desktop/5523.docx
+2026-10-16 10:20:47 | INFO     | app.ui.main_window:_load_image_from_clipboard:922 | Image loaded from clipboard ((713, 1076, 3))
+2026-10-16 10:20:48 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:21:09 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 42 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:21:52 | INFO     | app.core.ocr_engine:recognize:958 | Hybrid OCR completed: 17 lines, 1 tables detected, avg_conf=0.95, elapsed=64.30s
+2026-10-16 10:21:52 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 17 lines, avg_conf=0.95
+2026-10-16 10:23:36 | INFO     | app.ui.main_window:_on_spell_check_finished:1227 | Spell check finished: 0 suspicious tokens found.
+2026-10-16 10:23:36 | INFO     | app.ui.main_window:_on_spell_check_finished:1227 | Spell check finished: 0 suspicious tokens found.
+2026-10-16 10:23:42 | DEBUG    | app.core.ocr_engine:recognize:611 | Running PaddleOCR Text Detection …
+2026-10-16 10:23:57 | DEBUG    | app.core.ocr_engine:recognize:666 | Recognizing 42 text lines with VietOCR (vgg_transformer) …
+2026-10-16 10:24:43 | INFO     | app.core.ocr_engine:recognize:958 | Hybrid OCR completed: 17 lines, 1 tables detected, avg_conf=0.95, elapsed=60.71s
+2026-10-16 10:24:43 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 17 lines, avg_conf=0.95
+2026-10-16 10:26:35 | INFO     | app.ui.main_window:_on_spell_check_finished:1227 | Spell check finished: 0 suspicious tokens found.
+2026-10-16 10:26:59 | INFO     | app.core.docx_exporter:export_to_docx:239 | DOCX exported successfully: C:/Users/pqtru/OneDrive/Desktop/Tool-Documents-Pro/331.docx
+2026-10-16 10:26:59 | INFO     | app.ui.main_window:_on_export_docx:1159 | Result exported to DOCX: C:/Users/pqtru/OneDrive/Desktop/Tool-Documents-Pro/331.docx
+2026-10-16 10:28:03 | INFO     | app.core.ocr_engine:clear_cache:413 | OCREngine cache cleared.
+2026-10-16 10:28:03 | INFO     | app.ui.main_window:closeEvent:1432 | MainWindow closed.
+2026-10-16 10:28:03 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-16 11:03:44 | INFO     | __main__:main:71 | ============================================================
+2026-10-16 11:03:44 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-16 11:03:44 | INFO     | __main__:main:73 | ============================================================
+2026-10-16 11:03:44 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-16 11:03:44 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-16 11:03:46 | INFO     | app.ui.main_window:__init__:544 | MainWindow initialized.
+2026-10-16 11:03:46 | INFO     | __main__:main:131 | Application window opened.
+2026-10-16 11:04:22 | INFO     | app.core.ocr_engine:clear_cache:413 | OCREngine cache cleared.
+2026-10-16 11:04:22 | INFO     | app.ui.main_window:closeEvent:1432 | MainWindow closed.
+2026-10-16 11:04:22 | INFO     | __main__:main:134 | Application exited with code 0.

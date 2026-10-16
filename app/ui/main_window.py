@@ -553,12 +553,29 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self.setStyleSheet(build_stylesheet())
 
-        # Đặt icon nếu có
-        icon_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "icon.ico"
+        # Thiết lập AppUserModelID trên Windows để icon hiển thị đúng trên Windows Taskbar
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                    "ToolDocumentsPro.OCR.Desktop.v2"
+                )
+            except Exception:
+                pass
+
+        # Đặt icon ứng dụng chính thức
+        icon_path = (
+            Path(__file__).resolve().parents[2]
+            / "assets"
+            / "icon"
+            / "icon_tool_documents_pro.ico"
         )
-        if os.path.isfile(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        if icon_path.exists():
+            app_icon = QIcon(str(icon_path))
+            self.setWindowIcon(app_icon)
+            qapp = QApplication.instance()
+            if qapp is not None:
+                qapp.setWindowIcon(app_icon)
 
     # ==================================================================
     # INIT — Toolbar

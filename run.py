@@ -80,11 +80,21 @@ def main() -> int:
             "Recommended: Python 3.9 — 3.11."
         )
 
+    # Thiết lập AppUserModelID trên Windows để icon hiển thị đúng trên Windows Taskbar
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "ToolDocumentsPro.OCR.Desktop.v2"
+            )
+        except Exception as exc_appid:
+            logger.debug(f"Không thể đặt AppUserModelID: {exc_appid}")
+
     # Import PyQt5
     try:
         from PyQt5.QtWidgets import QApplication
         from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
+        from PyQt5.QtGui import QFont, QIcon
     except ImportError:
         logger.error(
             "PyQt5 chưa được cài đặt. Chạy: pip install -r requirements.txt"
@@ -100,6 +110,13 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Tool-Documents-Pro")
     app.setOrganizationName("ToolDocumentsPro")
+
+    # Đặt icon ứng dụng chính thức
+    from pathlib import Path
+    icon_path = Path(__file__).resolve().parent / "assets" / "icon" / "icon_tool_documents_pro.ico"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+        logger.info(f"Loaded application icon from: {icon_path}")
 
     # Font mặc định dễ đọc
     default_font = QFont("Segoe UI", 10)

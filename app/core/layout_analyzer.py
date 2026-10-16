@@ -345,7 +345,7 @@ def detect_parallel_administrative_header(
         text_upper = item["text"].upper()
         is_title_keyword = any(kw in text_upper for kw in [
             "BIÊN BẢN", "QUYẾT ĐỊNH", "THÔNG TƯ", "NGHỊ ĐỊNH", "BÁO CÁO",
-            "KẾ HOẠCH", "TỜ TRÌNH", "BẢNG ĐIỂM", "CHỈ THỊ", "CÔNG VĂN"
+            "KẾ HOẠCH", "TỜ TRÌNH", "BẢNG ĐIỂM", "CHỈ THỊ", "CÔNG VĂN", "DANH SÁCH"
         ])
         if (is_title_keyword or abs(item_mid - page_mid_x) < 0.18 * page_w) and item["top"] < 400:
             if is_title_keyword or item["top"] > 180:
@@ -371,14 +371,25 @@ def detect_parallel_administrative_header(
     if has_table_kw:
         return HeaderDetectionResult([], box_info, parallel_header=None)
 
+    # Tách nhãn biểu mẫu độc lập ở góc trên bên phải (ví dụ: 'Mẫu số 02')
+    form_label_boxes: List[dict] = []
+    core_header_boxes: List[dict] = []
+    for b in header_boxes:
+        if re.match(r"^(?:Mẫu\s+số\s*\d+|Mẫu\s+\d+)", b["text"].strip(), re.IGNORECASE) and b["top"] < 180:
+            form_label_boxes.append(b)
+        else:
+            core_header_boxes.append(b)
+
+    target_header_boxes = core_header_boxes if form_label_boxes else header_boxes
+
     best_split_x = None
     max_gap = 0.0
     for split_ratio in np.linspace(0.35, 0.65, 31):
         sx = page_min_x + split_ratio * page_w
-        left_b = [b for b in header_boxes if b["right"] <= sx]
-        right_b = [b for b in header_boxes if b["left"] >= sx]
-        cross_b = [b for b in header_boxes if b["left"] < sx and b["right"] > sx]
-        if len(left_b) >= 2 and len(right_b) >= 1 and not cross_b:
+        left_b = [b for b in target_header_boxes if b["right"] <= sx]
+        right_b = [b for b in target_header_boxes if b["left"] >= sx]
+        cross_b = [b for b in target_header_boxes if b["left"] < sx and b["right"] > sx]
+        if len(left_b) >= 1 and len(right_b) >= 1 and not cross_b:
             gap = min(b["left"] for b in right_b) - max(b["right"] for b in left_b)
             if gap >= max(20.0, 0.05 * page_w) and gap > max_gap:
                 max_gap = gap
@@ -387,8 +398,8 @@ def detect_parallel_administrative_header(
     if best_split_x is None:
         return HeaderDetectionResult([], box_info, parallel_header=None)
 
-    left_b = [b for b in header_boxes if b["right"] <= best_split_x]
-    right_b = [b for b in header_boxes if b["left"] >= best_split_x]
+    left_b = [b for b in target_header_boxes if b["right"] <= best_split_x]
+    right_b = [b for b in target_header_boxes if b["left"] >= best_split_x]
 
     if centered_title is None:
         left_text = " ".join(b["text"].upper() for b in left_b)
@@ -432,7 +443,8 @@ def detect_parallel_administrative_header(
         right_boxes=right_boxes,
     )
 
-    return HeaderDetectionResult(lines_left + lines_right, remaining, parallel_header=parallel_hdr)
+    form_lines = [[b["box"] for b in form_label_boxes]] if form_label_boxes else []
+    return HeaderDetectionResult(form_lines + lines_left + lines_right, remaining, parallel_header=parallel_hdr)
 
 
 def detect_and_reconstruct_table(
