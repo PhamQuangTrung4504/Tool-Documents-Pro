@@ -17,8 +17,11 @@ Tính năng:
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -72,6 +75,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStatusBar,
+    QTabWidget,
     QTextEdit,
     QToolBar,
     QToolButton,
@@ -89,6 +93,9 @@ from app.core.ocr_engine import (
     get_lang_code,
 )
 from app.core.spell_corrector import SpellError, check_text_spelling
+from app.core.document_session import DocumentSession
+from app.core.document_renderer import DocumentRenderService
+from app.ui.word_preview import WordPreviewWidget
 
 # ---------------------------------------------------------------------------
 # Hằng số giao diện
@@ -192,6 +199,42 @@ class SpellCheckWorker(QThread):
         except Exception as exc:
             logger.exception("Spell check worker error:")
             self.finished.emit([], self._text)
+
+
+class DocumentWorker(QThread):
+    """Create the session DOCX and render that same file to PDF off the UI thread."""
+    docx_ready = pyqtSignal(str, object)
+    rendered = pyqtSignal(str, object)
+
+    def __init__(self, result: OCRResult, session: DocumentSession, generation: int, parent=None):
+        super().__init__(parent)
+        self.result = result
+        self.session = session
+        self.generation = generation
+
+    def run(self) -> None:
+        if not export_to_docx(self.result, str(self.session.docx_path)):
+            self.docx_ready.emit(self.session.session_id, RuntimeError("Không thể tạo file Word tạm."))
+            return
+        if not self.session.docx_path.is_file() or self.session.docx_path.stat().st_size == 0:
+            self.docx_ready.emit(self.session.session_id, RuntimeError("File Word tạm không hợp lệ."))
+            return
+        try:
+            with zipfile.ZipFile(self.session.docx_path) as archive:
+                if "word/document.xml" not in archive.namelist():
+                    raise zipfile.BadZipFile("missing word/document.xml")
+                bad_member = archive.testzip()
+                if bad_member:
+                    raise zipfile.BadZipFile(f"corrupt member: {bad_member}")
+        except (OSError, zipfile.BadZipFile) as exc:
+            self.docx_ready.emit(self.session.session_id, RuntimeError(f"File Word tạm không hợp lệ: {exc}"))
+            return
+        self.docx_ready.emit(self.session.session_id, self.session.docx_path)
+        try:
+            pdf = DocumentRenderService().render_docx(self.session.docx_path, self.session.pdf_path)
+            self.rendered.emit(self.session.session_id, pdf)
+        except Exception as exc:
+            self.rendered.emit(self.session.session_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +570,12 @@ class MainWindow(QMainWindow):
         self._spell_worker: Optional[SpellCheckWorker] = None
         self._active_spell_errors: List[SpellError] = []
         self._is_replacing_suggestion: bool = False
+        self._generation = 0
+        self._document_session: Optional[DocumentSession] = None
+        self._document_worker: Optional[DocumentWorker] = None
+        self._document_workers: List[DocumentWorker] = []
+        self._retired_sessions: Dict[str, DocumentSession] = {}
+        self._document_dirty = False
 
         # Engine (lazy)
         self._engine: Optional[OCREngine] = None
@@ -705,11 +754,16 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(6)
 
         # Title
-        result_title = QLabel("📝  Kết quả nhận dạng")
+        result_title = QLabel("📄  Xem trước tài liệu Word")
         result_title.setObjectName("labelTitle")
         right_layout.addWidget(result_title)
 
-        # Text editor
+        self.document_tabs = QTabWidget()
+        self.word_preview = WordPreviewWidget()
+        self.document_tabs.addTab(self.word_preview, "Xem trước Word")
+        right_layout.addWidget(self.document_tabs, stretch=1)
+
+        # Text editor (kept as an explicit editing/spell-check mode)
         self.text_result = QPlainTextEdit()
         self.text_result.setPlaceholderText(
             "Kết quả OCR sẽ hiển thị tại đây …"
@@ -718,7 +772,7 @@ class MainWindow(QMainWindow):
         self.text_result.textChanged.connect(self._on_text_changed)
         self.text_result.setContextMenuPolicy(Qt.CustomContextMenu)
         self.text_result.customContextMenuRequested.connect(self._on_text_context_menu)
-        right_layout.addWidget(self.text_result, stretch=1)
+        self.document_tabs.addTab(self.text_result, "Chỉnh sửa văn bản")
 
         # Info label
         self.label_info = QLabel("")
@@ -766,10 +820,10 @@ class MainWindow(QMainWindow):
         self.btn_export.clicked.connect(self._on_export_txt)
         btn_row.addWidget(self.btn_export)
 
-        self.btn_export_docx = QPushButton("📄  Xuất Word")
+        self.btn_export_docx = QPushButton("📄  Lưu Word")
         self.btn_export_docx.setObjectName("btnExportDocx")
         self.btn_export_docx.setFixedHeight(42)
-        self.btn_export_docx.setToolTip("Xuất kết quả sang file Microsoft Word (.docx), giữ nguyên cấu trúc bảng biểu")
+        self.btn_export_docx.setToolTip("Lưu bản Word đang được xem trước vào vị trí bạn chọn")
         self.btn_export_docx.clicked.connect(self._on_export_docx)
         btn_row.addWidget(self.btn_export_docx)
 
@@ -870,6 +924,8 @@ class MainWindow(QMainWindow):
             )
             return False
 
+        self._invalidate_document()
+
         # BGRA → BGR
         if len(image.shape) == 3 and image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
@@ -908,6 +964,8 @@ class MainWindow(QMainWindow):
             return False
         else:
             return False
+
+        self._invalidate_document()
 
         self._current_image = image
         self._image_path = None
@@ -949,10 +1007,14 @@ class MainWindow(QMainWindow):
         if mimedata.hasImage():
             qimg = QImage(mimedata.imageData())
             if not qimg.isNull():
+                self._invalidate_document()
                 image = qimage_to_numpy(qimg)
                 self._current_image = image
                 self._image_path = None
+                self._current_result = None
                 self._show_image(image)
+                self.text_result.clear()
+                self.label_info.setText("")
                 self.setWindowTitle(f"{APP_TITLE} — (Dropped)")
                 self._set_status("Đã nhận ảnh kéo thả")
                 event.acceptProposedAction()
@@ -1002,6 +1064,9 @@ class MainWindow(QMainWindow):
             self._set_status("OCR đang chạy, vui lòng đợi …")
             return
 
+        self._invalidate_document()
+        self._current_result = None
+
         # Disable controls
         self.btn_ocr.setEnabled(False)
         self.act_ocr.setEnabled(False)
@@ -1014,7 +1079,8 @@ class MainWindow(QMainWindow):
 
         self._ocr_worker = OCRWorker(engine, self._current_image, self)
         self._ocr_worker.progress.connect(self._on_ocr_progress)
-        self._ocr_worker.finished.connect(self._on_ocr_finished)
+        generation = self._generation
+        self._ocr_worker.finished.connect(lambda result, g=generation: self._on_ocr_finished(result, g))
         self._ocr_worker.start()
 
     @pyqtSlot(str)
@@ -1022,8 +1088,10 @@ class MainWindow(QMainWindow):
         self._set_status(msg)
 
     @pyqtSlot(object)
-    def _on_ocr_finished(self, result_or_error) -> None:
+    def _on_ocr_finished(self, result_or_error, generation: Optional[int] = None) -> None:
         """Callback khi OCR hoàn thành."""
+        if generation is not None and generation != self._generation:
+            return
         self.btn_ocr.setEnabled(True)
         self.act_ocr.setEnabled(True)
         self.progress_bar.setVisible(False)
@@ -1045,6 +1113,10 @@ class MainWindow(QMainWindow):
         cleaned_text = final_document_cleanup(result.full_text)
         result.full_text = cleaned_text
         self.text_result.setPlainText(cleaned_text)
+        self._document_dirty = False
+        self.word_preview.set_notice("Đang tạo tài liệu Word và bản xem trước …")
+        self.btn_export_docx.setEnabled(False)
+        self._create_document_session(result)
 
         # Vẽ bounding box lên ảnh
         if self._current_image is not None and result.boxes:
@@ -1076,6 +1148,84 @@ class MainWindow(QMainWindow):
             f"OCR result displayed: {result.num_lines} lines, "
             f"avg_conf={avg_conf:.2f}"
         )
+
+    def _create_document_session(self, result: OCRResult) -> None:
+        """Generate the temporary DOCX first, then render that same file."""
+        old_session = self._document_session
+        old_worker = self._document_worker
+        if old_session is not None:
+            if old_worker is not None and old_worker.isRunning():
+                self._retired_sessions[old_session.session_id] = old_session
+                old_worker.finished.connect(lambda sid=old_session.session_id: self._cleanup_retired_session(sid))
+            else:
+                old_session.cleanup()
+        self._document_session = DocumentSession.create()
+        worker = DocumentWorker(result, self._document_session, self._generation, self)
+        worker.docx_ready.connect(self._on_temp_docx_ready)
+        worker.rendered.connect(self._on_preview_rendered)
+        worker.finished.connect(lambda w=worker: self._forget_document_worker(w))
+        self._document_worker = worker
+        self._document_workers.append(worker)
+        self._set_status("Đang tạo tài liệu Word …")
+        worker.start()
+
+    @pyqtSlot(str, object)
+    def _on_temp_docx_ready(self, session_id: str, result_or_error) -> None:
+        session = self._document_session
+        if session is None or session.session_id != session_id:
+            return
+        if isinstance(result_or_error, Exception):
+            self.btn_export_docx.setEnabled(False)
+            self.word_preview.set_notice(f"Không tạo được DOCX: {result_or_error}")
+            self._set_status("OCR hoàn tất nhưng không tạo được file Word.")
+            logger.error("Temporary DOCX generation failed ({})", type(result_or_error).__name__)
+            return
+        self.btn_export_docx.setEnabled(True)
+        self._set_status("DOCX sẵn sàng. Đang tạo bản xem trước …")
+
+    @pyqtSlot(str, object)
+    def _on_preview_rendered(self, session_id: str, result_or_error) -> None:
+        session = self._document_session
+        if session is None or session.session_id != session_id:
+            return
+        if isinstance(result_or_error, Exception):
+            self.word_preview.set_notice(str(result_or_error))
+            self._set_status("DOCX đã sẵn sàng; không thể tạo bản xem trước.")
+            logger.error(
+                "Document preview failed at renderer stage ({}, code={}).",
+                type(result_or_error).__name__,
+                getattr(result_or_error, "diagnostic_code", "not-applicable"),
+            )
+            return
+        self.word_preview.set_pdf(Path(result_or_error))
+        self._set_status("Bản xem trước Word đã sẵn sàng.")
+
+    def _invalidate_document(self) -> None:
+        """Invalidate pending callbacks and clean only this window's owned session."""
+        self._generation += 1
+        self.btn_ocr.setEnabled(True)
+        self.act_ocr.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.word_preview.set_notice("Chưa có tài liệu. Chạy OCR để tạo bản xem trước Word.")
+        self.btn_export_docx.setEnabled(False)
+        self._document_dirty = False
+        session, self._document_session = self._document_session, None
+        worker = self._document_worker
+        if session is not None:
+            if worker is not None and worker.isRunning():
+                self._retired_sessions[session.session_id] = session
+                worker.finished.connect(lambda sid=session.session_id: self._cleanup_retired_session(sid))
+            elif not session.cleanup():
+                logger.warning(f"Temporary document session cleanup deferred: {session.directory}")
+
+    def _cleanup_retired_session(self, session_id: str) -> None:
+        session = self._retired_sessions.pop(session_id, None)
+        if session is not None and not session.cleanup():
+            logger.warning(f"Temporary document session cleanup deferred: {session.directory}")
+
+    def _forget_document_worker(self, worker: DocumentWorker) -> None:
+        if worker in self._document_workers:
+            self._document_workers.remove(worker)
 
     @pyqtSlot()
     def _on_copy_result(self) -> None:
@@ -1128,9 +1278,13 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_export_docx(self) -> None:
-        """Lưu kết quả ra file Microsoft Word (.docx)."""
+        """Save the exact generated DOCX without modifying its session copy."""
+        if self._document_dirty:
+            self._regenerate_edited_document()
+            self._set_status("Đang cập nhật Word từ nội dung đã chỉnh sửa. Bấm Lưu Word khi DOCX sẵn sàng.")
+            return
         text = self.text_result.toPlainText().strip()
-        if not text:
+        if not text or self._document_session is None or not self._document_session.docx_path.is_file():
             self._set_status("Chưa có kết quả để lưu")
             return
 
@@ -1146,25 +1300,42 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-
-        result_to_export = self._current_result
-        if result_to_export is None:
-            result_to_export = OCRResult(full_text=text)
-        else:
-            result_to_export.full_text = text
-
-        success = export_to_docx(result_to_export, path)
-        if success:
+        target = Path(path)
+        if target.suffix.lower() != ".docx":
+            target = target.with_suffix(".docx")
+        try:
+            target.resolve().relative_to(self._document_session.root if self._document_session else Path(tempfile.gettempdir()) / "Tool-Documents-Pro" / "temp")
+            inside_managed_root = True
+        except (OSError, RuntimeError, ValueError):
+            inside_managed_root = False
+        if inside_managed_root:
+            QMessageBox.warning(self, "Đường dẫn không hợp lệ", "Không thể lưu bản Word vào thư mục tạm do ứng dụng quản lý.")
+            return
+        if target.exists():
+            answer = QMessageBox.question(self, "Xác nhận ghi đè", f"File đã tồn tại:\n{target}\n\nBạn có muốn ghi đè không?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        temp_path = None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(prefix=f".{target.stem}-", suffix=".docx", dir=str(target.parent), delete=False) as tmp:
+                temp_path = Path(tmp.name)
+            shutil.copyfile(self._document_session.docx_path, temp_path)
+            os.replace(temp_path, target)
             self._set_status(f"✅ Đã lưu Word: {os.path.basename(path)}")
-            logger.info(f"Result exported to DOCX: {path}")
-        else:
+            QMessageBox.information(self, "Đã lưu Word", f"Đã lưu tài liệu tại:\n{target}")
+            logger.info(f"Result exported to DOCX: {target}")
+        except OSError as exc:
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
             QMessageBox.critical(
-                self, "Lỗi", f"Không thể lưu file Word:\n{path}"
+                self, "Lỗi", f"Không thể lưu file Word:\n{exc}"
             )
 
     @pyqtSlot()
     def _on_clear(self) -> None:
         """Xoá ảnh và kết quả."""
+        self._invalidate_document()
         self._current_image = None
         self._current_pixmap = None
         self._current_result = None
@@ -1201,6 +1372,8 @@ class MainWindow(QMainWindow):
         if not text or not text.strip():
             self._set_status("Không đủ dữ liệu để kiểm tra.")
             return
+
+        self.document_tabs.setCurrentWidget(self.text_result)
 
         if self._spell_worker is not None and self._spell_worker.isRunning():
             self._set_status("Đang kiểm tra chính tả, vui lòng đợi …")
@@ -1398,11 +1571,26 @@ class MainWindow(QMainWindow):
     def _on_text_changed(self) -> None:
         """Xóa hoặc cập nhật các đánh dấu cũ khi người dùng chỉnh sửa văn bản trực tiếp."""
         if getattr(self, "_is_replacing_suggestion", False):
+            self._mark_document_dirty_if_changed()
             return
         if self._active_spell_errors:
             self._active_spell_errors = []
             self.text_result.setExtraSelections([])
             self._set_status("Văn bản đã chỉnh sửa — đã xoá các đánh dấu cũ.")
+        self._mark_document_dirty_if_changed()
+
+    def _mark_document_dirty_if_changed(self) -> None:
+        if self._current_result is not None and self._current_result.full_text != self.text_result.toPlainText():
+            self._document_dirty = True
+            self.word_preview.set_notice("Văn bản đã chỉnh sửa. Khi lưu Word, cấu trúc bảng OCR gốc sẽ không được áp dụng để tránh lệch dữ liệu.")
+            self.btn_export_docx.setEnabled(True)
+
+    def _regenerate_edited_document(self) -> None:
+        if not self._document_dirty:
+            return
+        text = self.text_result.toPlainText()
+        self._document_dirty = False
+        self._create_document_session(OCRResult(full_text=text))
 
     # ==================================================================
     # RESIZE — Cập nhật ảnh khi resize cửa sổ
@@ -1422,12 +1610,21 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def closeEvent(self, event) -> None:
-        if self._ocr_worker and self._ocr_worker.isRunning():
-            self._ocr_worker.terminate()
-            self._ocr_worker.wait(2000)
-        if self._spell_worker and self._spell_worker.isRunning():
-            self._spell_worker.terminate()
-            self._spell_worker.wait(1000)
+        if not self.word_preview.wait_for_idle(1000):
+            self._set_status("Đang hoàn tất hiển thị trang PDF. Đóng cửa sổ lần nữa sau khi kết thúc.")
+            event.ignore()
+            return
+        running_workers = [worker for worker in (self._ocr_worker, self._spell_worker, *self._document_workers) if worker is not None and worker.isRunning()]
+        for worker in running_workers:
+            worker.wait(1000)
+        if any(worker.isRunning() for worker in running_workers):
+            self._set_status("Đang hoàn tất tác vụ nền. Đóng cửa sổ lần nữa sau khi kết thúc.")
+            event.ignore()
+            return
+        if self._document_session is not None:
+            self._document_session.cleanup()
+        for session in self._retired_sessions.values():
+            session.cleanup()
         OCREngine.clear_cache()
         logger.info("MainWindow closed.")
         event.accept()

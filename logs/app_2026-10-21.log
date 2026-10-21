@@ -35,3 +35,33 @@
 2026-10-21 19:05:03 | INFO     | app.ui.main_window:_on_ocr_finished:1075 | OCR result displayed: 5 lines, avg_conf=0.95
 2026-10-21 19:07:32 | INFO     | app.core.docx_exporter:export_to_docx:479 | DOCX exported successfully: C:/Users/pqtru/Downloads/hhh_ocr.docx
 2026-10-21 19:07:32 | INFO     | app.ui.main_window:_on_export_docx:1159 | Result exported to DOCX: C:/Users/pqtru/Downloads/hhh_ocr.docx
+2026-10-21 19:13:01 | DEBUG    | app.core.spell_corrector:_load_datasets:413 | Loaded 7698 syllables from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_syllables.txt
+2026-10-21 19:13:01 | DEBUG    | app.core.spell_corrector:_load_datasets:433 | Loaded 72535 words from C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\app\core\vietnamese_words.txt
+2026-10-21 19:13:01 | DEBUG    | app.core.spell_corrector:_load_datasets:491 | Loaded 82834 English words from symspellpy.
+2026-10-21 19:13:01 | INFO     | app.ui.main_window:_on_spell_check_finished:1235 | Spell check finished: 9 suspicious tokens highlighted.
+2026-10-21 19:47:56 | INFO     | app.ui.main_window:_on_spell_check_finished:1235 | Spell check finished: 9 suspicious tokens highlighted.
+2026-10-21 19:47:57 | DEBUG    | app.core.ocr_engine:recognize:754 | Running PaddleOCR Text Detection …
+2026-10-21 19:47:58 | INFO     | app.core.ocr_engine:clear_cache:414 | OCREngine cache cleared.
+2026-10-21 19:47:58 | INFO     | app.ui.main_window:closeEvent:1432 | MainWindow closed.
+2026-10-21 19:47:58 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-21 20:17:52 | INFO     | __main__:main:71 | ============================================================
+2026-10-21 20:17:52 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-21 20:17:52 | INFO     | __main__:main:73 | ============================================================
+2026-10-21 20:17:52 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-21 20:17:52 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-21 20:17:57 | INFO     | app.ui.main_window:__init__:593 | MainWindow initialized.
+2026-10-21 20:17:57 | INFO     | __main__:main:131 | Application window opened.
+2026-10-21 20:18:31 | INFO     | app.ui.main_window:_load_image_from_path:946 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang3.png ((335, 596, 3))
+2026-10-21 20:18:31 | INFO     | app.core.ocr_engine:get_global_detector:279 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-21 20:18:34 | INFO     | app.core.ocr_engine:get_global_detector:315 | PaddleOCR detector singleton initialized successfully.
+2026-10-21 20:18:36 | INFO     | app.core.ocr_engine:get_global_vietocr:339 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-21 20:18:39 | INFO     | app.core.ocr_engine:get_global_vietocr:346 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-21 20:18:39 | INFO     | app.core.ocr_engine:_ensure_loaded:451 | Hybrid OCR engines ready in 7.77s.
+2026-10-21 20:18:39 | DEBUG    | app.core.ocr_engine:recognize:754 | Running PaddleOCR Text Detection …
+2026-10-21 20:18:50 | DEBUG    | app.core.ocr_engine:recognize:814 | Recognizing 24 text lines with VietOCR (vgg_transformer) …
+2026-10-21 20:19:22 | INFO     | app.core.ocr_engine:recognize:1160 | Hybrid OCR completed: 5 lines, 1 tables detected, avg_conf=0.95, elapsed=43.30s
+2026-10-21 20:19:22 | INFO     | app.ui.main_window:_on_ocr_finished:1147 | OCR result displayed: 5 lines, avg_conf=0.95
+2026-10-21 20:19:23 | INFO     | app.core.docx_exporter:export_to_docx:479 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\39659061526a47e0a85a45fc7db1c5a6\document.docx
+2026-10-21 20:22:24 | INFO     | app.core.ocr_engine:clear_cache:414 | OCREngine cache cleared.
+2026-10-21 20:22:24 | INFO     | app.ui.main_window:closeEvent:1619 | MainWindow closed.
+2026-10-21 20:22:24 | INFO     | __main__:main:134 | Application exited with code 0.
