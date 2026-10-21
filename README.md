@@ -7,12 +7,12 @@
 
 ## 🖥️ Yêu cầu hệ thống
 
-| Thành phần        | Yêu cầu                     |
-| ----------------- | --------------------------- |
-| Hệ điều hành      | Windows 10 / 11 (64-bit)    |
-| Python            | 3.9 — 3.11                  |
-| RAM               | ≥ 4 GB (khuyến nghị 8 GB)   |
-| GPU (tuỳ chọn)    | NVIDIA CUDA 11.x trở lên    |
+| Thành phần     | Yêu cầu                   |
+| -------------- | ------------------------- |
+| Hệ điều hành   | Windows 10 / 11 (64-bit)  |
+| Python         | 3.9 — 3.11                |
+| RAM            | ≥ 4 GB (khuyến nghị 8 GB) |
+| GPU (tuỳ chọn) | NVIDIA CUDA 11.x trở lên  |
 
 ---
 
@@ -28,7 +28,17 @@ python -m venv venv
 venv\Scripts\activate
 
 # 3. Cài đặt thư viện
-pip install -r requirements.txt
+pip install vietocr --no-deps ; pip install "einops>=0.6.0" "albumentations>=1.4.3" "Pillow>=10.4.0" ; pip install --no-deps -r requirements.txt ; pip install paddlepaddle paddleocr torch torchvision pymupdf opencv-python numpy scikit-image PyQt5 PyQt5-sip pyperclip loguru gdown symspellpy pyyaml tqdm lmdb
+
+pip install -r requirements.txt(ko dùng)
+
+-------
+
+# 4. Thoát khỏi môi trường ảo (Không chọn)
+deactivate
+
+# 4. Xóa môi trường ảo hiện tại (Không chọn)
+Remove-Item -Recurse -Force venv
 ```
 
 ---
@@ -75,15 +85,15 @@ Tool-Documents-Pro/
 
 ## ⌨️ Phím tắt
 
-| Phím tắt           | Chức năng                         |
-| ------------------ | --------------------------------- |
-| `Ctrl+O`           | Mở file ảnh                       |
-| `Ctrl+V`           | Dán ảnh từ clipboard              |
-| `Ctrl+R`           | Chạy nhận dạng OCR                |
-| `Ctrl+C`           | Sao chép kết quả vào clipboard    |
-| `Ctrl+S`           | Lưu kết quả ra file TXT           |
-| `Ctrl+Shift+C`     | Sao chép kết quả (giữ định dạng)  |
-| `Ctrl+Q`           | Thoát ứng dụng                    |
+| Phím tắt       | Chức năng                        |
+| -------------- | -------------------------------- |
+| `Ctrl+O`       | Mở file ảnh                      |
+| `Ctrl+V`       | Dán ảnh từ clipboard             |
+| `Ctrl+R`       | Chạy nhận dạng OCR               |
+| `Ctrl+C`       | Sao chép kết quả vào clipboard   |
+| `Ctrl+S`       | Lưu kết quả ra file TXT          |
+| `Ctrl+Shift+C` | Sao chép kết quả (giữ định dạng) |
+| `Ctrl+Q`       | Thoát ứng dụng                   |
 
 ---
 
@@ -91,11 +101,11 @@ Tool-Documents-Pro/
 
 PaddleOCR hỗ trợ **80+ ngôn ngữ**. Ứng dụng mặc định cấu hình:
 
-- `vi` — Tiếng Việt  
-- `en` — Tiếng Anh  
-- `ch` — Tiếng Trung (Giản thể)  
-- `japan` — Tiếng Nhật  
-- `korean` — Tiếng Hàn  
+- `vi` — Tiếng Việt
+- `en` — Tiếng Anh
+- `ch` — Tiếng Trung (Giản thể)
+- `japan` — Tiếng Nhật
+- `korean` — Tiếng Hàn
 
 Thay đổi ngôn ngữ qua dropdown trên giao diện.
 
