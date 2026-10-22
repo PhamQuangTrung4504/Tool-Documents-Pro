@@ -450,9 +450,9 @@ class TestOCRLineGroupingAndBullets(unittest.TestCase):
         lines = group_boxes_into_lines(boxes)
         self.assertEqual(len(lines), 2, "Phải gom nhóm thành đúng 2 dòng")
 
-        # Dòng 1: icon 'o' ở đầu được chuẩn hóa thành '•' và đi cùng text
+        # The glyph is ambiguous without image evidence; preserve it verbatim.
         line1_text = " ".join(b.text for b in lines[0])
-        self.assertTrue(line1_text.startswith("• "))
+        self.assertTrue(line1_text.startswith("o "))
         self.assertIn("Trong file ghi:", line1_text)
 
         # Dòng 2: '3.' là số thứ tự được giữ nguyên, đi cùng text trên cùng một hàng
@@ -666,28 +666,31 @@ class TestParallelHeaderScreenshot1(unittest.TestCase):
         lines = group_boxes_into_lines(boxes)
         line_texts = [" ".join(b.text for b in line) for line in lines]
 
-        # Khối trái phải được đọc trọn vẹn từ trên xuống dưới (đường kẻ trang trí '*' đã bị loại bỏ theo Phase 3.3)
+        # Preserve the recognized marker because no source-image evidence is
+        # available to decide whether it is decoration or document content.
         self.assertEqual(line_texts[0], "ĐẢNG ỦY XÃ PHƯỚC HẢI")
         self.assertEqual(line_texts[1], "CHI BỘ VĂN PHÒNG HĐND")
         self.assertEqual(line_texts[2], "VÀ UBND XÃ")
-        self.assertEqual(line_texts[3], "Số: 01-BB/CB")
+        self.assertEqual(line_texts[3], "*")
+        self.assertEqual(line_texts[4], "Số: 01-BB/CB")
 
         # Sau đó mới đến Khối phải:
-        self.assertEqual(line_texts[4], "ĐẢNG CỘNG SẢN VIỆT NAM")
-        self.assertEqual(line_texts[5], "Phước Hải, ngày 05 tháng 10 năm 2026")
+        self.assertEqual(line_texts[5], "ĐẢNG CỘNG SẢN VIỆT NAM")
+        self.assertEqual(line_texts[6], "Phước Hải, ngày 05 tháng 10 năm 2026")
 
         # Tiếp theo là Tiêu đề chính giữa trang và Thân bài:
-        self.assertEqual(line_texts[6], "BIÊN BẢN")
-        self.assertEqual(line_texts[7], "sinh hoạt chi bộ định kỳ tháng 10 năm 2026")
-        self.assertEqual(line_texts[8], "Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026, tại Phòng họp UBND xã")
+        self.assertEqual(line_texts[7], "BIÊN BẢN")
+        self.assertEqual(line_texts[8], "sinh hoạt chi bộ định kỳ tháng 10 năm 2026")
+        self.assertEqual(line_texts[9], "Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026, tại Phòng họp UBND xã")
 
         # Tuyệt đối không để ĐẢNG CỘNG SẢN VIỆT NAM bị chèn vào giữa Khối trái
         sorted_boxes = sort_boxes_reading_order(boxes)
         sorted_texts = [b.text for b in sorted_boxes]
-        self.assertEqual(sorted_texts[:4], [
+        self.assertEqual(sorted_texts[:5], [
             "ĐẢNG ỦY XÃ PHƯỚC HẢI",
             "CHI BỘ VĂN PHÒNG HĐND",
             "VÀ UBND XÃ",
+            "*",
             "Số: 01-BB/CB",
         ])
 
@@ -859,6 +862,7 @@ class TestDocxExportWithTable(unittest.TestCase):
         import tempfile
         import docx
         from app.core.ocr_engine import OCRBox, OCRResult, OCRTable, export_to_docx
+        from app.core.models import DocumentBlock
 
         # Tạo OCRResult giả lập có bảng
         tbl = OCRTable(
@@ -886,6 +890,12 @@ class TestDocxExportWithTable(unittest.TestCase):
             full_text=full_text,
             language="vi",
             tables=[tbl],
+            document_blocks=[
+                DocumentBlock(kind="heading", order=0, text="BẢNG ĐIỂM ĐÁNH GIÁ CHẤT LƯỢNG"),
+                DocumentBlock(kind="paragraph", order=1, text="THÁNG 10 NĂM 2026"),
+                DocumentBlock(kind="table", order=2, table_index=0),
+                DocumentBlock(kind="paragraph", order=3, text="* Ghi chú dưới bảng biểu"),
+            ],
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:

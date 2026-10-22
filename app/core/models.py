@@ -17,12 +17,21 @@ __all__ = [
     "OCRBox",
     "TableCell",
     "OCRTable",
+    "DocumentBlock",
     "ParallelHeader",
     "HeaderDetectionResult",
     "LayoutResult",
     "OCRResult",
     "SymbolDecision",
+    "format_confidence",
 ]
+
+
+def format_confidence(value: Optional[float], as_percent: bool = False) -> str:
+    """Format a confidence without converting missing evidence into zero."""
+    if value is None:
+        return "N/A"
+    return f"{value:.1%}" if as_percent else f"{value:.2f}"
 
 # ---------------------------------------------------------------------------
 # Kiểu dữ liệu kết quả OCR
@@ -34,9 +43,10 @@ class OCRBox:
     """Một vùng văn bản đã được nhận dạng."""
 
     text: str
-    confidence: float
+    confidence: Optional[float]
     bbox: List[List[int]]  # 4 điểm [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
     raw_text: str = ""     # Lưu giữ văn bản nhận dạng ban đầu của OCR engine
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Provenance/evidence; never merged across boxes
 
     def __post_init__(self):
         if not self.raw_text:
@@ -51,10 +61,10 @@ class OCRBox:
         return (int(self.bbox[2][0]), int(self.bbox[2][1]))
 
     def __repr__(self) -> str:
+        confidence = f"{self.confidence:.2f}" if self.confidence is not None else "unknown"
         return (
             f"OCRBox(text={self.text!r}, "
-            f"conf={self.confidence:.2f}, "
-            f"pos={self.top_left})"
+            f"conf={confidence}, pos={self.top_left})"
         )
 
 
@@ -70,6 +80,9 @@ class TableCell:
     bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] của khung ô vật lý
     boxes: List[OCRBox] = field(default_factory=list)
     diagonal_border: Optional[str] = None  # OOXML border name: "tl2br" or "tr2bl"
+    # Physical edge evidence, when extracted from a ruled table. None means
+    # that the source engine did not provide border evidence.
+    border_edges: Optional[Dict[str, bool]] = None
 
     @property
     def row_span(self) -> int:
@@ -94,6 +107,46 @@ class OCRTable:
     num_cols: int = 0
     row_boxes: List[List[OCRBox]] = field(default_factory=list)  # Danh sách box cho từng hàng
     cells: List[TableCell] = field(default_factory=list)         # Danh sách ô vật lý (kèm rowspan/colspan)
+    column_boundaries: List[float] = field(default_factory=list)
+    row_boundaries: List[float] = field(default_factory=list)
+    header_rows: List[int] = field(default_factory=list)
+
+    def topology_issues(self) -> List[str]:
+        """Return logical-grid violations without modifying or discarding cells."""
+        issues: List[str] = []
+        occupied: Dict[Tuple[int, int], TableCell] = {}
+        for cell in self.cells:
+            if (
+                cell.row_start < 0 or cell.col_start < 0
+                or cell.row_end <= cell.row_start or cell.col_end <= cell.col_start
+                or cell.row_end > self.num_rows or cell.col_end > self.num_cols
+            ):
+                issues.append("cell_span_out_of_bounds")
+                continue
+            for row in range(cell.row_start, cell.row_end):
+                for col in range(cell.col_start, cell.col_end):
+                    if (row, col) in occupied:
+                        issues.append("overlapping_cells")
+                    occupied[(row, col)] = cell
+        return issues
+
+
+@dataclass
+class DocumentBlock:
+    """Ordered document region linked to source objects by result-local indexes.
+
+    ``box_indices`` and ``table_index`` are stable for the lifetime/serialization
+    of one OCRResult and avoid relying on Python object identity in persisted data.
+    """
+
+    kind: str  # paragraph, heading, parallel_header, table
+    order: int
+    text: str = ""
+    raw_text: str = ""
+    box_indices: List[int] = field(default_factory=list)
+    table_index: Optional[int] = None
+    bbox: Optional[List[float]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -169,6 +222,7 @@ class OCRResult:
     audit_trail: List[dict] = field(default_factory=list)  # Nhật ký vết các phép sửa tự động
     parallel_header: Optional[ParallelHeader] = None      # Tiêu đề hành chính 2 khối song song
     diagnostics: Optional[Dict[str, Any]] = None  # Chỉ được tạo khi caller bật diagnostics
+    document_blocks: List[DocumentBlock] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -187,10 +241,11 @@ class OCRResult:
         return len(self.boxes)
 
     @property
-    def average_confidence(self) -> float:
-        if not self.boxes:
-            return 0.0
-        return sum(b.confidence for b in self.boxes) / len(self.boxes)
+    def average_confidence(self) -> Optional[float]:
+        known = [b.confidence for b in self.boxes if b.confidence is not None]
+        if not known:
+            return None
+        return sum(known) / len(known)
 
 
 

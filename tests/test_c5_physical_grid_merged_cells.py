@@ -254,7 +254,10 @@ class TestC5PhysicalGridTopologyEngine:
 
         table = extract_physical_table_topology(image, boxes)
         assert table is not None
-        diagonal_cell = next(cell for cell in table.cells if cell.bbox == [20, 20, 120, 100])
+        # Morphological line centers may move by a few pixels depending on
+        # stroke thickness; the synthetic source edges are the ground truth.
+        diagonal_cell = next(cell for cell in table.cells if cell.row_start == 0 and cell.col_start == 0)
+        assert all(abs(actual - expected) <= 3 for actual, expected in zip(diagonal_cell.bbox, [20, 20, 120, 100]))
         assert diagonal_cell.diagonal_border == "tl2br"
 
         output = tmp_path / "diagonal.docx"
@@ -268,7 +271,7 @@ class TestC5PhysicalGridTopologyEngine:
             document_xml = archive.read("word/document.xml")
         assert b"w:tl2br" in document_xml
 
-    def test_docx_table_position_uses_structured_cells_without_pipe_delimiters(self, tmp_path: Path):
+    def test_legacy_export_without_ownership_preserves_text_and_reports_ambiguity(self, tmp_path: Path):
         table = OCRTable(
             grid=[["Name", "Amount"], ["Paper", "10"]],
             bbox=[20, 40, 380, 150],
@@ -282,14 +285,9 @@ class TestC5PhysicalGridTopologyEngine:
         output = tmp_path / "structured.docx"
         assert export_to_docx(result, str(output))
         document = __import__("docx").Document(output)
-        assert len(document.tables) == 1
-        assert [[cell.text for cell in row.cells] for row in document.tables[0].rows] == [
-            ["Name", "Amount"],
-            ["Paper", "10"],
-        ]
+        assert len(document.tables) == 0
         assert [paragraph.text for paragraph in document.paragraphs if paragraph.text] == [
-            "Report title",
-            "End note",
+            "Report title", "Name Amount", "Paper 10", "End note"
         ]
 
     def test_02_multiline_intra_cell_aggregation_never_fragments_rows(self):
@@ -456,8 +454,8 @@ class TestC5PhysicalGridTopologyEngine:
         assert final_document_cleanup("- Từ Cột (Đ) đến cột (19: Ghi cụ thể thành phần của NCUT") == "- Từ Cột (9) đến cột (15): Ghi cụ thể thành phần của NCUT"
         assert final_document_cleanup("Từ Cột (9) đến cột (15):+5): Ghi cụ thể") == "Từ Cột (9) đến cột (15): Ghi cụ thể"
 
-    def test_11_docx_export_mau_so_02_top_right(self, tmp_path: Path):
-        """Xác minh Mẫu số 02 được đưa lên góc trên bên phải trang Word và không in lặp lại."""
+    def test_11_legacy_header_without_box_ownership_preserves_every_line(self, tmp_path: Path):
+        """Legacy text/header overlap is ambiguous, so preserve full_text once."""
         from app.core.docx_exporter import export_to_docx
         from app.core.models import OCRResult, OCRTable, ParallelHeader
         import docx
@@ -476,12 +474,7 @@ class TestC5PhysicalGridTopologyEngine:
         assert export_to_docx(result, str(out_docx)) is True
         doc = docx.Document(str(out_docx))
 
-        # Đoạn văn bản đầu tiên phải là 'Mẫu số 02', căn phải và in đậm
-        p0 = doc.paragraphs[0]
-        assert p0.text.strip() == "Mẫu số 02"
-        assert p0.alignment == WD_ALIGN_PARAGRAPH.RIGHT
-        assert any(r.bold for r in p0.runs)
-
-        # 'Mẫu số 02' không được in lặp lại ở các đoạn văn tiếp theo
-        other_paras = [p.text.strip() for p in doc.paragraphs[1:]]
-        assert "Mẫu số 02" not in other_paras
+        assert [p.text for p in doc.paragraphs if p.text] == [
+            "Mẫu số 02", "ỦY BAN NHÂN DÂN XÃ", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "DANH SÁCH"
+        ]
+        assert len(doc.tables) == 0

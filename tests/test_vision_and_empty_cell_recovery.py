@@ -81,29 +81,31 @@ def test_recover_missing_cell_ink_flat_paper_rejected():
     assert len(cell.boxes) == 0
 
 
-def test_recover_missing_cell_ink_linguistic_guard_kills_hallucinations():
-    """Nếu vùng có nhiễu vượt qua tương phản nhưng VietOCR trả về ảo giác tiếng Anh, guard phải xóa bỏ."""
+def test_recover_missing_cell_ink_preserves_recognized_text_for_review():
+    """Without independent visual evidence, recovered recognition is preserved for review."""
     img = np.full((100, 100, 3), 250, dtype=np.uint8)
     # Vẽ vài đốm đen để pass qua contrast check
     cv2.circle(img, (50, 50), 10, (10, 10, 10), -1)
 
     cell = TableCell(row_start=0, row_end=1, col_start=0, col_end=1, bbox=(5, 5, 95, 95), text="")
-    # Model giả lập ảo giác COLINEdE
+    # The helper cannot prove this recognition is a hallucination from language alone.
     mock_model = MockVietOCRModel("COLINEdE")
 
     _recover_missing_cell_ink([cell], img, vietocr_model=mock_model)
-    # Guard phải phát hiện từ cấm và trả về rỗng
-    assert cell.text == ""
+    assert cell.text == "COLINEdE"
+    assert cell.boxes and cell.boxes[0].text == "COLINEdE"
 
     # Thử với STATE
     mock_model_state = MockVietOCRModel("STATE")
-    _recover_missing_cell_ink([cell], img, vietocr_model=mock_model_state)
-    assert cell.text == ""
+    second_cell = TableCell(row_start=0, row_end=1, col_start=0, col_end=1, bbox=(5, 5, 95, 95), text="")
+    _recover_missing_cell_ink([second_cell], img, vietocr_model=mock_model_state)
+    assert second_cell.text == "STATE"
 
     # Thử với từ hợp lệ có nguyên âm tiếng Việt và số: "UBND" hoặc "Thôn 1"
     mock_model_valid = MockVietOCRModel("Thôn 1")
-    _recover_missing_cell_ink([cell], img, vietocr_model=mock_model_valid)
-    assert "Thôn 1" in cell.text
+    third_cell = TableCell(row_start=0, row_end=1, col_start=0, col_end=1, bbox=(5, 5, 95, 95), text="")
+    _recover_missing_cell_ink([third_cell], img, vietocr_model=mock_model_valid)
+    assert third_cell.text == "Thôn 1"
 
 
 def test_full_text_plus_bullet_sync():

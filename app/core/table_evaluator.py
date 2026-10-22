@@ -57,6 +57,8 @@ class TableGroundTruth:
     expected_grid: List[List[str]] = field(default_factory=list)
     expected_non_table_lines: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    expected_cell_spans: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    expected_diagonal_cells: List[Tuple[int, int, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -98,6 +100,8 @@ class TableEvalTrace:
                 "expected_grid": self.ground_truth.expected_grid,
                 "expected_non_table_lines": self.ground_truth.expected_non_table_lines,
                 "metadata": self.ground_truth.metadata,
+                "expected_cell_spans": [list(span) for span in self.ground_truth.expected_cell_spans],
+                "expected_diagonal_cells": [list(cell) for cell in self.ground_truth.expected_diagonal_cells],
             },
             "predicted_tables": [
                 {
@@ -105,6 +109,20 @@ class TableEvalTrace:
                     "num_cols": tbl.num_cols,
                     "bbox": tbl.bbox,
                     "grid": tbl.grid,
+                    "column_boundaries": tbl.column_boundaries,
+                    "row_boundaries": tbl.row_boundaries,
+                    "cells": [
+                        {
+                            "row_start": cell.row_start,
+                            "col_start": cell.col_start,
+                            "row_end": cell.row_end,
+                            "col_end": cell.col_end,
+                            "bbox": cell.bbox,
+                            "diagonal_border": cell.diagonal_border,
+                            "border_edges": cell.border_edges,
+                        }
+                        for cell in tbl.cells
+                    ],
                 }
                 for tbl in self.predicted_tables
             ],
@@ -123,6 +141,17 @@ class TableEvalTrace:
 def _tokenize(text: str) -> List[str]:
     """Tách từ/token đơn giản chuẩn hóa khoảng trắng và chữ thường."""
     return [tok for tok in re.split(r"\s+", text.strip().lower()) if tok]
+
+
+def _set_f1(expected: Set[Tuple[Any, ...]], actual: Set[Tuple[Any, ...]]) -> float:
+    if not expected and not actual:
+        return 1.0
+    if not expected or not actual:
+        return 0.0
+    true_positive = len(expected & actual)
+    precision = true_positive / len(actual)
+    recall = true_positive / len(expected)
+    return 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
 
 
 def _diagnose_cell_errors(
@@ -319,13 +348,53 @@ def evaluate_table_sample(
     # 4. Chẩn đoán chi tiết lỗi
     diagnostics = _diagnose_cell_errors(gt_grid, pred_grid)
 
+    input_ids = {id(box) for box in input_boxes}
+    box_cell_owners: Dict[int, Set[Tuple[int, int]]] = {}
+    assigned_box_ids: Set[int] = set()
+    for table_index, table in enumerate(pred_tables):
+        if table.cells:
+            for cell_index, cell in enumerate(table.cells):
+                for box in cell.boxes:
+                    box_id = id(box)
+                    if box_id in input_ids:
+                        assigned_box_ids.add(box_id)
+                        box_cell_owners.setdefault(box_id, set()).add((table_index, cell_index))
+        else:
+            for row_index, row in enumerate(table.row_boxes):
+                for box in row:
+                    box_id = id(box)
+                    if box_id in input_ids:
+                        assigned_box_ids.add(box_id)
+                        box_cell_owners.setdefault(box_id, set()).add((table_index, row_index))
+    for line in pred_lines:
+        assigned_box_ids.update(id(box) for box in line if id(box) in input_ids)
+    assignment_rate = len(assigned_box_ids) / max(1, len(input_ids))
+    duplicate_cell_box_count = sum(max(0, len(owners) - 1) for owners in box_cell_owners.values())
+
     metrics = {
         "table_detected_exact": table_detected_exact,
         "row_count_accuracy": row_count_acc,
         "col_count_accuracy": col_count_acc,
         "cell_exact_match_rate": cell_exact_match_rate,
         "cell_content_f1": cell_content_f1,
+        "ocr_box_assignment_rate": assignment_rate,
+        "duplicate_cell_box_assignment_count": float(duplicate_cell_box_count),
     }
+
+    if ground_truth.expected_cell_spans:
+        expected_spans = set(ground_truth.expected_cell_spans)
+        predicted_spans = {
+            (cell.row_start, cell.col_start, cell.row_end, cell.col_end)
+            for table in pred_tables for cell in table.cells if cell.is_merged
+        }
+        metrics["cell_span_f1"] = _set_f1(expected_spans, predicted_spans)
+    if ground_truth.expected_diagonal_cells:
+        expected_diagonals = set(ground_truth.expected_diagonal_cells)
+        predicted_diagonals = {
+            (cell.row_start, cell.col_start, cell.diagonal_border)
+            for table in pred_tables for cell in table.cells if cell.diagonal_border
+        }
+        metrics["diagonal_cell_f1"] = _set_f1(expected_diagonals, predicted_diagonals)
 
     return TableEvalTrace(
         sample_id=sample_id,
@@ -348,16 +417,18 @@ def generate_benchmark_summary(traces: List[TableEvalTrace]) -> Dict[str, Any]:
         return {"num_samples": 0}
 
     metric_sums: Dict[str, float] = {}
+    metric_counts: Dict[str, int] = {}
     failure_mode_counts: Dict[str, int] = {}
 
     for tr in traces:
         for k, v in tr.metrics.items():
             metric_sums[k] = metric_sums.get(k, 0.0) + v
+            metric_counts[k] = metric_counts.get(k, 0) + 1
         for diag in tr.diagnostics:
             failure_mode_counts[diag.failure_mode] = failure_mode_counts.get(diag.failure_mode, 0) + 1
 
     n = len(traces)
-    avg_metrics = {k: round(v / n, 4) for k, v in metric_sums.items()}
+    avg_metrics = {k: round(v / max(1, metric_counts[k]), 4) for k, v in metric_sums.items()}
 
     return {
         "num_samples": n,

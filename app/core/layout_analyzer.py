@@ -64,6 +64,42 @@ def _box_info_list(boxes: List[OCRBox]) -> List[dict]:
     return box_info
 
 
+def _table_candidate_quality(table: OCRTable, source_boxes: List[OCRBox]) -> Tuple[float, float, float]:
+    """Return bounded (quality, box coverage, rectangularity) for one candidate.
+
+    Invalid dimensions or overlapping/out-of-bounds logical cells are rejected.
+    Empty candidates score zero; a valid candidate is never zeroed merely
+    because it has no topology errors.
+    """
+    if (
+        table.num_rows <= 0 or table.num_cols <= 0 or not table.grid
+        or not source_boxes or table.num_rows < 0 or table.num_cols < 0
+    ):
+        return 0.0, 0.0, 0.0
+
+    assigned_ids = {id(box) for row in table.row_boxes for box in row}
+    assigned_ids.update(id(box) for cell in table.cells for box in cell.boxes)
+    source_ids = {id(box) for box in source_boxes}
+    coverage = min(1.0, max(0.0, len(assigned_ids & source_ids) / len(source_ids)))
+    nonempty_rows = sum(any(str(value).strip() for value in row) for row in table.grid)
+    row_coverage = min(1.0, max(0.0, nonempty_rows / table.num_rows))
+    nonempty_cols = sum(
+        any(col < len(row) and str(row[col]).strip() for row in table.grid)
+        for col in range(table.num_cols)
+    )
+    col_coverage = min(1.0, max(0.0, nonempty_cols / table.num_cols))
+    rectangularity = min(
+        1.0,
+        max(0.0, sum(len(row) == table.num_cols for row in table.grid) / len(table.grid)),
+    )
+    # `topology_issues()` reports structural invalidity. A clean candidate
+    # retains its score; overlap and out-of-bounds spans make it unusable.
+    if table.topology_issues():
+        return 0.0, coverage, rectangularity
+    score = 0.60 * coverage + 0.15 * row_coverage + 0.15 * col_coverage + 0.10 * rectangularity
+    return min(1.0, max(0.0, score)), coverage, rectangularity
+
+
 def _group_single_column_lines(sub_boxes: List[dict], median_h: float, gutter_thresh: float) -> List[List[OCRBox]]:
     """Gom nhóm các box trong 1 cột hoặc 1 khối đơn thành từng dòng."""
     if not sub_boxes:
@@ -103,12 +139,6 @@ def _group_single_column_lines(sub_boxes: List[dict], median_h: float, gutter_th
     result: List[List[OCRBox]] = []
     for line in lines:
         line.sort(key=lambda it: (round(it["left"], 2), it["text"]))
-        if len(line) >= 2:
-            first = line[0]
-            if first["w"] <= 35 and first["h"] <= 35 and first["box"].text.strip() in [
-                "o", "O", "•", "·", "*", "■", "□", "回", "▫", "▪"
-            ]:
-                first["box"].text = "•"
         result.append([it["box"] for it in line])
     return result
 
@@ -240,19 +270,7 @@ def _group_boxes_sliding_window(
 
                 # Hỗ trợ nối các trường điền chấm chấm (dotted forms: Hôm nay, vào lúc... ngày... tháng... năm...)
                 # và các cặp trường biểu mẫu nằm ngang (+ Ông (bà): ......... và (ghi tên...))
-                is_form_pair = (
-                    (overlap_y >= 0.40 * min(b_curr["h"], avg_h) or abs(b_curr["cy"] - avg_cy) < y_thresh)
-                    and (
-                        last_box["text"].rstrip().endswith((":", ".", "…", "_", "-", ","))
-                        or any(kw in last_box["text"] for kw in ["Ông (bà)", "Ông(bà)", "Chức danh", "Họ và tên", "Chức vụ", "vào lúc"])
-                        or b_curr["text"].lstrip().startswith(("(", "Chủ trì", "Thư ký"))
-                    )
-                )
-                is_dotted_fill = (
-                    (last_box["text"].rstrip().endswith((".", "…", "_", "-", ":", ",")) or b_curr["text"].lstrip().startswith((".", "…", "_", "-")))
-                    and abs(b_curr["cy"] - avg_cy) < max(6.0, median_h * 0.35)
-                )
-                can_merge_x = gap_x < gutter_thresh or ((is_dotted_fill or is_form_pair) and gap_x < 0.70 * page_w)
+                can_merge_x = gap_x < gutter_thresh
 
                 if (abs(b_curr["cy"] - avg_cy) < y_thresh or overlap_y >= 0.40 * min(b_curr["h"], avg_h)) and can_merge_x:
                     single_line_boxes.append(b_curr)
@@ -261,12 +279,6 @@ def _group_boxes_sliding_window(
                     break
 
             single_line_boxes.sort(key=lambda it: (round(it["left"], 2), it["text"]))
-            if len(single_line_boxes) >= 2:
-                first = single_line_boxes[0]
-                if first["w"] <= 35 and first["h"] <= 35 and first["box"].text.strip() in [
-                    "o", "O", "•", "·", "*", "■", "□", "回", "▫", "▪"
-                ]:
-                    first["box"].text = "•"
 
             result_lines.append([it["box"] for it in single_line_boxes])
             i = k
@@ -275,49 +287,8 @@ def _group_boxes_sliding_window(
 
 
 def join_ocr_line_boxes(line_boxes: List[OCRBox]) -> str:
-    """
-    Nối các box trên một dòng văn bản.
-    Đối với các cặp trường biểu mẫu nằm cùng hàng ngang (ví dụ: '+ Ông (bà):' và '(ghi tên...)',
-    'Chức danh:' và 'Chủ trì cuộc họp'), tự động chèn '......' vào giữa theo đúng quy định.
-    """
-    if not line_boxes:
-        return ""
-    if len(line_boxes) == 1:
-        return line_boxes[0].text.strip()
-
-    parts: List[str] = []
-    for idx, b in enumerate(line_boxes):
-        b_txt = b.text.strip()
-        if not b_txt:
-            continue
-        if idx == 0:
-            parts.append(b_txt)
-        else:
-            prev_txt = parts[-1]
-            prev_b = line_boxes[idx - 1]
-            gap = b.bbox[0][0] - prev_b.bbox[1][0]
-            is_form_junction = (
-                (
-                    prev_txt.endswith((":", "."))
-                    or any(kw in prev_txt for kw in ["Ông (bà)", "Ông(bà)", "Chức danh", "Họ và tên"])
-                )
-                and (
-                    b_txt.startswith(("(", "Chủ trì", "Thư ký"))
-                    or any(kw in b_txt for kw in ["Chủ trì", "Thư ký", "đại diện"])
-                    or gap >= 20
-                )
-            )
-            if is_form_junction:
-                clean_prev = re.sub(r"[\.…_\s]+$", "", prev_txt)
-                if clean_prev.endswith(":"):
-                    parts[-1] = f"{clean_prev} ......"
-                else:
-                    parts[-1] = f"{clean_prev}: ......"
-                parts.append(b_txt)
-            else:
-                parts.append(b_txt)
-    return " ".join(parts)
-
+    """Join recognized boxes with whitespace; never invent punctuation/fill text."""
+    return " ".join(box.text.strip() for box in line_boxes if box.text.strip())
 
 def detect_parallel_administrative_header(
     box_info: List[dict],
@@ -327,127 +298,67 @@ def detect_parallel_administrative_header(
     gutter_thresh: float,
     median_h: float,
 ) -> Tuple[List[List[OCRBox]], List[dict]]:
+    """Separate a two-block upper page region using geometry only.
+
+    The detector preserves every input box. A centered text band can delimit
+    the region; otherwise only a compact upper two-column cluster is eligible.
+    Text vocabulary is not used to decide which side or region a box belongs to.
     """
-    Phát hiện vùng tiêu đề hành chính 2 khối độc lập (Administrative Parallel Header):
-    - Cột bên trái: Cơ quan ban hành, số hiệu văn bản (đọc trọn vẹn từ trên xuống dưới).
-    - Cột bên phải: Quốc hiệu, tiêu ngữ, địa danh, ngày tháng (đọc trọn vẹn từ trên xuống dưới).
-    - Ranh giới kết thúc là Tiêu đề chính giữa trang (ví dụ: BIÊN BẢN, THÔNG TƯ, QUYẾT ĐỊNH,...).
-    """
-    if len(box_info) < 3:
+    if len(box_info) < 4:
         return HeaderDetectionResult([], box_info, parallel_header=None)
 
     page_mid_x = (page_min_x + page_max_x) / 2.0
-
-    # Tìm tiêu đề chính giữa trang
-    centered_title = None
-    for item in box_info:
-        item_mid = (item["left"] + item["right"]) / 2.0
-        text_upper = item["text"].upper()
-        is_title_keyword = any(kw in text_upper for kw in [
-            "BIÊN BẢN", "QUYẾT ĐỊNH", "THÔNG TƯ", "NGHỊ ĐỊNH", "BÁO CÁO",
-            "KẾ HOẠCH", "TỜ TRÌNH", "BẢNG ĐIỂM", "CHỈ THỊ", "CÔNG VĂN", "DANH SÁCH"
-        ])
-        if (is_title_keyword or abs(item_mid - page_mid_x) < 0.18 * page_w) and item["top"] < 400:
-            if is_title_keyword or item["top"] > 180:
-                centered_title = item
-                break
-
-    header_limit_y = centered_title["top"] if centered_title else min(350.0, max(b["bottom"] for b in box_info) * 0.38)
-
-    header_boxes = [b for b in box_info if b["bottom"] <= header_limit_y + 5]
-    remaining = [b for b in box_info if b not in header_boxes]
-
-    if len(header_boxes) < 3:
-        return HeaderDetectionResult([], box_info, parallel_header=None)
-
-    # Không bao giờ nhận nhầm hàng tiêu đề bảng thành tiêu đề hành chính 2 cột
-    has_table_kw = any(
-        re.match(
-            r"^(?:STT|TT|SỐ\s*TT|MÃ\s*SỐ|MÃ|HỌ\s*TÊN|HỌ\s*VÀ\s*TÊN|ĐƠN\s*GIÁ|SỐ\s*LƯỢNG|TIÊU\s*CHÍ|ĐIỂM\s*TỐI\s*ĐA|ĐIỂM\s*TỰ\s*CHẤM|HẠNG\s*MỤC|TÊN\s*HÀNG)",
-            b["text"].strip().upper(),
-        )
-        for b in header_boxes
+    text_top = min(item["top"] for item in box_info)
+    text_bottom = max(item["bottom"] for item in box_info)
+    text_height = max(1.0, text_bottom - text_top)
+    centered_candidates = [
+        item for item in box_info
+        if abs((item["left"] + item["right"]) / 2.0 - page_mid_x) <= 0.18 * page_w
+        and 0.20 <= (item["top"] - text_top) / text_height <= 0.90
+    ]
+    centered_title = min(centered_candidates, key=lambda item: item["top"]) if centered_candidates else None
+    header_limit = (
+        centered_title["top"]
+        if centered_title
+        else text_top + max(0.38 * text_height, 1.5 * median_h)
     )
-    if has_table_kw:
+    header_boxes = [
+        item for item in box_info
+        if item["bottom"] <= header_limit - (0.20 * median_h if centered_title else 0.0)
+    ]
+    if len(header_boxes) < 4:
         return HeaderDetectionResult([], box_info, parallel_header=None)
 
-    # Tách nhãn biểu mẫu độc lập ở góc trên bên phải (ví dụ: 'Mẫu số 02')
-    form_label_boxes: List[dict] = []
-    core_header_boxes: List[dict] = []
-    for b in header_boxes:
-        if re.match(r"^(?:Mẫu\s+số\s*\d+|Mẫu\s+\d+)", b["text"].strip(), re.IGNORECASE) and b["top"] < 180:
-            form_label_boxes.append(b)
-        else:
-            core_header_boxes.append(b)
+    best_split: Optional[float] = None
+    best_gap = 0.0
+    for ratio in np.linspace(0.30, 0.70, 41):
+        split_x = page_min_x + ratio * page_w
+        left = [item for item in header_boxes if item["right"] <= split_x]
+        right = [item for item in header_boxes if item["left"] >= split_x]
+        crosses = [item for item in header_boxes if item["left"] < split_x < item["right"]]
+        if len(left) < 2 or len(right) < 2 or crosses:
+            continue
+        gap = min(item["left"] for item in right) - max(item["right"] for item in left)
+        required_gap = max(1.25 * median_h, 0.05 * page_w)
+        if gap >= required_gap and gap > best_gap:
+            best_split, best_gap = split_x, gap
 
-    target_header_boxes = core_header_boxes if form_label_boxes else header_boxes
-
-    best_split_x = None
-    max_gap = 0.0
-    for split_ratio in np.linspace(0.35, 0.65, 31):
-        sx = page_min_x + split_ratio * page_w
-        left_b = [b for b in target_header_boxes if b["right"] <= sx]
-        right_b = [b for b in target_header_boxes if b["left"] >= sx]
-        cross_b = [b for b in target_header_boxes if b["left"] < sx and b["right"] > sx]
-        if len(left_b) >= 1 and len(right_b) >= 1 and not cross_b:
-            gap = min(b["left"] for b in right_b) - max(b["right"] for b in left_b)
-            if gap >= max(20.0, 0.05 * page_w) and gap > max_gap:
-                max_gap = gap
-                best_split_x = sx
-
-    if best_split_x is None:
+    if best_split is None:
         return HeaderDetectionResult([], box_info, parallel_header=None)
 
-    left_b = [b for b in target_header_boxes if b["right"] <= best_split_x]
-    right_b = [b for b in target_header_boxes if b["left"] >= best_split_x]
-
-    if centered_title is None:
-        left_text = " ".join(b["text"].upper() for b in left_b)
-        right_text = " ".join(b["text"].upper() for b in right_b)
-        has_admin_left = any(kw in left_text for kw in ["ĐẢNG", "CHI BỘ", "UBND", "ỦY BAN", "CÔNG TY", "DOANH NGHIỆP", "BỘ", "SỞ", "PHÒNG", "BAN", "TRƯỜNG", "SỐ:", "SỐ "])
-        has_admin_right = any(kw in right_text for kw in ["CỘNG HÒA", "ĐỘC LẬP", "HẠNH PHÚC", "ĐẢNG CỘNG SẢN", "NGÀY", "NĂM 20"])
-        if not (has_admin_left or has_admin_right):
-            return HeaderDetectionResult([], box_info, parallel_header=None)
-
-    # Lọc bỏ các box đường kẻ trang trí bị OCR nhận sai thành ký tự rác (%, *, ~, _, -, =, ...) hoặc số lặp 14444444, 44444, 11111
-    def _is_decorative_line_noise(b_item: dict) -> bool:
-        txt = b_item["text"].strip()
-        if not txt:
-            return True
-        if re.fullmatch(r"[%*~_\-=—–·•.]+", txt):
-            return True
-        if re.fullmatch(r"1?4{3,}", txt) or re.fullmatch(r"[1lI|!*=\-—_~]{4,}", txt):
-            return True
-        txt_u = txt.upper()
-        if txt_u in {"NG", "N", "G", "II", "I", "*", "-", "•", "~", "—", "–", "·"}:
-            return True
-        if re.fullmatch(r"^(?:NG|N|G|II|I|[*–—\-_~.]+)$", txt_u):
-            return True
-        if re.fullmatch(r"^\d{1,2}$", txt):
-            return True
-        return False
-
-    left_b = [b for b in left_b if not _is_decorative_line_noise(b)]
-    right_b = [b for b in right_b if not _is_decorative_line_noise(b)]
-
-    lines_left = _group_single_column_lines(left_b, median_h, gutter_thresh)
-    lines_right = _group_single_column_lines(right_b, median_h, gutter_thresh)
-
-    left_text_lines = [" ".join(b.text.strip() for b in line if b.text.strip()) for line in lines_left]
-    right_text_lines = [" ".join(b.text.strip() for b in line if b.text.strip()) for line in lines_right]
-    left_boxes = [b for line in lines_left for b in line]
-    right_boxes = [b for line in lines_right for b in line]
-
-    parallel_hdr = ParallelHeader(
-        left_lines=left_text_lines,
-        right_lines=right_text_lines,
-        left_boxes=left_boxes,
-        right_boxes=right_boxes,
+    left_boxes = [item for item in header_boxes if item["right"] <= best_split]
+    right_boxes = [item for item in header_boxes if item["left"] >= best_split]
+    lines_left = _group_single_column_lines(left_boxes, median_h, gutter_thresh)
+    lines_right = _group_single_column_lines(right_boxes, median_h, gutter_thresh)
+    parallel_header = ParallelHeader(
+        left_lines=[" ".join(box.text.strip() for box in line if box.text.strip()) for line in lines_left],
+        right_lines=[" ".join(box.text.strip() for box in line if box.text.strip()) for line in lines_right],
+        left_boxes=[box for line in lines_left for box in line],
+        right_boxes=[box for line in lines_right for box in line],
     )
-
-    form_lines = [[b["box"] for b in form_label_boxes]] if form_label_boxes else []
-    return HeaderDetectionResult(form_lines + lines_left + lines_right, remaining, parallel_header=parallel_hdr)
-
+    owned_ids = {id(box) for box in parallel_header.left_boxes + parallel_header.right_boxes}
+    remaining = [item for item in box_info if id(item["box"]) not in owned_ids]
+    return HeaderDetectionResult(lines_left + lines_right, remaining, parallel_header=parallel_header)
 
 def detect_and_reconstruct_table(
     box_info: List[dict],
@@ -981,10 +892,9 @@ def reconstruct_document_layout(
         if diagnostics is not None:
             diagnostics["physical_grid_candidate"] = physical_diagnostics
         if phys_tbl is not None:
-            is_complex_grid = (
-                phys_tbl.num_cols >= 6 or any(c.is_merged for c in phys_tbl.cells)
-            )
-            if is_complex_grid:
+            # A structurally valid ruled grid is stronger evidence than
+            # content-derived table heuristics, even for small/simple tables.
+            if not phys_tbl.topology_issues():
                 if diagnostics is not None:
                     diagnostics["selected_engine"] = "physical_grid_topology"
                 physical_box_ids = {
@@ -992,6 +902,11 @@ def reconstruct_document_layout(
                     for cell in phys_tbl.cells
                     for box in cell.boxes
                 }
+                physical_box_ids.update(
+                    id(box)
+                    for row in phys_tbl.row_boxes
+                    for box in row
+                )
                 tbl_top = phys_tbl.bbox[1]
                 tbl_bottom = phys_tbl.bbox[3]
                 pre_tbl_boxes = [
@@ -1001,6 +916,12 @@ def reconstruct_document_layout(
                 post_tbl_boxes = [
                     b for b in box_info
                     if id(b["box"]) not in physical_box_ids and b["cy"] > tbl_bottom + 4
+                ]
+                pre_ids = {id(item["box"]) for item in pre_tbl_boxes}
+                post_ids = {id(item["box"]) for item in post_tbl_boxes}
+                orphan_table_boxes = [
+                    item for item in box_info
+                    if id(item["box"]) not in physical_box_ids | pre_ids | post_ids
                 ]
 
                 # Chạy detect_parallel_administrative_header CHỈ TRÊN pre_tbl_boxes
@@ -1032,7 +953,19 @@ def reconstruct_document_layout(
                 else:
                     post_lines = []
 
-                all_lines = pre_lines + phys_tbl.row_boxes + post_lines
+                orphan_lines = _group_boxes_sliding_window(
+                    orphan_table_boxes,
+                    min((item["left"] for item in orphan_table_boxes), default=page_min_x),
+                    max(1.0, max((item["right"] for item in orphan_table_boxes), default=page_max_x)
+                        - min((item["left"] for item in orphan_table_boxes), default=page_min_x)),
+                    gutter_thresh,
+                    median_h,
+                )
+                table_region_lines = list(phys_tbl.row_boxes) + orphan_lines
+                table_region_lines.sort(
+                    key=lambda line: min(min(point[1] for point in box.bbox) for box in line) if line else float("inf")
+                )
+                all_lines = pre_lines + table_region_lines + post_lines
                 return LayoutResult(all_lines, [phys_tbl], parallel_header=parallel_hdr)
 
     # 2. Kiểm tra Header 2 khối hành chính đầu trang TRƯỚC (Administrative Parallel Header) cho tài liệu thông thường
@@ -1044,7 +977,10 @@ def reconstruct_document_layout(
     rem_boxes = hdr_res[1]
     parallel_hdr = getattr(hdr_res, "parallel_header", None)
 
-    target_boxes_for_table = rem_boxes if header_lines else box_info
+    # Table candidate generation sees the complete page first. Header regions
+    # are classified only after the spatial candidates exist, so text that
+    # happens to be in an upper two-column band cannot strip a table header.
+    target_boxes_for_table = box_info
 
     # 2. Ưu tiên số 1 (Primary Engine): Chạy logic detect_and_reconstruct_table nguyên bản
     # (sử dụng phân tích cụm cột neo STT và header 5 cột Tiêu chí đánh giá / Điểm tối đa / Điểm tự chấm).
@@ -1052,61 +988,48 @@ def reconstruct_document_layout(
         target_boxes_for_table, page_min_x, page_max_x, page_w, median_h
     )
 
-    is_scorecard_or_standard_v1 = False
-    if tbl_v1 is not None and tbl_v1.grid:
-        h_text = " ".join(tbl_v1.grid[0]).lower()
-        has_scorecard_kw = any(
-            kw in h_text
-            for kw in [
-                "tiêu chí",
-                "tiêu chí đánh giá",
-                "điểm tối đa",
-                "điểm tự chấm",
-                "chấp hành thời gian",
-            ]
-        )
-        has_stt_col = bool(
-            re.match(r"^(?:STT|TT|SỐ\s*TT)$", tbl_v1.grid[0][0].strip().upper())
-        )
-        is_borderless_or_merged = any(
-            kw in h_text
-            for kw in [
-                "tên hàng hóa",
-                "đơn giá",
-                "thành tiền",
-                "kế hoạch",
-                "thực tế",
-                "hạng mục",
-            ]
-        )
-
-        if has_scorecard_kw or (has_stt_col and not is_borderless_or_merged):
-            is_scorecard_or_standard_v1 = True
-
-    if is_scorecard_or_standard_v1 and tbl_v1 is not None:
-        if diagnostics is not None:
-            diagnostics["selected_engine"] = "legacy_anchor_table"
-        pre_lines = header_lines + _group_boxes_sliding_window(
-            pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
-        )
-        post_lines = _group_boxes_sliding_window(
-            post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
-        )
-        all_lines = pre_lines + tbl_rows_v1 + post_lines
-        return LayoutResult(all_lines, [tbl_v1], parallel_header=parallel_hdr)
-
-    # 3. Chỉ gọi UnifiedHybridTableEngine (Fallback Engine) khi và chỉ khi:
-    # - detect_and_reconstruct_table trả về None (như sample_05 hoặc bảng chữ ký 3 cột ở cuối)
-    # - HOẶC bảng thuộc dạng hóa đơn không viền / tiêu đề gộp (sample_02, sample_03) không có cấu trúc bảng điểm Tiêu chí đánh giá
+    # For borderless or partially ruled tables, run spatial projection first.
+    # The legacy anchor engine remains a fallback if the general engine finds no table.
     from app.core.table_engines import unified_hybrid_engine
 
     target_ocr_boxes = [b["box"] for b in target_boxes_for_table]
     hybrid_res = unified_hybrid_engine(target_ocr_boxes, image=image)
     if len(hybrid_res[1]) > 0:
+        hybrid_table = hybrid_res[1][0]
+        if tbl_v1 is not None:
+            legacy_score = _table_candidate_quality(tbl_v1, target_ocr_boxes)
+            hybrid_score = _table_candidate_quality(hybrid_table, target_ocr_boxes)
+            if legacy_score[0] >= hybrid_score[0]:
+                if diagnostics is not None:
+                    diagnostics["selected_engine"] = "legacy_anchor_quality"
+                    diagnostics["table_candidate_quality"] = {
+                        "legacy": {"score": legacy_score[0], "box_coverage": legacy_score[1], "rectangularity": legacy_score[2]},
+                        "spatial": {"score": hybrid_score[0], "box_coverage": hybrid_score[1], "rectangularity": hybrid_score[2]},
+                    }
+                pre_lines = header_lines + _group_boxes_sliding_window(
+                    [item for item in pre_tbl_v1 if id(item["box"]) not in {id(box) for line in header_lines for box in line}],
+                    page_min_x, page_w, gutter_thresh, median_h
+                )
+                post_lines = _group_boxes_sliding_window(
+                    post_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
+                )
+                return LayoutResult(pre_lines + tbl_rows_v1 + post_lines, [tbl_v1], parallel_header=parallel_hdr)
         if diagnostics is not None:
             diagnostics["selected_engine"] = "unified_hybrid"
-        tbl = hybrid_res[1][0]
-        all_lines = header_lines + hybrid_res[0]
+            if tbl_v1 is not None:
+                legacy_score = _table_candidate_quality(tbl_v1, target_ocr_boxes)
+                hybrid_score = _table_candidate_quality(hybrid_table, target_ocr_boxes)
+                diagnostics["table_candidate_quality"] = {
+                    "legacy": {"score": legacy_score[0], "box_coverage": legacy_score[1], "rectangularity": legacy_score[2]},
+                    "spatial": {"score": hybrid_score[0], "box_coverage": hybrid_score[1], "rectangularity": hybrid_score[2]},
+                }
+        tbl = hybrid_table
+        header_ids = {id(box) for line in header_lines for box in line}
+        remaining_hybrid_lines = [
+            [box for box in line if id(box) not in header_ids]
+            for line in hybrid_res[0]
+        ]
+        all_lines = header_lines + [line for line in remaining_hybrid_lines if line]
         return LayoutResult(all_lines, [tbl], parallel_header=parallel_hdr)
 
     # 4. Fallback cuối: Nếu UnifiedHybrid không tìm thấy nhưng detect_and_reconstruct_table có bảng

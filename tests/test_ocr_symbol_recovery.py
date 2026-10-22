@@ -544,15 +544,16 @@ class TestPhase3TwoColumnHeaderAndDecorativeLine:
 
         header_line_texts = [" ".join(b.text for b in line) for line in header_lines]
 
-        # Đường kẻ '%' phải bị loại bỏ, khối trái gồm đúng 4 dòng:
-        assert len(header_line_texts) == 6
+        # Without image evidence, '%' is recognized content and must remain.
+        assert len(header_line_texts) == 7
         assert header_line_texts[0] == "ĐẢNG ỦY XÃ PHƯỚC HẢI"
         assert header_line_texts[1] == "CHI BỘ VĂN PHÒNG HĐND"
         assert header_line_texts[2] == "VÀ UBND XÃ"
-        assert header_line_texts[3] == "Số 01-BB/CB"
+        assert header_line_texts[3] == "%"
+        assert header_line_texts[4] == "Số 01-BB/CB"
         # Sau đó là Khối phải gồm 2 dòng:
-        assert header_line_texts[4] == "ĐẢNG CỘNG SẢN VIỆT NAM"
-        assert header_line_texts[5] == "Phước Hải, ngày 05 tháng 10 năm 2026"
+        assert header_line_texts[5] == "ĐẢNG CỘNG SẢN VIỆT NAM"
+        assert header_line_texts[6] == "Phước Hải, ngày 05 tháng 10 năm 2026"
 
 
 class TestPhase4SpellingAndTokenization:
@@ -674,6 +675,7 @@ class TestPhase6DocxExportParallelHeader:
         """Xác nhận export_to_docx tạo bảng 2 cột không viền cho header và không duplicate text."""
         import docx
         from app.core.ocr_engine import ParallelHeader, OCRResult, export_to_docx
+        from app.core.models import DocumentBlock
 
         hdr = ParallelHeader(
             left_lines=[
@@ -703,6 +705,12 @@ class TestPhase6DocxExportParallelHeader:
             full_text=full_text,
             language="vi",
             parallel_header=hdr,
+            document_blocks=[
+                DocumentBlock(kind="parallel_header", order=0),
+                DocumentBlock(kind="heading", order=1, text="BIÊN BẢN"),
+                DocumentBlock(kind="paragraph", order=2, text="sinh hoạt chi bộ định kỳ tháng 10 năm 2026"),
+                DocumentBlock(kind="paragraph", order=3, text="Vào lúc 15 giờ, ngày 05 tháng 10 năm 2026..."),
+            ],
         )
 
         out_docx = str(tmp_path / "test_parallel_header.docx")
@@ -1531,8 +1539,8 @@ class TestMasterPromptFixTransformerAndSpellCheck:
         cleaned_fn = VietnameseTextPostProcessor.clean_and_restore(sample_footnote)
         assert cleaned_fn.startswith("* Trừ trường hợp")
 
-    def test_03_horizontal_form_line_merging(self):
-        """3. Gom đúng hàng ngang biểu mẫu có chấm lửng (không tách nhầm thành 2 cột)."""
+    def test_03_horizontal_form_boxes_preserve_source_without_inferred_join(self):
+        """Boxes share a baseline but may be separate columns; preserve each source string."""
         from app.core.ocr_engine import OCRBox, _group_boxes_sliding_window, _box_info_list, join_ocr_line_boxes
 
         boxes = [
@@ -1544,15 +1552,9 @@ class TestMasterPromptFixTransformerAndSpellCheck:
 
         box_info = _box_info_list(boxes)
         grouped = _group_boxes_sliding_window(box_info, page_min_x=40, page_w=800, gutter_thresh=60, median_h=25)
-        assert len(grouped) == 2, f"Phải gom thành đúng 2 dòng ngang, thực tế: {len(grouped)}"
-
-        line1_text = join_ocr_line_boxes(grouped[0])
-        line2_text = join_ocr_line_boxes(grouped[1])
-
-        assert "+ Ông (bà): ......" in line1_text
-        assert "(ghi tên người đại diện" in line1_text
-        assert "Chức danh: ......" in line2_text
-        assert "Chủ trì cuộc họp." in line2_text
+        assert len(grouped) == 4
+        joined = [join_ocr_line_boxes(line) for line in grouped]
+        assert joined == [box.text for box in boxes]
 
     def test_04_scorecard_text_postprocessing(self):
         """4. Xác minh '0s' -> '05', '% so với quy định' -> '½' và bullet '-' -> '+'."""
@@ -2198,19 +2200,12 @@ class TestImageSpecificFixes698And6a0:
         import docx
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from app.core.docx_exporter import export_to_docx
-        from app.core.models import OCRResult, ParallelHeader, OCRTable, TableCell
-        from app.core.text_postprocessor import final_document_cleanup
+        from app.core.models import DocumentBlock, OCRResult, ParallelHeader, OCRTable, TableCell
 
-        # 1. Kiểm tra text cleanup
+        # 1. Preserve source symbols and spelling in the explicit document model.
         s = "(1) | (2) | (3) | (4) | (5) | (6) | 0 | (8) | (0) | (10) | (11) | (12) | (13) | (14) | (15) | (16)"
-        cleaned = final_document_cleanup(s)
-        assert "(6) | (7) | (8) | (9) | (10)" in cleaned
-
         s2 = "Số lượng NCUT (3 - 445)"
-        assert "(3=4+5)" in final_document_cleanup(s2)
-
         s3 = "Trình độ học vấn chuyên môn"
-        assert "Trình độ học vấn/chuyên môn" in final_document_cleanup(s3)
 
         # 2. Kiểm tra export_to_docx cho bảng 16 cột
         hdr = ParallelHeader(
@@ -2238,6 +2233,11 @@ class TestImageSpecificFixes698And6a0:
             full_text="DANH SÁCH\n" + s,
             parallel_header=hdr,
             tables=[tbl],
+            document_blocks=[
+                DocumentBlock(kind="parallel_header", order=0),
+                DocumentBlock(kind="heading", order=1, text="DANH SÁCH"),
+                DocumentBlock(kind="table", order=2, table_index=0),
+            ],
         )
         doc_path = tmp_path / "test_mau_02.docx"
         assert export_to_docx(res, doc_path) is True
@@ -2247,16 +2247,16 @@ class TestImageSpecificFixes698And6a0:
         # Khối trái căn trái
         for p in hdr_tbl.cell(0, 0).paragraphs:
             assert p.alignment == WD_ALIGN_PARAGRAPH.LEFT
-        # Khối phải căn phải và không chứa số 3 mồ côi
+        # Preserve every source header line, including a standalone number.
         right_texts = [p.text for p in hdr_tbl.cell(0, 1).paragraphs]
-        assert "3" not in right_texts
+        assert "3" in right_texts
         for p in hdr_tbl.cell(0, 1).paragraphs:
             assert p.alignment == WD_ALIGN_PARAGRAPH.RIGHT
 
         data_tbl = doc.tables[1]
-        assert data_tbl.cell(2, 6).text == "(7)"
-        assert data_tbl.cell(2, 8).text == "(9)"
-        assert "(3=4+5)" in data_tbl.cell(0, 2).text
-        assert "Trình độ học vấn/chuyên môn" in data_tbl.cell(1, 7).text
+        assert data_tbl.cell(2, 6).text == "0"
+        assert data_tbl.cell(2, 8).text == "(0)"
+        assert data_tbl.cell(0, 2).text == s2
+        assert data_tbl.cell(1, 7).text == s3
 
 

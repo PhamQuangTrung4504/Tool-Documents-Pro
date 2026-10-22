@@ -463,6 +463,7 @@ class TestGroup15HeadersFootersAndDocxExport:
 
     def test_export_docx_with_multi_genre_table(self):
         """Xuất file DOCX có bảng số liệu và tiêu đề cân đối."""
+        from app.core.models import DocumentBlock
         tbl = OCRTable(
             grid=[
                 ["STT", "Tên thiết bị", "Số lượng", "Đơn giá (VNĐ)", "Thành tiền (VNĐ)"],
@@ -488,6 +489,11 @@ class TestGroup15HeadersFootersAndDocxExport:
             full_text=full_text,
             tables=[tbl],
             language="vi",
+            document_blocks=[
+                DocumentBlock(kind="heading", order=0, text="HỢP ĐỒNG MUA BÁN THIẾT BỊ"),
+                DocumentBlock(kind="table", order=1, table_index=0),
+                DocumentBlock(kind="paragraph", order=2, text="Tổng giá trị hợp đồng: 300.000.000 VNĐ."),
+            ],
         )
 
         with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:

@@ -44,6 +44,7 @@ from loguru import logger
 
 # Re-exports từ các module con (Phase C1 Decoupling)
 from app.core.models import (
+    DocumentBlock,
     HeaderDetectionResult,
     LayoutResult,
     OCRBox,
@@ -51,7 +52,9 @@ from app.core.models import (
     OCRTable,
     ParallelHeader,
     SymbolDecision,
+    format_confidence,
 )
+from app.core.document_diagnostics import build_reconstruction_diagnostic, infer_visual_document_styles
 from app.core.vision_preprocess import (
     adaptive_safe_crop_padding,
     assess_image_quality,
@@ -80,6 +83,78 @@ from app.core.text_postprocessor import (
     preserve_casing,
     recover_emails_and_urls,
 )
+
+
+def _resolve_table_row_identity(
+    line_box_ids: frozenset[int],
+    table_row_map: List[Tuple[frozenset[int], int, int, List[str]]],
+    rendered_rows: Set[Tuple[int, int]],
+) -> Optional[Tuple[int, int, List[str]]]:
+    """Resolve a line to one table/logical-row pair using in-memory ownership.
+
+    Row content is intentionally absent from identity, so equal-valued rows
+    remain distinct. Ambiguous box ownership is left unassigned.
+    """
+    if not line_box_ids:
+        return None
+    candidates = []
+    for row_box_ids, table_index, row_index, row_data in table_row_map:
+        common = line_box_ids & row_box_ids
+        if common:
+            ownership = len(common) / len(line_box_ids)
+            if ownership >= 0.7 or line_box_ids.issubset(row_box_ids):
+                candidates.append((ownership, table_index, row_index, row_data))
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    if not candidates or (len(candidates) > 1 and candidates[0][0] == candidates[1][0]):
+        return None
+    _, table_index, row_index, row_data = candidates[0]
+    key = (table_index, row_index)
+    if key in rendered_rows:
+        return None
+    rendered_rows.add(key)
+    return table_index, row_index, row_data
+
+
+def _recognition_evidence(
+    crop_id: int,
+    crop_bbox: List[List[int]],
+    primary_name: str,
+    primary_text: str,
+    primary_confidence: Optional[float],
+    alternate_text: str = "",
+    alternate_confidence: Optional[float] = None,
+    alternate_name: str = "paddleocr",
+) -> Dict[str, Any]:
+    """Keep same-crop candidates and flag disagreements without score voting.
+
+    Model confidence scales are not calibrated across recognizers. The primary
+    prediction remains the displayed text; alternatives are evidence for review.
+    """
+    primary = unicodedata.normalize("NFC", primary_text or "")
+    alternate = unicodedata.normalize("NFC", alternate_text or "")
+    candidates = [{
+        "recognizer": primary_name, "text": primary_text or "",
+        "confidence": primary_confidence, "crop_id": crop_id, "crop_bbox": crop_bbox,
+    }]
+    if alternate_text:
+        candidates.append({
+            "recognizer": alternate_name, "text": alternate_text,
+            "confidence": alternate_confidence, "crop_id": crop_id, "crop_bbox": crop_bbox,
+        })
+    disagreement = bool(primary and alternate and primary.strip() != alternate.strip())
+    return {
+        "candidates": candidates,
+        "arbitration": "disagreement_preserved" if disagreement else "agreement" if alternate else "single_candidate",
+        "needs_review": disagreement or primary_confidence is None,
+        "confidence_source": primary_name if primary_confidence is not None else None,
+        "confidence_comparable_across_models": False,
+        "selected_candidate": 0,
+    }
+def _table_source_box_indices(table: OCRTable, box_index_by_id: Dict[int, int]) -> List[int]:
+    """Return result-local indexes owned by a table, without duplicate row/cell links."""
+    owned_ids = {id(box) for row in table.row_boxes for box in row}
+    owned_ids.update(id(box) for cell in table.cells for box in cell.boxes)
+    return sorted(box_index_by_id[box_id] for box_id in owned_ids if box_id in box_index_by_id)
 from app.core.layout_analyzer import (
     _box_info_list,
     _group_boxes_sliding_window,
@@ -889,7 +964,7 @@ class OCREngine:
             ]
 
             text = ""
-            conf = 0.0
+            conf: Optional[float] = None
             crop_bgr: Optional[np.ndarray] = None
 
             if use_vietocr:
@@ -917,19 +992,20 @@ class OCREngine:
                                     p_res = self._vietocr.predict(sc_pil, return_prob=True)
                                     if isinstance(p_res, tuple):
                                         t_sub = (p_res[0] or "").strip()
-                                        c_sub = float(p_res[1]) if p_res[1] is not None else 0.95
+                                        c_sub = float(p_res[1]) if p_res[1] is not None else None
                                     else:
                                         t_sub = str(p_res).strip()
-                                        c_sub = 0.95
+                                        c_sub = None
                                     if t_sub:
                                         sub_texts.append(t_sub)
                                         sub_confs.append(c_sub)
                                 if sub_texts:
                                     text = " ...... ".join(sub_texts)
-                                    conf = float(np.mean(sub_confs)) if sub_confs else 0.95
+                                    known_sub_confs = [value for value in sub_confs if value is not None]
+                                    conf = float(np.mean(known_sub_confs)) if known_sub_confs else None
                                 else:
                                     text = ""
-                                    conf = 0.5
+                                    conf = None
                             else:
                                 # 4. Đệm khung trắng chuẩn tỷ lệ cho ô hẹp & chữ số (05, 01, 1, 2)
                                 crop_bgr_padded = pad_small_crop_for_vietocr(crop_bgr)
@@ -942,41 +1018,53 @@ class OCREngine:
                                 if isinstance(pred_res, tuple):
                                     text = pred_res[0] or ""
                                     prob = pred_res[1]
-                                    conf = float(prob) if prob is not None else 0.95
+                                    conf = float(prob) if prob is not None else None
                                 else:
                                     text = str(pred_res)
-                                    conf = 0.95
+                                    conf = None
                         except Exception as err:
                             logger.debug(f"VietOCR line predict error: {err}")
                             text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                            conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+                            conf = paddle_scores[idx] if idx < len(paddle_scores) else None
                 else:
                     text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                    conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+                    conf = paddle_scores[idx] if idx < len(paddle_scores) else None
             else:
                 # Tiếng Anh hoặc ngôn ngữ khác dùng kết quả từ PaddleOCR
                 text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
+                conf = paddle_scores[idx] if idx < len(paddle_scores) else None
 
             raw_recognized_text = text
-            # Chuẩn hóa văn bản Unicode NFC và làm sạch hậu kiểm
-            text = unicodedata.normalize("NFC", text)
-            text = VietnameseTextPostProcessor.clean_and_restore(text)
+            # NFC is non-semantic; retain recognizer output separately.
             text = unicodedata.normalize("NFC", text)
 
             # Bỏ qua dòng trống, dòng ảo giác lặp từ hoặc ký tự rác, hoặc quá thấp độ tin cậy
-            accepted = bool(text and not is_decorative_or_hallucinated(text, crop_bgr) and conf >= self.drop_score)
+            paddle_text = paddle_texts[idx] if idx < len(paddle_texts) else ""
+            paddle_conf = paddle_scores[idx] if idx < len(paddle_scores) else None
+            recognizer_name = f"vietocr:{self.vietocr_model_name}" if use_vietocr else "paddleocr"
+            # These are two predictions for the same detected polygon. Their
+            # confidence scales are not calibrated against each other; retain
+            # both and flag disagreement instead of choosing by score.
+            accepted = bool(text and (conf is None or conf >= self.drop_score))
+            recognition_metadata = _recognition_evidence(
+                crop_id=idx, crop_bbox=bbox_int, primary_name=recognizer_name,
+                primary_text=raw_recognized_text, primary_confidence=conf,
+                alternate_text=paddle_text if use_vietocr else "",
+                alternate_confidence=paddle_conf, alternate_name="paddleocr",
+            )
             if accepted:
-                boxes.append(OCRBox(text=text, confidence=conf, bbox=bbox_int, raw_text=text))
+                boxes.append(OCRBox(text=text, confidence=float(conf) if conf is not None else None, bbox=bbox_int,
+                                    raw_text=raw_recognized_text, metadata=recognition_metadata))
             if diagnostic_report is not None:
                 diagnostic_report["recognition"].append({
                     "box_index": idx,
                     "bbox_original": [[int(x), int(y)] for x, y in bbox_int],
-                    "paddle_text": paddle_texts[idx] if idx < len(paddle_texts) else "",
-                    "paddle_confidence": paddle_scores[idx] if idx < len(paddle_scores) else None,
+                    "paddle_text": paddle_text,
+                    "paddle_confidence": paddle_conf,
                     "recognizer_raw_text": raw_recognized_text,
                     "normalized_text": text,
-                    "confidence": float(conf),
+                    "confidence": conf,
+                    **recognition_metadata,
                     "accepted": accepted,
                 })
 
@@ -1009,235 +1097,167 @@ class OCREngine:
 
         # 7. Tổng hợp toàn bộ văn bản (đối với bảng, nối các ô bằng ' | ', đối với văn bản thường nối bằng space)
         # Nhận diện các bảng vật lý có ô gộp phức tạp để render nguyên khối theo đúng thứ tự đọc
-        phys_merged_tables = {}
-        for tbl in detected_tables:
+        phys_merged_tables: Dict[int, Tuple[OCRTable, Set[int]]] = {}
+        phys_merged_table_indexes: Set[int] = set()
+        for table_index, tbl in enumerate(detected_tables):
             cells = getattr(tbl, "cells", [])
             is_phys_merged = any(getattr(c, "is_merged", False) for c in cells) and (
                 tbl.num_cols >= 6 or any(getattr(c, "col_span", 1) >= 3 for c in cells)
             )
             if is_phys_merged:
+                phys_merged_table_indexes.add(table_index)
                 tbl_box_ids = {id(b) for r_b in tbl.row_boxes for b in r_b} | {
                     id(b) for c in cells for b in c.boxes
                 }
-                phys_merged_tables[id(tbl)] = (tbl, tbl_box_ids)
+                phys_merged_tables[table_index] = (tbl, tbl_box_ids)
 
-        rendered_physical_table_ids: Set[int] = set()
+        rendered_physical_table_indexes: Set[int] = set()
+        emitted_table_blocks: Set[int] = set()
+        document_blocks: List[DocumentBlock] = []
+        box_index_by_id = {id(box): index for index, box in enumerate(boxes)}
+        if parallel_hdr is not None:
+            header_boxes = parallel_hdr.left_boxes + parallel_hdr.right_boxes
+            header_ids = {id(box) for box in header_boxes}
+            document_blocks.append(DocumentBlock(
+                kind="parallel_header", order=0,
+                text="\n".join(parallel_hdr.left_lines + parallel_hdr.right_lines),
+                raw_text="\n".join(box.raw_text for box in header_boxes if box.raw_text),
+                box_indices=[box_index_by_id[id(box)] for box in header_boxes if id(box) in box_index_by_id],
+                bbox=[min(point[0] for box in header_boxes for point in box.bbox),
+                      min(point[1] for box in header_boxes for point in box.bbox),
+                      max(point[0] for box in header_boxes for point in box.bbox),
+                      max(point[1] for box in header_boxes for point in box.bbox)] if header_boxes else None,
+            ))
+        else:
+            header_ids = set()
 
-        # Xây dựng bản đồ ánh xạ hàng bảng theo box id cho các bảng thông thường (scorecard, simple grid)
-        table_row_map = {}
-        for tbl in detected_tables:
-            if id(tbl) in phys_merged_tables:
+        # Row identity is (table index, logical row index) within this result.
+        # OCRBox ids are used only to associate current in-memory geometry with
+        # that identity; row text is never an identifier.
+        table_row_map = []
+        for table_index, tbl in enumerate(detected_tables):
+            if table_index in phys_merged_table_indexes:
                 continue
             for r_idx, r_boxes in enumerate(tbl.row_boxes):
                 if r_idx < len(tbl.grid):
                     box_id_set = frozenset(id(b) for b in r_boxes)
-                    table_row_map[box_id_set] = (tbl, tbl.grid[r_idx])
+                    if box_id_set:
+                        table_row_map.append((box_id_set, table_index, r_idx, tbl.grid[r_idx]))
 
-        rendered_table_rows = set()
+        rendered_table_rows: Set[Tuple[int, int]] = set()
         text_lines = []
         for line in grouped_lines:
             if not line:
+                continue
+            if all(id(box) in header_ids for box in line):
+                text_lines.append(join_ocr_line_boxes(line))
                 continue
 
             line_box_ids = frozenset(id(b) for b in line)
 
             # Kiểm tra xem dòng này có chứa box thuộc bảng vật lý ô gộp phức tạp không
-            matched_phys_tbl_id = None
-            for tbl_id, (tbl, tbl_box_ids) in phys_merged_tables.items():
+            matched_phys_tbl_index = None
+            for table_index, (tbl, tbl_box_ids) in phys_merged_tables.items():
                 if any(id(b) in tbl_box_ids for b in line):
-                    matched_phys_tbl_id = tbl_id
+                    matched_phys_tbl_index = table_index
                     break
 
-            if matched_phys_tbl_id is not None:
-                if matched_phys_tbl_id not in rendered_physical_table_ids:
-                    rendered_physical_table_ids.add(matched_phys_tbl_id)
-                    tbl, _ = phys_merged_tables[matched_phys_tbl_id]
+            if matched_phys_tbl_index is not None:
+                if matched_phys_tbl_index not in emitted_table_blocks:
+                    table = detected_tables[matched_phys_tbl_index]
+                    document_blocks.append(DocumentBlock(
+                        kind="table", order=len(document_blocks), table_index=matched_phys_tbl_index,
+                        bbox=list(table.bbox) if table.bbox else None,
+                        box_indices=_table_source_box_indices(table, box_index_by_id),
+                    ))
+                    emitted_table_blocks.add(matched_phys_tbl_index)
+                if matched_phys_tbl_index not in rendered_physical_table_indexes:
+                    rendered_physical_table_indexes.add(matched_phys_tbl_index)
+                    tbl, _ = phys_merged_tables[matched_phys_tbl_index]
                     for row_data in tbl.grid:
-                        non_empty_cells = [c.strip() for c in row_data if c.strip()]
-                        if not non_empty_cells:
-                            continue
-                        if not row_data[0].strip():
-                            formatted_row = " | ".join(non_empty_cells)
-                        else:
-                            formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
-                        formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
-                        formatted_row = format_progress_table_row(formatted_row)
-                        text_lines.append(formatted_row)
+                        text_lines.append(" | ".join(c.strip() for c in row_data))
                 continue
-            matched_tbl_row = None
-            if line_box_ids in table_row_map:
-                candidate_tuple = table_row_map[line_box_ids]
-                r_key = (id(candidate_tuple[0]), tuple(candidate_tuple[1]))
-                if r_key not in rendered_table_rows:
-                    matched_tbl_row = candidate_tuple
-                    rendered_table_rows.add(r_key)
-            else:
-                for r_box_ids, tbl_row_tuple in table_row_map.items():
-                    common = line_box_ids & r_box_ids
-                    if common and (len(common) / len(line_box_ids) >= 0.7 or line_box_ids.issubset(r_box_ids)):
-                        r_key = (id(tbl_row_tuple[0]), tuple(tbl_row_tuple[1]))
-                        if r_key not in rendered_table_rows:
-                            matched_tbl_row = tbl_row_tuple
-                            rendered_table_rows.add(r_key)
-                        break
+            matched_row_identity = _resolve_table_row_identity(
+                line_box_ids, table_row_map, rendered_table_rows
+            )
 
-            if matched_tbl_row is not None:
-                tbl, row_data = matched_tbl_row
-                if not row_data[0].strip():
-                    non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
-                    formatted_row = " | ".join(non_empty_cells)
-                else:
-                    formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
-
-                formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
-                formatted_row = format_progress_table_row(formatted_row)
-                text_lines.append(formatted_row)
+            if matched_row_identity is not None:
+                table_index, _, row_data = matched_row_identity
+                tbl = detected_tables[table_index]
+                if table_index not in emitted_table_blocks:
+                    document_blocks.append(DocumentBlock(
+                        kind="table", order=len(document_blocks), table_index=table_index,
+                        bbox=list(tbl.bbox) if tbl.bbox else None,
+                        box_indices=_table_source_box_indices(tbl, box_index_by_id),
+                    ))
+                    emitted_table_blocks.add(table_index)
+                text_lines.append(" | ".join(c.strip() for c in row_data))
             else:
-                is_fallback_table_row = False
                 line_joined = join_ocr_line_boxes(line)
-                for tbl in detected_tables:
-                    if id(tbl) in phys_merged_tables:
-                        continue
-                    for row_data in tbl.grid:
-                        row_joined = " ".join(c.strip() for c in row_data if c.strip())
-                        if row_joined and (row_joined == line_joined or (len(line_joined) >= 15 and line_joined in row_joined)):
-                            r_key = (id(tbl), tuple(row_data))
-                            if r_key not in rendered_table_rows:
-                                is_fallback_table_row = True
-                                rendered_table_rows.add(r_key)
-                                if not row_data[0].strip():
-                                    non_empty_cells = [c.strip() for c in row_data[1:] if c.strip()]
-                                    formatted_row = " | ".join(non_empty_cells)
-                                else:
-                                    formatted_row = " | ".join(c.strip() for c in row_data if c.strip())
-                                formatted_row = re.sub(r"\b(\d+)\s*\|\s*\|\s*", r"\1 | ", formatted_row)
-                                formatted_row = format_progress_table_row(formatted_row)
-                                text_lines.append(formatted_row)
-                            else:
-                                is_fallback_table_row = True
-                            break
-                    if is_fallback_table_row:
-                        break
+                text_lines.append(line_joined)
+                document_blocks.append(DocumentBlock(
+                    kind="paragraph", order=len(document_blocks), text=line_joined,
+                    raw_text=" ".join(box.raw_text.strip() for box in line if box.raw_text.strip()),
+                    box_indices=[box_index_by_id[id(box)] for box in line if id(box) in box_index_by_id],
+                    bbox=[min(point[0] for box in line for point in box.bbox),
+                          min(point[1] for box in line for point in box.bbox),
+                          max(point[0] for box in line for point in box.bbox),
+                          max(point[1] for box in line for point in box.bbox)] if line else None,
+                ))
 
-                if not is_fallback_table_row:
-                    cleaned_line = line_joined.strip()
-                    if is_hallucinated_or_noise_line(cleaned_line):
-                        continue
-                    text_lines.append(line_joined)
+        # Place boxless/empty tables using their geometry among the paragraph
+        # events. Their position is explicit metadata, not inferred from text.
+        for table_index, table in enumerate(detected_tables):
+            if table_index in emitted_table_blocks:
+                continue
+            table_top = table.bbox[1] if len(table.bbox) >= 4 else float("inf")
+            insert_at = next((idx for idx, block in enumerate(document_blocks)
+                              if block.kind != "parallel_header" and block.bbox
+                              and block.bbox[1] >= table_top), len(document_blocks))
+            document_blocks.insert(insert_at, DocumentBlock(
+                kind="table", order=insert_at, table_index=table_index,
+                bbox=list(table.bbox) if table.bbox else None,
+                box_indices=_table_source_box_indices(table, box_index_by_id),
+            ))
+            emitted_table_blocks.add(table_index)
+        for order, block in enumerate(document_blocks):
+            block.order = order
+        infer_visual_document_styles(document_blocks, boxes, image)
 
-        raw_full_text = "\n".join(text_lines)
-        raw_full_text = VietnameseTextPostProcessor.clean_and_restore(raw_full_text)
-
-        # 8. Context-Aware Symbol Recovery: khôi phục ký tự, số La Mã, bullet dựa trên ngữ cảnh
-        # BẮT BUỘC chạy clean_and_restore trước để tách các đề mục số La Mã bị dính vào cuối dòng trước
-        # (ví dụ: '... 14 người. TT. Nội dung cuộc họp' -> tách thành 2 dòng riêng trước khi nhận dạng số La Mã)
-        pre_cleaned_lines = raw_full_text.split("\n")
-        recovered_lines, audit_records = ContextSymbolRecovery.recover_document_symbols(pre_cleaned_lines)
-        full_text = "\n".join(recovered_lines)
-        full_text = VietnameseTextPostProcessor.clean_and_restore(full_text)
-
-        # 9. Hậu xử lý bắt buộc toàn văn trước khi trả về kết quả OCR:
-        # a. Khôi phục bullet '+' cho các dòng tiêu chí con trong bảng đánh giá chất lượng
-        full_text = re.sub(
-            r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
-            r"\1+ \2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        full_text = re.sub(
-            r"(?m)^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
-            r"\1+ \2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        # a2. Khôi phục ghi chú chân trang '* Trừ trường hợp...'
-        full_text = re.sub(
-            r"(?m)^([ \t]*)[-*–—/1?]+\s*(Trừ\s+trường\s+hợp)",
-            r"\1* \2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        # b. Chuẩn hóa tiêu đề cột 'đa' -> 'Điểm tối đa'
-        full_text = re.sub(
-            r"(\|\s*Tiêu\s+chí\s+đánh\s+giá\s*\|\s*)(?:tối\s+)?đa(\s*\|\s*Điểm\s+tự\s+chấm)",
-            r"\1Điểm tối đa\2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        # c. Khóa chốt hậu xử lý văn bản cuối cùng (Final Document Cleanup)
-        full_text = final_document_cleanup(full_text)
-
-        # Cập nhật văn bản trong các OCRBox và OCRTable để đồng bộ với full_text
-        for b in boxes:
-            b.text = final_document_cleanup(b.text)
-
-        for tbl in detected_tables:
-            is_wide_tbl = tbl.num_cols >= 8
-            for r_idx in range(len(tbl.grid)):
-                row_cells = tbl.grid[r_idx]
-                has_col_numbers = any(row_cells[ci].strip() in {"(1)", "(2)", "(3)"} for ci in range(min(4, len(row_cells))))
-                for c_idx in range(len(row_cells)):
-                    cell_val = row_cells[c_idx]
-                    cell_val = re.sub(
-                        r"^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
-                        r"\1+ \2",
-                        cell_val,
-                        flags=re.IGNORECASE,
-                    )
-                    cell_cleaned = final_document_cleanup(cell_val)
-                    if is_wide_tbl:
-                        if has_col_numbers and c_idx == 6 and cell_cleaned.strip() in {"0", "(0)", "O", "(O)", "7"}:
-                            cell_cleaned = "(7)"
-                        elif has_col_numbers and c_idx == 8 and cell_cleaned.strip() in {"0", "(0)", "O", "(O)", "9"}:
-                            cell_cleaned = "(9)"
-                        if "NCUT" in cell_cleaned or ("3" in cell_cleaned and "4" in cell_cleaned and "5" in cell_cleaned):
-                            cell_cleaned = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", cell_cleaned)
-                        if "học vấn" in cell_cleaned.lower():
-                            cell_cleaned = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", cell_cleaned, flags=re.IGNORECASE)
-                    row_cells[c_idx] = cell_cleaned
-
-            for c in tbl.cells:
-                c_clean = final_document_cleanup(c.text)
-                if is_wide_tbl:
-                    if c.col_start == 6 and c_clean.strip() in {"0", "(0)", "O", "(O)", "7"}:
-                        c_clean = "(7)"
-                    elif c.col_start == 8 and c_clean.strip() in {"0", "(0)", "O", "(O)", "9"}:
-                        c_clean = "(9)"
-                    if "NCUT" in c_clean or ("3" in c_clean and "4" in c_clean and "5" in c_clean):
-                        c_clean = re.sub(r"\(\s*3\s*[-=~_]?\s*4\s*[-+=4\s]*\s*5\s*\)", "(3=4+5)", c_clean)
-                    if "học vấn" in c_clean.lower():
-                        c_clean = re.sub(r"Trình\s+độ\s+học\s+vấn[ \t]*(?:/|[|\\~_\-])?[ \t]*chuyên\s+môn", "Trình độ học vấn/chuyên môn", c_clean, flags=re.IGNORECASE)
-                c.text = c_clean
-
-        # Đồng bộ hóa triệt để 100% giữa full_text (Giao diện App) và tbl.grid (File Word)
-        full_text = re.sub(
-            r"(?m)^([ \t]*)[-–—*•%~]\s+((?:Chi\s+bộ|Thời\s+gian|Từ\s+\d+|Dưới\s+\d+|Không\s+có).*\|\s*0\d)",
-            r"\1+ \2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        full_text = re.sub(
-            r"(?m)^([ \t]*)(?:[-–—*•%~]\s+|\+\s*)?((?:Chi\s+bộ\s+dưới|Thời\s+gian\s+sinh\s+hoạt|Từ\s+\d+%|Dưới\s+\d+%|Không\s+có\s+đảng\s+viên).*)",
-            r"\1+ \2",
-            full_text,
-            flags=re.IGNORECASE,
-        )
-        sync_lines = []
-        for ln in full_text.splitlines():
-            ln_s = ln.strip()
-            if re.search(r"\|\s*0[1-9]\b", ln_s):
-                if ln_s.startswith(("- ", "– ", "— ", "* ", "• ", "~ ")):
-                    indent = ln[:len(ln) - len(ln_s)]
-                    ln = indent + "+ " + ln_s[2:].strip()
-                elif ln_s.startswith(("-", "–", "—", "*", "•", "~")) and not ln_s.startswith("+"):
-                    indent = ln[:len(ln) - len(ln_s)]
-                    ln = indent + "+ " + ln_s[1:].strip()
-            sync_lines.append(ln)
-        full_text = "\n".join(sync_lines)
-
-        # Khóa chốt bảo đảm full_text luôn được xử lý qua final_document_cleanup sau cùng
-        full_text = final_document_cleanup(full_text)
-
+        raw_parts: List[str] = []
+        for block in document_blocks:
+            if block.kind == "parallel_header":
+                if block.raw_text:
+                    raw_parts.extend(block.raw_text.splitlines())
+            elif block.kind == "paragraph":
+                raw_parts.append(block.raw_text or block.text)
+            elif block.kind == "table" and block.table_index is not None:
+                table = detected_tables[block.table_index]
+                cells_by_origin = {(cell.row_start, cell.col_start): cell for cell in table.cells}
+                for row_index, row_data in enumerate(table.grid):
+                    raw_row = []
+                    for col_index, value in enumerate(row_data):
+                        cell = cells_by_origin.get((row_index, col_index))
+                        if cell is not None and cell.boxes:
+                            raw_value = " ".join(box.raw_text.strip() for box in cell.boxes if box.raw_text.strip())
+                        else:
+                            raw_value = value
+                        raw_row.append(raw_value)
+                    raw_parts.append(" | ".join(raw_row))
+        raw_full_text = "\n".join(raw_parts)
+        normalized_parts: List[str] = []
+        for block in document_blocks:
+            if block.kind == "parallel_header":
+                normalized_parts.extend(block.text.splitlines())
+            elif block.kind == "paragraph":
+                normalized_parts.append(block.text)
+            elif block.kind == "table" and block.table_index is not None:
+                table = detected_tables[block.table_index]
+                normalized_parts.extend(" | ".join(value for value in row) for row in table.grid)
+        # NFC and whitespace normalization are represented by box/block text;
+        # semantic correction remains a separate, user-confirmed operation.
+        full_text = "\n".join(normalized_parts)
+        audit_records: List[dict] = []
         if diagnostic_report is not None:
             input_indexes = {id(box): index for index, box in enumerate(diagnostic_input_boxes)}
             line_membership: Dict[int, List[int]] = {}
@@ -1302,16 +1322,24 @@ class OCREngine:
             image_width=orig_w,
             image_height=orig_h,
             tables=detected_tables,
+            document_blocks=document_blocks,
             raw_full_text=raw_full_text,
             audit_trail=audit_records,
             parallel_header=parallel_hdr,
             diagnostics=diagnostic_report,
         )
+        if diagnostic_report is not None:
+            diagnostic_report["reconstruction_integrity"] = build_reconstruction_diagnostic(
+                result,
+                source_boxes=diagnostic_input_boxes,
+            )
 
+        average_confidence = result.average_confidence
+        confidence_summary = format_confidence(average_confidence)
         logger.info(
             f"Hybrid OCR completed: {result.num_lines} lines, "
             f"{len(result.tables)} tables detected, "
-            f"avg_conf={result.average_confidence:.2f}, "
+            f"avg_conf={confidence_summary}, "
             f"elapsed={elapsed:.2f}s"
         )
         return result
@@ -1338,7 +1366,8 @@ class OCREngine:
 
             if show_text:
                 x, y = box.bbox[0]
-                label = f"{box.text} ({box.confidence:.0%})"
+                confidence_label = f"{box.confidence:.0%}" if box.confidence is not None else "?"
+                label = f"{box.text} ({confidence_label})"
                 cv2.putText(
                     canvas, label, (x, max(y - 5, 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale,
@@ -1389,6 +1418,7 @@ __all__ = [
     "LayoutResult",
     "OCRResult",
     "SymbolDecision",
+    "format_confidence",
     # Vision Preprocess
     "get_rotate_crop_image",
     "clean_crop_borders",

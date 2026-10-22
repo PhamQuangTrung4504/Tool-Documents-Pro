@@ -28,7 +28,7 @@ python -m venv venv
 venv\Scripts\activate
 
 # 3. Cài đặt thư viện
-pip install vietocr --no-deps ; pip install "einops>=0.6.0" "albumentations>=1.4.3" "Pillow>=10.4.0" ; pip install --no-deps -r requirements.txt ; pip install paddlepaddle paddleocr torch torchvision pymupdf opencv-python numpy scikit-image PyQt5 PyQt5-sip pyperclip loguru gdown symspellpy pyyaml tqdm lmdb python-docx
+pip install vietocr --no-deps ; pip install "einops>=0.6.0" "albumentations>=1.4.3" "Pillow>=10.4.0" ; pip install --no-deps -r requirements.txt ; pip install paddlepaddle paddleocr torch torchvision pymupdf opencv-python numpy scikit-image PyQt5 PyQt5-sip pyperclip loguru gdown symspellpy pyyaml tqdm lmdb python-docx pytest
 
 pip install -r requirements.txt(ko dùng)
 

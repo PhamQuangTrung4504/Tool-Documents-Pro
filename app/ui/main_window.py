@@ -88,7 +88,7 @@ from app.core.ocr_engine import (
     OCREngine,
     OCRResult,
     export_to_docx,
-    final_document_cleanup,
+    format_confidence,
     get_display_languages,
     get_lang_code,
 )
@@ -171,7 +171,6 @@ class OCRWorker(QThread):
             result = self._engine.recognize(
                 self._image, preprocess=True, denoise=True,
             )
-            result.full_text = final_document_cleanup(result.full_text)
             self.finished.emit(result)
 
         except Exception as exc:
@@ -1110,9 +1109,7 @@ class MainWindow(QMainWindow):
         self._current_result = result
 
         # Hiển thị kết quả text
-        cleaned_text = final_document_cleanup(result.full_text)
-        result.full_text = cleaned_text
-        self.text_result.setPlainText(cleaned_text)
+        self.text_result.setPlainText(result.full_text)
         self._document_dirty = False
         self.word_preview.set_notice("Đang tạo tài liệu Word và bản xem trước …")
         self.btn_export_docx.setEnabled(False)
@@ -1130,11 +1127,13 @@ class MainWindow(QMainWindow):
 
         # Cập nhật info
         avg_conf = result.average_confidence
-        conf_color = COLORS["success"] if avg_conf > 0.8 else COLORS["warning"]
+        conf_color = COLORS["success"] if avg_conf is not None and avg_conf > 0.8 else COLORS["warning"]
+        conf_text = format_confidence(avg_conf, as_percent=True)
+        conf_log = format_confidence(avg_conf)
         info_text = (
             f"✅ {result.num_lines} dòng  |  "
             f"Độ tin cậy: <span style='color:{conf_color};'>"
-            f"{avg_conf:.1%}</span>  |  "
+            f"{conf_text}</span>  |  "
             f"⏱ {result.elapsed_seconds:.2f}s"
         )
         self.label_info.setText(info_text)
@@ -1146,7 +1145,7 @@ class MainWindow(QMainWindow):
 
         logger.info(
             f"OCR result displayed: {result.num_lines} lines, "
-            f"avg_conf={avg_conf:.2f}"
+            f"avg_conf={conf_log}"
         )
 
     def _create_document_session(self, result: OCRResult) -> None:

@@ -37,3 +37,5 @@ python-docx>=0.8.11
 pyyaml>=6.0
 tqdm>=4.65.0
 lmdb>=1.4.0
+
+pytest>=8.3,<10

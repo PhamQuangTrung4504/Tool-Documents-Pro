@@ -434,81 +434,12 @@ class SpatialProjectionGraphEngine:
                 texts = [it["text"].strip() for it in cell_b if it["text"].strip()]
                 cell_text = " ".join(texts)
 
-                if cell_text and c_idx <= 2:
-                    rec_text, dec, _ = ContextSymbolRecovery.recover_bullets_and_pluses(cell_text)
-                    if dec == SymbolDecision.AUTO_CORRECT:
-                        cell_text = rec_text
-
                 row_texts.append(cell_text)
                 row_box_list.extend([it["box"] for it in cell_b])
 
             table_grid.append(row_texts)
             if row_box_list:
                 table_row_boxes.append(row_box_list)
-
-        # Chuẩn hóa thứ tự STT và nhận diện hàng con (Sub-row preservation & STT restoration)
-        is_stt_col = False
-        if table_grid and len(table_grid[0]) > 0:
-            is_stt_col = bool(re.match(r"^(?:STT|TT|SỐ\s*TT)$", table_grid[0][0].strip().upper()))
-
-        if is_stt_col and len(table_grid) > 1:
-            expected_stt = 1
-            main_row_min_x: Optional[float] = None
-
-            for r_idx in range(1, len(table_grid)):
-                row_texts = table_grid[r_idx]
-                r_boxes = rows[r_idx] if r_idx < len(rows) else []
-                c0_text = row_texts[0].strip()
-                main_text = row_texts[1].strip() if len(row_texts) > 1 else ""
-                main_lower = main_text.lower()
-
-                stt_boxes = [b for b in r_boxes if dividers[0] <= (b["left"] + b["right"]) / 2.0 < dividers[1]]
-                has_orig_digit = any(re.search(r"\d", b["text"]) for b in stt_boxes)
-
-                content_boxes = [b for b in r_boxes if len(dividers) > 2 and dividers[1] <= (b["left"] + b["right"]) / 2.0 < dividers[2]]
-                curr_min_x = min(b["left"] for b in content_boxes) if content_boxes else None
-
-                starts_with_bullet = (
-                    c0_text in {"+", "-", "*", "•", "%", "~", "—", "–", "·"}
-                    or re.match(r"^([+*•·%–\-~]|—|\b[FE47]\s+)", main_text) is not None
-                    or any(re.match(r"^([+*•·%–\-~]|—)$", b["text"].strip()) is not None for b in stt_boxes)
-                )
-
-                is_indented = False
-                if main_row_min_x is not None and curr_min_x is not None:
-                    if (curr_min_x - main_row_min_x) >= max(12.0, 0.6 * median_h):
-                        is_indented = True
-
-                main_stripped = re.sub(r"^[+*•%~—–\-·\s]+", "", main_lower).strip()
-                is_sub_condition = (
-                    re.search(r"^(từ\s+\d+|dưới\s+\d+|trên\s+\d+|không\s+có\s+|thời\s+gian\s+|chi\s+bộ\s+(?:dưới|trên)|ít\s+hơn|chỉ\s+bằng|vắng\s+mặt)", main_stripped) is not None
-                    or any(phrase in main_lower for phrase in [
-                        "ít hơn quy định", "chỉ bằng ½", "chỉ bằng %", "dưới ½", "dưới %",
-                        "vắng không có lý do", "vắng mặt có lý do", "quá 03 lần liên tiếp"
-                    ])
-                )
-
-                is_sub_row = (
-                    starts_with_bullet
-                    or is_indented
-                    or (not has_orig_digit and is_sub_condition)
-                )
-
-                if is_sub_row:
-                    if c0_text in {"+", "-", "*", "•", "%", "~", "—", "–", "·"}:
-                        row_texts[0] = c0_text
-                    else:
-                        row_texts[0] = ""
-                elif main_text:
-                    if curr_min_x is not None:
-                        main_row_min_x = curr_min_x
-                    m_num = re.search(r"^(\d+)", c0_text)
-                    if m_num:
-                        row_texts[0] = m_num.group(1)
-                        expected_stt = int(m_num.group(1)) + 1
-                    else:
-                        row_texts[0] = str(expected_stt)
-                        expected_stt += 1
 
         table_bbox = [
             int(min(b["left"] for b in boxes)),
@@ -742,15 +673,6 @@ def _recover_missing_cell_ink(
     img_h, img_w = image.shape[:2]
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
 
-    # Danh sách từ vựng ảo giác tiếng Anh do pretrain của VietOCR trên ảnh nhiễu/nền phẳng
-    HALLUCINATED_WORDS = {
-        "STATE", "COLINEDE", "CONG", "SET", "BET", "BLL", "DISMING", "COLLY",
-        "CORT", "CORILL", "CONSTE", "COLL", "COLES", "STOT", "STAN", "DERECH",
-        "CONGLE", "CONTINESS", "CONGER", "COLLER", "COLILY", "CONTH", "CAT",
-        "DISMIST", "CHA", "CORIL", "CONT", "COL", "BL", "ST",
-    }
-    VIET_VOWELS = r"[aàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵ]"
-
     for cell in cells:
         if cell.bbox is None or cell.text.strip():
             continue
@@ -851,26 +773,7 @@ def _recover_missing_cell_ink(
                 rec_text = ""
 
         import unicodedata
-        from app.core.text_postprocessor import VietnameseTextPostProcessor, final_document_cleanup
         rec_text = unicodedata.normalize("NFC", rec_text)
-        rec_text = VietnameseTextPostProcessor.clean_and_restore(rec_text)
-        rec_text = final_document_cleanup(rec_text).strip()
-
-        # 3. Bộ lọc từ vựng tiếng Việt nghiêm ngặt (Strict Vietnamese Linguistic Guard):
-        # Bác bỏ ngay lập tức nếu chứa các từ tiếng Anh ảo giác pretrain
-        clean_tokens = [re.sub(r"[^\w]", "", t).upper() for t in rec_text.split() if re.sub(r"[^\w]", "", t)]
-        if any(tok in HALLUCINATED_WORDS for tok in clean_tokens):
-            rec_text = ""
-
-        # Bác bỏ nếu chứa ký tự ngoại lai không có trong bảng chữ cái tiếng Việt chuẩn
-        if rec_text and re.search(r"[wWzZjJfF]", rec_text):
-            rec_text = ""
-
-        # Chỉ chấp nhận chuỗi nếu chứa nguyên âm tiếng Việt hợp lệ hoặc là số/phân số/ký hiệu
-        is_valid_num = bool(re.match(r"^[\d\.,\s/\-+–—½%()]+$", rec_text))
-        has_viet_vowel = bool(re.search(VIET_VOWELS, rec_text, re.IGNORECASE))
-        if not (is_valid_num or has_viet_vowel):
-            rec_text = ""
 
         if rec_text:
             cell.text = rec_text
@@ -878,7 +781,7 @@ def _recover_missing_cell_ink(
                 text=rec_text,
                 confidence=rec_conf,
                 bbox=[[crop_x1, crop_y1], [crop_x2, crop_y1], [crop_x2, crop_y2], [crop_x1, crop_y2]],
-                raw_text=rec_text,
+                raw_text=str(pred_res[0] if isinstance(pred_res, tuple) else pred_res),
             )
             cell.boxes.append(rec_box)
 
@@ -908,13 +811,21 @@ def extract_physical_table_topology(
     if img_h < 50 or img_w < 50:
         return None
 
+    # Scale pixel tolerances with the page rather than treating one scan DPI as
+    # universal. Normalized morphology lengths remain tied to the image axes.
+    geometry_scale = max(0.5, min(3.0, min(img_w, img_h) / 700.0))
+    coord_tolerance = max(2.0, 8.0 * geometry_scale)
+    intersection_tolerance = max(3.0, 10.0 * geometry_scale)
+    wall_radius = max(1, int(round(5.0 * geometry_scale)))
+    close_h = max(3, int(round(15.0 * geometry_scale)))
+
     # Bước 1 — Trích xuất mặt nạ vạch kẻ ngang & dọc
     thresh = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 5
     )
 
-    h_kernel_len = max(20, img_w // 45)
-    v_kernel_len = max(18, img_h // 45)
+    h_kernel_len = max(5, int(round(img_w * 0.025)))
+    v_kernel_len = max(5, int(round(img_h * 0.025)))
 
     h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_len, 1))
     v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
@@ -922,8 +833,8 @@ def extract_physical_table_topology(
     h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
     v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
 
-    h_mask = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)))
-    v_mask = cv2.morphologyEx(v_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)))
+    h_mask = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (close_h, 1)))
+    v_mask = cv2.morphologyEx(v_lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, close_h)))
 
     # Cô lập Khung Bảng Vật Lý Lớn Nhất (Largest Connected Grid ROI)
     grid_mask = cv2.bitwise_or(h_mask, v_mask)
@@ -944,8 +855,9 @@ def extract_physical_table_topology(
         return None
 
     gx, gy, gw, gh = table_roi
-    roi_x1, roi_y1 = max(0, gx - 5), max(0, gy - 5)
-    roi_x2, roi_y2 = min(img_w, gx + gw + 5), min(img_h, gy + gh + 5)
+    roi_padding = int(round(wall_radius))
+    roi_x1, roi_y1 = max(0, gx - roi_padding), max(0, gy - roi_padding)
+    roi_x2, roi_y2 = min(img_w, gx + gw + roi_padding), min(img_h, gy + gh + roi_padding)
 
     # Bước 2 — Xác định Hệ Lưới Trục Chuẩn (Grid Axes X0..XM và Y0..YN)
     h_contours, _ = cv2.findContours(h_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -983,31 +895,31 @@ def extract_physical_table_topology(
                 clusters[-1].append(c)
         return [float(np.mean(cl)) for cl in clusters]
 
-    raw_y = _cluster_coords([s[2] for s in h_segments], tol=8.0)
-    raw_x = _cluster_coords([s[2] for s in v_segments], tol=8.0)
+    raw_y = _cluster_coords([s[2] for s in h_segments], tol=coord_tolerance)
+    raw_x = _cluster_coords([s[2] for s in v_segments], tol=coord_tolerance)
 
     # Lọc trục chuẩn: trục ngang >= 35% table_w, trục dọc >= 35% table_h
     valid_y: List[float] = []
     for yk in raw_y:
-        matching_h = [s for s in h_segments if abs(s[2] - yk) <= 8.0]
+        matching_h = [s for s in h_segments if abs(s[2] - yk) <= coord_tolerance]
         cov_h = _segment_coverage([(s[0], s[1]) for s in matching_h])
-        intersecting_v = sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10))
+        intersecting_v = sum(1 for (y1, y2, _) in v_segments if (y1 - intersection_tolerance) <= yk <= (y2 + intersection_tolerance))
         if cov_h >= 0.35 * gw and intersecting_v >= 2:
             valid_y.append(yk)
 
     valid_x: List[float] = []
     for xk in raw_x:
-        matching_v = [s for s in v_segments if abs(s[2] - xk) <= 8.0]
+        matching_v = [s for s in v_segments if abs(s[2] - xk) <= coord_tolerance]
         cov_v = _segment_coverage([(s[0], s[1]) for s in matching_v])
-        intersecting_h = sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10))
+        intersecting_h = sum(1 for (x1, x2, _) in h_segments if (x1 - intersection_tolerance) <= xk <= (x2 + intersection_tolerance))
         if cov_v >= 0.35 * gh and intersecting_h >= 2:
             valid_x.append(xk)
 
     # Fallback an toàn nếu đường kẻ mờ hoặc đứt nét
     if len(valid_y) < 2:
-        valid_y = [yk for yk in raw_y if sum(1 for (y1, y2, _) in v_segments if (y1 - 10) <= yk <= (y2 + 10)) >= 2]
+        valid_y = [yk for yk in raw_y if sum(1 for (y1, y2, _) in v_segments if (y1 - intersection_tolerance) <= yk <= (y2 + intersection_tolerance)) >= 2]
     if len(valid_x) < 2:
-        valid_x = [xk for xk in raw_x if sum(1 for (x1, x2, _) in h_segments if (x1 - 10) <= xk <= (x2 + 10)) >= 2]
+        valid_x = [xk for xk in raw_x if sum(1 for (x1, x2, _) in h_segments if (x1 - intersection_tolerance) <= xk <= (x2 + intersection_tolerance)) >= 2]
 
     valid_y.sort()
     valid_x.sort()
@@ -1023,7 +935,7 @@ def extract_physical_table_topology(
             x
             for x in valid_x
             if any(
-                abs(seg_x - x) <= 8.0
+                abs(seg_x - x) <= coord_tolerance
                 and y1 <= valid_y[-1] + 8.0
                 and y2 >= img_h - 1
                 for y1, y2, seg_x in v_segments
@@ -1118,8 +1030,8 @@ def extract_physical_table_topology(
 
         for c in range(M - 1):
             x_wall = valid_x[c + 1]
-            x_min = int(max(0, x_wall - 5))
-            x_max = int(min(img_w, x_wall + 6))
+            x_min = int(max(0, x_wall - wall_radius))
+            x_max = int(min(img_w, x_wall + wall_radius + 1))
 
             strip = v_mask[y_start:y_end, x_min:x_max]
             if strip.size > 0:
@@ -1130,8 +1042,8 @@ def extract_physical_table_topology(
 
     for r in range(N - 1):
         y_wall = valid_y[r + 1]
-        y_min = int(max(0, y_wall - 5))
-        y_max = int(min(img_h, y_wall + 6))
+        y_min = int(max(0, y_wall - wall_radius))
+        y_max = int(min(img_h, y_wall + wall_radius + 1))
 
         for c in range(M):
             x_left = valid_x[c]
@@ -1211,47 +1123,33 @@ def extract_physical_table_topology(
         bcx = (bx1 + bx2) / 2.0
         bcy = (by1 + by2) / 2.0
 
-        if bcy < valid_y[0] - 10 or bcy > valid_y[-1] + 10 or bcx < valid_x[0] - 15 or bcx > valid_x[-1] + 15:
+        if bcy < valid_y[0] - intersection_tolerance or bcy > valid_y[-1] + intersection_tolerance or bcx < valid_x[0] - intersection_tolerance or bcx > valid_x[-1] + intersection_tolerance:
             continue
 
-        assigned_cell: Optional[TableCell] = None
+        ranked_cells: List[Tuple[float, float, TableCell]] = []
+        box_area = max(1.0, (bx2 - bx1) * (by2 - by1))
         for cell in cells:
             if cell.bbox is None:
                 continue
             x1, y1, x2, y2 = cell.bbox
-            if (x1 - 8) <= bcx <= (x2 + 8) and (y1 - 8) <= bcy <= (y2 + 8):
-                assigned_cell = cell
-                break
+            inter_x = max(0.0, min(x2, bx2) - max(x1, bx1))
+            inter_y = max(0.0, min(y2, by2) - max(y1, by1))
+            coverage = (inter_x * inter_y) / box_area
+            contains_center = x1 <= bcx <= x2 and y1 <= bcy <= y2
+            ranked_cells.append((coverage, 1.0 if contains_center else 0.0, cell))
 
-        if assigned_cell is None:
-            best_ioa = 0.0
-            for cell in cells:
-                if cell.bbox is None:
-                    continue
-                x1, y1, x2, y2 = cell.bbox
-                inter_x = max(0.0, min(x2, bx2) - max(x1, bx1))
-                inter_y = max(0.0, min(y2, by2) - max(y1, by1))
-                inter_area = inter_x * inter_y
-                b_area = max(1.0, (bx2 - bx1) * (by2 - by1))
-                ioa = inter_area / b_area
-                if ioa > best_ioa:
-                    best_ioa = ioa
-                    assigned_cell = cell
-            if best_ioa < 0.15:
-                assigned_cell = None
-
-        if assigned_cell is None and (valid_y[0] - 10 <= bcy <= valid_y[-1] + 10 and valid_x[0] - 12 <= bcx <= valid_x[-1] + 12):
-            min_dist = float("inf")
-            for cell in cells:
-                if cell.bbox is None:
-                    continue
-                cx1, cy1, cx2, cy2 = cell.bbox
-                ccx = (cx1 + cx2) / 2.0
-                ccy = (cy1 + cy2) / 2.0
-                dist = (bcx - ccx) ** 2 + (bcy - ccy) ** 2
-                if dist < min_dist:
-                    min_dist = dist
-                    assigned_cell = cell
+        ranked_cells.sort(key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
+        assigned_cell: Optional[TableCell] = None
+        if ranked_cells:
+            best_coverage, contains_center, best_cell = ranked_cells[0]
+            second_coverage = ranked_cells[1][0] if len(ranked_cells) > 1 else 0.0
+            # A box crossing unrelated cells is left unassigned unless one
+            # candidate has clear geometric support. Never use nearest-cell
+            # fallback to manufacture ownership outside the box's ink region.
+            clear_coverage_lead = best_coverage - second_coverage >= 0.15
+            contained_dominant = contains_center and second_coverage <= 0.25
+            if best_coverage >= 0.45 and (clear_coverage_lead or contained_dominant):
+                assigned_cell = best_cell
 
         if assigned_cell is not None:
             assigned_cell.boxes.append(b)
@@ -1285,23 +1183,7 @@ def extract_physical_table_topology(
             if line_txt:
                 line_strings.append(line_txt)
 
-        # Nối dòng thông minh trong ô:
-        # Nếu dòng trên kết thúc bằng mã loại đất (ONT+CL, ONT-CL) và dòng dưới là N -> ONT+CLN
-        merged_line_str = ""
-        for lt in line_strings:
-            if not merged_line_str:
-                merged_line_str = lt
-            else:
-                if re.search(r"(?:ONT|CLN|HNK|LUC|BHK|RSX|RPH|NTS)[+\-][A-Z]{1,3}$", merged_line_str, re.IGNORECASE) and re.match(r"^[A-Z]{1,2}$", lt):
-                    merged_line_str += lt
-                elif re.search(r"ONT[+\-]CL$", merged_line_str, re.IGNORECASE) and re.match(r"^N$", lt, re.IGNORECASE):
-                    merged_line_str += lt
-                else:
-                    merged_line_str += " " + lt
-
-        raw_cell_txt = merged_line_str.strip()
-        from app.core.text_postprocessor import final_document_cleanup
-        cell.text = final_document_cleanup(raw_cell_txt)
+        cell.text = " ".join(line_strings).strip()
 
     # Bước 4.b — Khôi phục nét chữ cho các ô bị DBNet bỏ sót (Empty-Cell Ink Recovery)
     _recover_missing_cell_ink(cells, image, vietocr_model=vietocr_model)
@@ -1320,6 +1202,33 @@ def extract_physical_table_topology(
     grid, cells, row_boxes, N = _filter_empty_rows(grid, cells, row_boxes, N, M)
 
     table_bbox = [int(valid_x[0]), int(valid_y[0]), int(valid_x[-1]), int(valid_y[-1])]
+    edge_threshold = 0.40
+
+    def _has_edge(mask: np.ndarray, start: int, stop: int, fixed: int, horizontal: bool) -> bool:
+        radius = wall_radius
+        if horizontal:
+            start, stop = max(0, start + radius), min(img_w, stop - radius)
+            lo, hi = max(0, fixed - radius), min(img_h, fixed + radius + 1)
+            strip = mask[lo:hi, start:stop] if stop > start else np.empty((0, 0), dtype=np.uint8)
+            evidence = np.any(strip > 0, axis=0) if strip.size else np.array([], dtype=bool)
+        else:
+            start, stop = max(0, start + radius), min(img_h, stop - radius)
+            lo, hi = max(0, fixed - radius), min(img_w, fixed + radius + 1)
+            strip = mask[start:stop, lo:hi] if stop > start else np.empty((0, 0), dtype=np.uint8)
+            evidence = np.any(strip > 0, axis=1) if strip.size else np.array([], dtype=bool)
+        return bool(evidence.size and float(np.mean(evidence)) >= edge_threshold)
+
+    for cell in cells:
+        if cell.bbox is None:
+            continue
+        x1, y1, x2, y2 = cell.bbox
+        cell.border_edges = {
+            "top": _has_edge(h_mask, x1, x2, y1, horizontal=True),
+            "bottom": _has_edge(h_mask, x1, x2, y2, horizontal=True),
+            "left": _has_edge(v_mask, y1, y2, x1, horizontal=False),
+            "right": _has_edge(v_mask, y1, y2, x2, horizontal=False),
+        }
+
     result = OCRTable(
         grid=grid,
         bbox=table_bbox,
@@ -1327,6 +1236,8 @@ def extract_physical_table_topology(
         num_cols=M,
         row_boxes=row_boxes,
         cells=cells,
+        column_boundaries=list(valid_x),
+        row_boundaries=list(valid_y) if len(valid_y) == N + 1 else [],
     )
     if diagnostics is not None:
         box_indexes = {id(box): index for index, box in enumerate(boxes)}
@@ -1519,11 +1430,10 @@ def split_table_crossing_boxes(
                     sub_text = ""
 
             sub_text = unicodedata.normalize("NFC", sub_text)
-            sub_text = VietnameseTextPostProcessor.clean_and_restore(sub_text)
 
             if sub_text:
                 sub_boxes_for_b.append(
-                    OCRBox(text=sub_text, confidence=sub_conf, bbox=sub_bbox, raw_text=sub_text)
+                    OCRBox(text=sub_text, confidence=sub_conf, bbox=sub_bbox, raw_text=str(pred_res[0] if isinstance(pred_res, tuple) else pred_res))
                 )
 
         if sub_boxes_for_b:
