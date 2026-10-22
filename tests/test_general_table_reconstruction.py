@@ -570,3 +570,26 @@ def test_docx_export_honors_explicit_visual_format_metadata(tmp_path):
     assert paragraph.runs[0].bold is True
     assert paragraph.runs[0].italic is True
     assert paragraph.runs[0].font.size.pt == 14
+
+
+def test_docx_export_preserves_unknown_heading_style_and_explicit_regular_style(tmp_path):
+    import docx
+    from app.core.docx_exporter import export_to_docx
+
+    result = OCRResult(document_blocks=[
+        DocumentBlock("heading", 0, text="Uncertain heading", metadata={
+            "format": {"bold_evidence": {"status": "unknown"}},
+        }),
+        DocumentBlock("heading", 1, text="Verified regular heading", metadata={
+            "format": {"bold": False, "bold_evidence": {"status": "supported_regular"}},
+        }),
+        DocumentBlock("heading", 2, text="Legacy heading"),
+    ])
+    output = tmp_path / "tri_state_style.docx"
+
+    assert export_to_docx(result, str(output))
+
+    paragraphs = docx.Document(output).paragraphs
+    assert paragraphs[0].runs[0].bold is None
+    assert paragraphs[1].runs[0].bold is False
+    assert paragraphs[2].runs[0].bold is True

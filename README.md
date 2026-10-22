@@ -49,6 +49,12 @@ Remove-Item -Recurse -Force venv
 python run.py
 ```
 
+## 📊 Đo chất lượng OCR
+
+Benchmark yêu cầu ground truth do người dùng kiểm tra thủ công; chưa có ground truth thì không tính điểm. Xem [hướng dẫn benchmark OCR](docs/ocr_quality_benchmark.md) để tạo manifest ngoài repository, chạy baseline/phiên bản thử nghiệm và so sánh CER, WER, ký hiệu, bảng và thời gian riêng biệt.
+
+Để đối chiếu ảnh và nhập ground truth theo đoạn hoặc ô bảng, chạy `python scripts/ground_truth_annotator.py --manifest <manifest.json>`. Xem thêm [hướng dẫn công cụ annotation](docs/ground_truth_annotation.md).
+
 Ứng dụng sẽ mở cửa sổ chính với giao diện đồ hoạ cho phép:
 
 1. **Mở ảnh** — chọn file ảnh từ máy tính (PNG, JPG, BMP, TIFF, WebP).

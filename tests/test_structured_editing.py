@@ -172,3 +172,18 @@ def test_docx_export_preserves_table_merge_format_and_only_confirmed_text(tmp_pa
     assert word_table.cell(1, 2).text == "5"
     assert document.paragraphs[0].runs[0].bold is True
     assert "Name" not in "\n".join([p.text for p in document.paragraphs] + [word_table.cell(0, 0).text])
+
+
+def test_structured_edit_keeps_unknown_style_unknown_in_export(tmp_path):
+    result = structured_result()
+    result.document_blocks[0].metadata["format"] = {
+        "bold_evidence": {"status": "unknown"},
+    }
+    editor = StructuredDocumentEditor(result)
+    editor.apply_box_correction(0, "Confirmed title")
+    output = tmp_path / "unknown_style_edit.docx"
+
+    assert export_to_docx(editor.result, str(output))
+    document = Document(output)
+    assert document.paragraphs[0].text == "Confirmed title"
+    assert document.paragraphs[0].runs[0].bold is None

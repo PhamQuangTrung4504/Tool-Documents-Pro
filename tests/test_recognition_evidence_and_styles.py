@@ -116,6 +116,41 @@ def test_caps_are_not_bold_evidence_and_unknown_style_stays_unknown():
     assert "italic" not in caps_format
 
 
+def test_skeleton_thickness_detects_bold_when_distance_peaks_are_quantized(monkeypatch, tmp_path):
+    import app.core.document_diagnostics as style_module
+    from docx import Document
+    from app.core.docx_exporter import export_to_docx
+    from app.core.models import OCRResult
+
+    image = np.full((150, 360, 3), 255, dtype=np.uint8)
+    text = "II. SECTION HEADING"
+    boxes = []
+    blocks = []
+    for index, (baseline, thickness) in enumerate(((28, 1), (58, 1), (88, 1), (118, 2))):
+        (width, height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, thickness)
+        cv2.putText(image, text, (20, baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    (0, 0, 0), thickness, cv2.LINE_AA)
+        box = OCRBox(text, 1.0, [[20, baseline-height], [20+width, baseline-height],
+                                 [20+width, baseline], [20, baseline]])
+        boxes.append(box)
+        blocks.append(DocumentBlock("paragraph", index, text=text, box_indices=[index]))
+
+    # Emulate the low-resolution condition observed in real scans: the old
+    # distance-transform median is identical for regular and bold boxes.
+    monkeypatch.setattr(style_module, "_stroke_width", lambda _crop: 1.91)
+    infer_visual_document_styles(blocks, boxes, image)
+
+    assert [block.metadata["format"].get("bold") is True for block in blocks] == [False, False, False, True]
+    evidence = blocks[-1].metadata["format"]["bold_evidence"]
+    assert evidence["signals"]["stroke_width"] == "unknown"
+    assert evidence["signals"]["skeleton_thickness"] == "supported"
+
+    output = tmp_path / "skeleton_bold.docx"
+    assert export_to_docx(OCRResult(boxes=boxes, document_blocks=blocks), str(output))
+    runs = [paragraph.runs[0] for paragraph in Document(output).paragraphs]
+    assert [run.bold for run in runs] == [None, None, None, True]
+
+
 def test_table_edge_boxes_do_not_inflate_paragraph_bold_measurement():
     image = np.full((220, 520, 3), 255, dtype=np.uint8)
     body_boxes = [_put_line(image, f"Normal body {i}", 35 + i*38) for i in range(4)]

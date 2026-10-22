@@ -66,3 +66,33 @@
 2026-10-22 10:29:19 | INFO     | app.core.ocr_engine:clear_cache:445 | OCREngine cache cleared.
 2026-10-22 10:29:19 | INFO     | app.ui.main_window:closeEvent:1625 | MainWindow closed.
 2026-10-22 10:29:19 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-22 16:49:01 | INFO     | __main__:main:71 | ============================================================
+2026-10-22 16:49:01 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-22 16:49:01 | INFO     | __main__:main:73 | ============================================================
+2026-10-22 16:49:01 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-22 16:49:02 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-22 16:49:03 | INFO     | app.ui.main_window:__init__:602 | MainWindow initialized.
+2026-10-22 16:49:03 | INFO     | __main__:main:131 | Application window opened.
+2026-10-22 16:49:20 | INFO     | app.ui.main_window:_load_image_from_path:1003 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang4.png ((467, 729, 3))
+2026-10-22 16:49:21 | INFO     | app.core.ocr_engine:get_global_detector:608 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-22 16:49:22 | INFO     | app.core.ocr_engine:get_global_detector:644 | PaddleOCR detector singleton initialized successfully.
+2026-10-22 16:49:24 | INFO     | app.core.ocr_engine:get_global_vietocr:668 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-22 16:49:29 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-22 16:49:29 | INFO     | app.core.ocr_engine:_ensure_loaded:780 | Hybrid OCR engines ready in 7.85s.
+2026-10-22 16:49:29 | DEBUG    | app.core.ocr_engine:recognize:1161 | Running PaddleOCR Text Detection …
+2026-10-22 16:49:37 | DEBUG    | app.core.ocr_engine:recognize:1386 | Recognizing 44 text lines with VietOCR (vgg_transformer) …
+2026-10-22 16:49:50 | INFO     | app.core.ocr_engine:recognize:1899 | Hybrid OCR completed: 16 lines, 1 tables detected, avg_conf=N/A, elapsed=21.63s
+2026-10-22 16:49:50 | INFO     | app.ui.main_window:_on_ocr_finished:1219 | OCR result displayed: 16 lines, avg_conf=N/A
+2026-10-22 16:49:51 | INFO     | app.core.docx_exporter:export_to_docx:546 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\09b33d6fb0a941f982bf5a55bbb2fc98\document.docx
+2026-10-22 16:51:17 | INFO     | app.ui.main_window:_load_image_from_path:1003 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang2.png ((761, 1123, 3))
+2026-10-22 16:51:18 | DEBUG    | app.core.ocr_engine:recognize:1161 | Running PaddleOCR Text Detection …
+2026-10-22 16:51:36 | DEBUG    | app.core.ocr_engine:recognize:1386 | Recognizing 94 text lines with VietOCR (vgg_transformer) …
+2026-10-22 16:52:11 | INFO     | app.core.ocr_engine:recognize:1899 | Hybrid OCR completed: 17 lines, 1 tables detected, avg_conf=N/A, elapsed=52.76s
+2026-10-22 16:52:11 | INFO     | app.ui.main_window:_on_ocr_finished:1219 | OCR result displayed: 17 lines, avg_conf=N/A
+2026-10-22 16:52:11 | INFO     | app.core.docx_exporter:export_to_docx:546 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\0ebaf70060ce4dd0ba51f23bf354d828\document.docx
+2026-10-22 16:54:10 | INFO     | app.core.docx_exporter:export_to_docx:546 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\be2938d2e46f407eaf9998c7a79df712\document.docx
+2026-10-22 16:54:46 | INFO     | app.ui.main_window:_on_export_docx:1414 | Result exported to DOCX: C:\Users\pqtru\Downloads\h6.docx
+2026-10-22 16:55:13 | INFO     | app.core.docx_exporter:export_to_docx:546 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\97f9d42a8a8848c9b9d55dd9a86fd08c\document.docx
+2026-10-22 16:58:55 | INFO     | app.core.ocr_engine:clear_cache:743 | OCREngine cache cleared.
+2026-10-22 16:58:55 | INFO     | app.ui.main_window:closeEvent:1968 | MainWindow closed.
+2026-10-22 16:58:55 | INFO     | __main__:main:134 | Application exited with code 0.

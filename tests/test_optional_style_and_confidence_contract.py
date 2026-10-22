@@ -78,6 +78,35 @@ def test_optional_alignment_metadata_is_safe_with_and_without_table():
     assert unknown.metadata["format"]["bold_evidence"]["status"] == "unknown"
 
 
+def test_style_inference_preserves_independent_format_and_recomputes_old_bold_evidence():
+    image = np.full((80, 300, 3), 255, dtype=np.uint8)
+    boxes = [_box("One line", 20, 20, 120, 40)]
+    block = DocumentBlock("paragraph", 0, text="One line", box_indices=[0], metadata={
+        "format": {
+            "italic": True,
+            "font_size_pt": 15,
+            "alignment": "right",
+            "bold": True,
+            "bold_evidence": {"status": "supported", "relative_stroke_width": 1.5},
+        },
+    })
+
+    infer_visual_document_styles([block], boxes, image)
+
+    fmt = block.metadata["format"]
+    assert fmt["italic"] is True
+    assert fmt["font_size_pt"] == 15
+    assert fmt["alignment"] == "right"
+    assert "bold" not in fmt
+    assert fmt["bold_evidence"]["status"] == "unknown"
+
+    explicitly_regular = DocumentBlock("paragraph", 0, text="One line", box_indices=[0], metadata={
+        "format": {"bold": False, "bold_evidence": {"status": "unknown"}},
+    })
+    infer_visual_document_styles([explicitly_regular], boxes, image)
+    assert explicitly_regular.metadata["format"]["bold"] is False
+
+
 def test_average_confidence_distinguishes_missing_partial_and_zero_scores():
     def result(scores):
         return OCRResult(boxes=[

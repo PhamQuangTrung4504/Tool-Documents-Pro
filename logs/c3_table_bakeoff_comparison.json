@@ -34,7 +34,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 18.16
+            "elapsed_ms": 17.56
           },
           {
             "sample_id": "sample_02_borderless_financial",
@@ -50,12 +50,12 @@
             },
             "error_count": 20,
             "failure_modes": [
-              "MULTI_LINE_SPLIT",
-              "TEXT_MISMATCH",
               "MISSING_CELL",
-              "HEADER_DROP"
+              "HEADER_DROP",
+              "MULTI_LINE_SPLIT",
+              "TEXT_MISMATCH"
             ],
-            "elapsed_ms": 10.13
+            "elapsed_ms": 10.38
           },
           {
             "sample_id": "sample_03_merged_cells_header",
@@ -71,7 +71,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 9.19
+            "elapsed_ms": 9.58
           },
           {
             "sample_id": "sample_04_dense_7cols",
@@ -87,7 +87,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 11.81
+            "elapsed_ms": 9.82
           },
           {
             "sample_id": "sample_05_noisy_broken_grid",
@@ -105,7 +105,7 @@
             "failure_modes": [
               "TEXT_MISMATCH"
             ],
-            "elapsed_ms": 5.54
+            "elapsed_ms": 5.63
           }
         ]
       },
@@ -113,7 +113,7 @@
         {
           "sample_id": "sample_01_bordered_admin",
           "category": "bordered",
-          "elapsed_ms": 18.16,
+          "elapsed_ms": 17.56,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -834,7 +834,7 @@
         {
           "sample_id": "sample_02_borderless_financial",
           "category": "borderless",
-          "elapsed_ms": 10.13,
+          "elapsed_ms": 10.38,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 0.6,
@@ -1351,7 +1351,7 @@
         {
           "sample_id": "sample_03_merged_cells_header",
           "category": "merged_cells",
-          "elapsed_ms": 9.19,
+          "elapsed_ms": 9.58,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -1736,7 +1736,7 @@
         {
           "sample_id": "sample_04_dense_7cols",
           "category": "multi_column_dense",
-          "elapsed_ms": 11.81,
+          "elapsed_ms": 9.82,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -2406,7 +2406,7 @@
         {
           "sample_id": "sample_05_noisy_broken_grid",
           "category": "noisy_scan",
-          "elapsed_ms": 5.54,
+          "elapsed_ms": 5.63,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -2631,7 +2631,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 1.71
+            "elapsed_ms": 1.77
           },
           {
             "sample_id": "sample_02_borderless_financial",
@@ -2647,7 +2647,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 1.4
+            "elapsed_ms": 1.68
           },
           {
             "sample_id": "sample_03_merged_cells_header",
@@ -2663,7 +2663,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 1.65
+            "elapsed_ms": 1.82
           },
           {
             "sample_id": "sample_04_dense_7cols",
@@ -2679,7 +2679,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 1.93
+            "elapsed_ms": 1.97
           },
           {
             "sample_id": "sample_05_noisy_broken_grid",
@@ -2695,7 +2695,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 1.06
+            "elapsed_ms": 1.11
           }
         ]
       },
@@ -2703,7 +2703,7 @@
         {
           "sample_id": "sample_01_bordered_admin",
           "category": "bordered",
-          "elapsed_ms": 1.71,
+          "elapsed_ms": 1.77,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -3109,7 +3109,7 @@
         {
           "sample_id": "sample_02_borderless_financial",
           "category": "borderless",
-          "elapsed_ms": 1.4,
+          "elapsed_ms": 1.68,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -3401,7 +3401,7 @@
         {
           "sample_id": "sample_03_merged_cells_header",
           "category": "merged_cells",
-          "elapsed_ms": 1.65,
+          "elapsed_ms": 1.82,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -3629,7 +3629,7 @@
         {
           "sample_id": "sample_04_dense_7cols",
           "category": "multi_column_dense",
-          "elapsed_ms": 1.93,
+          "elapsed_ms": 1.97,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -4004,7 +4004,7 @@
         {
           "sample_id": "sample_05_noisy_broken_grid",
           "category": "noisy_scan",
-          "elapsed_ms": 1.06,
+          "elapsed_ms": 1.11,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -4191,7 +4191,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 0.74
+            "elapsed_ms": 0.86
           },
           {
             "sample_id": "sample_02_borderless_financial",
@@ -4207,7 +4207,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 0.6
+            "elapsed_ms": 0.69
           },
           {
             "sample_id": "sample_03_merged_cells_header",
@@ -4223,7 +4223,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 0.42
+            "elapsed_ms": 0.43
           },
           {
             "sample_id": "sample_04_dense_7cols",
@@ -4239,7 +4239,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 0.75
+            "elapsed_ms": 0.82
           },
           {
             "sample_id": "sample_05_noisy_broken_grid",
@@ -4255,7 +4255,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 0.2
+            "elapsed_ms": 0.22
           }
         ]
       },
@@ -4263,7 +4263,7 @@
         {
           "sample_id": "sample_01_bordered_admin",
           "category": "bordered",
-          "elapsed_ms": 0.74,
+          "elapsed_ms": 0.86,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -4669,7 +4669,7 @@
         {
           "sample_id": "sample_02_borderless_financial",
           "category": "borderless",
-          "elapsed_ms": 0.6,
+          "elapsed_ms": 0.69,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -4961,7 +4961,7 @@
         {
           "sample_id": "sample_03_merged_cells_header",
           "category": "merged_cells",
-          "elapsed_ms": 0.42,
+          "elapsed_ms": 0.43,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -5189,7 +5189,7 @@
         {
           "sample_id": "sample_04_dense_7cols",
           "category": "multi_column_dense",
-          "elapsed_ms": 0.75,
+          "elapsed_ms": 0.82,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -5564,7 +5564,7 @@
         {
           "sample_id": "sample_05_noisy_broken_grid",
           "category": "noisy_scan",
-          "elapsed_ms": 0.2,
+          "elapsed_ms": 0.22,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -5751,7 +5751,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 10.51
+            "elapsed_ms": 10.71
           },
           {
             "sample_id": "sample_02_borderless_financial",
@@ -5767,7 +5767,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 3.67
+            "elapsed_ms": 3.63
           },
           {
             "sample_id": "sample_03_merged_cells_header",
@@ -5783,7 +5783,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 10.14
+            "elapsed_ms": 11.82
           },
           {
             "sample_id": "sample_04_dense_7cols",
@@ -5799,7 +5799,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 10.73
+            "elapsed_ms": 10.33
           },
           {
             "sample_id": "sample_05_noisy_broken_grid",
@@ -5815,7 +5815,7 @@
             },
             "error_count": 0,
             "failure_modes": [],
-            "elapsed_ms": 2.72
+            "elapsed_ms": 2.64
           }
         ]
       },
@@ -5823,7 +5823,7 @@
         {
           "sample_id": "sample_01_bordered_admin",
           "category": "bordered",
-          "elapsed_ms": 10.51,
+          "elapsed_ms": 10.71,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -6229,7 +6229,7 @@
         {
           "sample_id": "sample_02_borderless_financial",
           "category": "borderless",
-          "elapsed_ms": 3.67,
+          "elapsed_ms": 3.63,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -6521,7 +6521,7 @@
         {
           "sample_id": "sample_03_merged_cells_header",
           "category": "merged_cells",
-          "elapsed_ms": 10.14,
+          "elapsed_ms": 11.82,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -6749,7 +6749,7 @@
         {
           "sample_id": "sample_04_dense_7cols",
           "category": "multi_column_dense",
-          "elapsed_ms": 10.73,
+          "elapsed_ms": 10.33,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,
@@ -7124,7 +7124,7 @@
         {
           "sample_id": "sample_05_noisy_broken_grid",
           "category": "noisy_scan",
-          "elapsed_ms": 2.72,
+          "elapsed_ms": 2.64,
           "metrics": {
             "table_detected_exact": 1.0,
             "row_count_accuracy": 1.0,

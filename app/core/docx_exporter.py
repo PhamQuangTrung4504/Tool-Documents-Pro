@@ -529,10 +529,17 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             run = p.add_run(line_str)
             run.font.name = "Times New Roman"
             run.font.size = Pt(visual_format.get("font_size_pt", 13 if block.kind == "heading" else 12))
-            if visual_format.get("bold") is True or ("bold" not in visual_format and block.kind == "heading"):
+            # Preserve three-state style semantics: explicit True/False is
+            # authoritative, and evidence marked unknown must not be promoted
+            # to bold merely because the structural block is a heading.
+            if "bold" in visual_format:
+                run.bold = visual_format["bold"] if isinstance(visual_format["bold"], bool) else None
+            elif "bold_evidence" not in visual_format and block.kind == "heading":
+                # Compatibility for legacy heading blocks without visual
+                # style metadata.
                 run.bold = True
-            if visual_format.get("italic") is True:
-                run.italic = True
+            if "italic" in visual_format and isinstance(visual_format["italic"], bool):
+                run.italic = visual_format["italic"]
         # If geometry-linked legacy fallback could not include tables because
         # there were no OCRBox ownership links, do not silently misplace them.
         legacy_ambiguous = bool(result.tables and result.full_text.strip() and not result.boxes and not result.document_blocks)
