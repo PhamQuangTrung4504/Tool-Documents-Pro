@@ -216,10 +216,23 @@ def _stroke_width(gray_crop: np.ndarray) -> Optional[float]:
     return float(2.0 * np.median(peaks)) if peaks.size else None
 
 
+def _stroke_measurement_rect(rect: list[int], width: int, height: int) -> list[int]:
+    left, top, right, bottom = rect
+    left, top = max(0, left), max(0, top)
+    right, bottom = min(width, right), min(height, bottom)
+    crop_width, crop_height = max(0, right-left), max(0, bottom-top)
+    inset_y = max(1, int(round(crop_height * 0.04)))
+    inset_x = max(1, int(round(crop_width * 0.015)))
+    if crop_height > 2 * inset_y and crop_width > 2 * inset_x:
+        return [left + inset_x, top + inset_y, right - inset_x, bottom - inset_y]
+    return [left, top, right, bottom]
+
+
 def infer_visual_document_styles(
     blocks: list[DocumentBlock],
     boxes: list[OCRBox],
     source_image: np.ndarray,
+    diagnostics: Optional[list[dict[str, Any]]] = None,
 ) -> list[DocumentBlock]:
     """Attach conservative, relative visual style evidence to OCR blocks.
 
@@ -245,9 +258,10 @@ def infer_visual_document_styles(
     valid_heights = [value for value in box_heights if value > 0]
     median_height = float(median(valid_heights)) if valid_heights else 0.0
 
-    for block in blocks:
+    for block_index, block in enumerate(blocks):
         if block.kind not in {"paragraph", "heading", "caption", "parallel_header"}:
             continue
+        kind_before_style = block.kind
         if not isinstance(block.metadata, dict):
             block.metadata = {}
         valid_indices = [index for index in block.box_indices if 0 <= index < len(boxes)]
@@ -274,19 +288,50 @@ def infer_visual_document_styles(
         ratios = []
         peer_counts = []
         comparable_peer_counts = []
+        comparison_records: list[dict[str, Any]] = []
         for index in valid_indices:
             current = stroke_widths[index]
             if current is None:
                 continue
-            peers = [
-                stroke_widths[peer]
-                for peer in range(len(boxes))
-                if peer != index
-                and peer not in table_box_indices
-                and 0.75 <= box_heights[peer] / max(1, box_heights[index]) <= 1.33
-                and stroke_widths[peer] is not None
-            ]
+            if diagnostics is None:
+                peers = [
+                    stroke_widths[peer]
+                    for peer in range(len(boxes))
+                    if peer != index
+                    and peer not in table_box_indices
+                    and 0.75 <= box_heights[peer] / max(1, box_heights[index]) <= 1.33
+                    and stroke_widths[peer] is not None
+                ]
+                peer_indices: list[int] = []
+            else:
+                peer_indices = [
+                    peer
+                    for peer in range(len(boxes))
+                    if peer != index
+                    and peer not in table_box_indices
+                    and 0.75 <= box_heights[peer] / max(1, box_heights[index]) <= 1.33
+                    and stroke_widths[peer] is not None
+                ]
+                peers = [stroke_widths[peer] for peer in peer_indices]
             comparable_peer_counts.append(len(peers))
+            if diagnostics is not None:
+                peer_median = float(median(peers)) if peers else None
+                comparison_records.append({
+                    "box_index": index,
+                    "bbox": rects[index],
+                    "measurement_bbox": _stroke_measurement_rect(rects[index], width, height),
+                    "stroke_width": current,
+                    "peer_box_indices": peer_indices,
+                    "peers": [
+                        {"box_index": peer, "bbox": rects[peer],
+                         "measurement_bbox": _stroke_measurement_rect(rects[peer], width, height),
+                         "stroke_width": stroke_widths[peer], "height": box_heights[peer]}
+                        for peer in peer_indices
+                    ],
+                    "peer_stroke_widths": peers,
+                    "peer_median_stroke_width": peer_median,
+                    "relative_stroke_width": current / peer_median if peer_median else None,
+                })
             if len(peers) >= 3:
                 ratios.append(current / max(float(median(peers)), 1e-6))
                 peer_counts.append(len(peers))
@@ -312,4 +357,31 @@ def infer_visual_document_styles(
         if block.bbox and len(block.bbox) >= 4:
             fmt["bbox_source"] = "ocr_geometry"
         block.metadata["format"] = fmt
+        if diagnostics is not None:
+            diagnostics.append({
+                "block_index": block_index,
+                "kind_before_style": kind_before_style,
+                "kind_after_style": block.kind,
+                "box_indices": valid_indices,
+                "bbox": [left, top, right, bottom],
+                "alignment_evidence": {
+                    "left_peer_count": left_alignment_support,
+                    "right_peer_count": right_alignment_support,
+                    "selected": fmt.get("alignment"),
+                },
+                "bold_evidence": {
+                    "metric": {
+                        "binarization": "Otsu inverse threshold",
+                        "distance_transform": "L2 mask size 3",
+                        "skeleton_proxy": "median local maxima in 3x3 neighborhood",
+                        "stroke_width_formula": "2 * median(local_max_distance)",
+                        "measurement_inset": {"x_fraction": 0.015, "y_fraction": 0.04,
+                                               "minimum_pixels": 1},
+                    },
+                    "threshold_relative_stroke_width": 1.3,
+                    "measurements": comparison_records,
+                    "decision": fmt.get("bold_evidence"),
+                },
+                "result_format": dict(fmt),
+            })
     return blocks

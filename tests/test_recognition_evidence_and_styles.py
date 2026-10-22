@@ -17,6 +17,12 @@ def test_disagreement_keeps_candidates_from_the_same_crop_without_score_voting()
     assert evidence["confidence_comparable_across_models"] is False
     assert [candidate["crop_id"] for candidate in evidence["candidates"]] == [4, 4]
     assert all(candidate["crop_bbox"] == bbox for candidate in evidence["candidates"])
+    assert evidence["candidate_recommendation"] == {
+        "status": "human_review_required",
+        "candidate_indices": [0, 1],
+        "selected_index": None,
+        "reason": "verified_candidates_disagree",
+    }
 
 
 def test_candidates_from_distinct_crops_are_not_combined():
@@ -38,6 +44,51 @@ def test_uncertain_vietnamese_and_symbol_candidates_are_preserved_verbatim():
         assert evidence["candidates"][0]["text"] == candidate_text
         assert evidence["needs_review"] is True
         assert evidence["selected_candidate"] == 0
+
+
+def test_agreement_retains_primary_without_claiming_cross_model_confidence_vote():
+    evidence = _recognition_evidence(
+        8, [[1, 2], [20, 2], [20, 12], [1, 12]],
+        "vietocr", "đối chiếu 123", 0.62,
+        alternate_text="đối chiếu 123", alternate_confidence=0.99,
+        alternate_mapping={"status": "matched"},
+    )
+    assert evidence["selected_candidate"] == 0
+    assert evidence["confidence_comparable_across_models"] is False
+    assert evidence["candidate_recommendation"] == {
+        "status": "primary_retained",
+        "candidate_indices": [0],
+        "selected_index": 0,
+        "reason": "candidate_texts_agree",
+    }
+
+
+def test_disagreement_proposal_does_not_replace_primary_for_symbols_or_brackets():
+    for primary, alternate in (("(3?445)", "3=4+5"), ("(abc", "abc"), ("12+3", "12-3")):
+        evidence = _recognition_evidence(
+            9, [[1, 2], [30, 2], [30, 12], [1, 12]],
+            "vietocr", primary, None,
+            alternate_text=alternate, alternate_confidence=0.0,
+            alternate_mapping={"status": "matched"},
+        )
+        assert evidence["candidates"][0]["text"] == primary
+        assert evidence["candidate_recommendation"]["selected_index"] is None
+        assert evidence["candidate_recommendation"]["candidate_indices"] == [0, 1]
+
+
+def test_missing_primary_candidate_does_not_automatically_promote_alternate():
+    evidence = _recognition_evidence(
+        10, [[1, 2], [30, 2], [30, 12], [1, 12]],
+        "none", "", None, alternate_text="recognized alternate",
+        alternate_mapping={"status": "matched"},
+    )
+    assert evidence["needs_review"] is True
+    assert evidence["candidate_recommendation"] == {
+        "status": "human_review_required",
+        "candidate_indices": [1],
+        "selected_index": None,
+        "reason": "primary_candidate_missing",
+    }
 
 
 def _put_line(image, text, baseline, thickness=1):

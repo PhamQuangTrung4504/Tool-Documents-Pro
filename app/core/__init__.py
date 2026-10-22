@@ -9,6 +9,12 @@ from app.core.spell_corrector import (
     check_text_spelling_detailed,
     get_suggestions,
 )
+from app.core.structured_editing import (
+    CorrectionRecord,
+    EditOwnershipError,
+    EditTarget,
+    StructuredDocumentEditor,
+)
 
 __all__ = [
     "OCREngine",
@@ -19,4 +25,8 @@ __all__ = [
     "check_text_spelling",
     "check_text_spelling_detailed",
     "get_suggestions",
+    "CorrectionRecord",
+    "EditOwnershipError",
+    "EditTarget",
+    "StructuredDocumentEditor",
 ]

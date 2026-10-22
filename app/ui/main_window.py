@@ -30,6 +30,7 @@ import numpy as np
 from loguru import logger
 
 from PyQt5.QtCore import (
+    QEvent,
     QMimeData,
     QPoint,
     QSize,
@@ -64,6 +65,9 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -94,6 +98,7 @@ from app.core.ocr_engine import (
 )
 from app.core.spell_corrector import SpellError, check_text_spelling
 from app.core.document_session import DocumentSession
+from app.core.structured_editing import EditOwnershipError, StructuredDocumentEditor
 from app.core.document_renderer import DocumentRenderService
 from app.ui.word_preview import WordPreviewWidget
 
@@ -575,6 +580,11 @@ class MainWindow(QMainWindow):
         self._document_workers: List[DocumentWorker] = []
         self._retired_sessions: Dict[str, DocumentSession] = {}
         self._document_dirty = False
+        self._structured_editor: Optional[StructuredDocumentEditor] = None
+        self._review_resolved_boxes: Set[int] = set()
+        self._structured_saved = True
+        self._plain_text_mode_active = False
+        self._plain_text_saved = True
 
         # Engine (lazy)
         self._engine: Optional[OCREngine] = None
@@ -737,6 +747,7 @@ class MainWindow(QMainWindow):
             "Ctrl+V  để dán từ clipboard"
         )
         self.label_image.setAlignment(Qt.AlignCenter)
+        self.label_image.installEventFilter(self)
         self.label_image.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
@@ -771,7 +782,51 @@ class MainWindow(QMainWindow):
         self.text_result.textChanged.connect(self._on_text_changed)
         self.text_result.setContextMenuPolicy(Qt.CustomContextMenu)
         self.text_result.customContextMenuRequested.connect(self._on_text_context_menu)
-        self.document_tabs.addTab(self.text_result, "Chỉnh sửa văn bản")
+        self.document_tabs.addTab(self.text_result, "Chỉnh sửa toàn văn (Word thuần)")
+
+        review_tab = QWidget()
+        review_layout = QVBoxLayout(review_tab)
+        review_layout.setContentsMargins(10, 10, 10, 10)
+        review_layout.addWidget(QLabel("Chọn một vùng OCR để đối chiếu với ảnh nguồn."))
+        self.ocr_review_list = QListWidget()
+        self.ocr_review_list.currentRowChanged.connect(self._on_review_box_selected)
+        review_layout.addWidget(self.ocr_review_list, stretch=2)
+        self.ocr_review_crop = QLabel("Ảnh crop sẽ hiển thị tại đây")
+        self.ocr_review_crop.setAlignment(Qt.AlignCenter)
+        self.ocr_review_crop.setMinimumHeight(100)
+        self.ocr_review_crop.setMaximumHeight(150)
+        self.ocr_review_crop.setStyleSheet(f"background: {COLORS['bg_input']}; border: 1px solid {COLORS['border']};")
+        review_layout.addWidget(self.ocr_review_crop)
+        self.ocr_review_evidence = QLabel("Chưa chọn vùng")
+        self.ocr_review_evidence.setWordWrap(True)
+        review_layout.addWidget(self.ocr_review_evidence)
+        self.ocr_review_candidates = QComboBox()
+        self.ocr_review_candidates.currentIndexChanged.connect(self._on_review_candidate_selected)
+        review_layout.addWidget(self.ocr_review_candidates)
+        self.ocr_review_edit = QLineEdit()
+        self.ocr_review_edit.setPlaceholderText("Nội dung đã đối chiếu hoặc nhập bản sửa")
+        review_layout.addWidget(self.ocr_review_edit)
+        review_buttons = QHBoxLayout()
+        self.btn_review_confirm = QPushButton("Xác nhận sửa")
+        self.btn_review_confirm.clicked.connect(self._confirm_review_edit)
+        self.btn_review_cancel = QPushButton("Hủy sửa")
+        self.btn_review_cancel.clicked.connect(self._cancel_review_edit)
+        review_buttons.addWidget(self.btn_review_confirm)
+        review_buttons.addWidget(self.btn_review_cancel)
+        review_layout.addLayout(review_buttons)
+        history_buttons = QHBoxLayout()
+        self.btn_review_next = QPushButton("Vùng cần xem tiếp")
+        self.btn_review_next.clicked.connect(self._select_next_review_box)
+        self.btn_review_undo = QPushButton("Hoàn tác")
+        self.btn_review_undo.clicked.connect(self._undo_structured_edit)
+        self.btn_review_redo = QPushButton("Làm lại")
+        self.btn_review_redo.clicked.connect(self._redo_structured_edit)
+        history_buttons.addWidget(self.btn_review_next)
+        history_buttons.addWidget(self.btn_review_undo)
+        history_buttons.addWidget(self.btn_review_redo)
+        review_layout.addLayout(history_buttons)
+        self.document_tabs.addTab(review_tab, "Rà soát OCR")
+        self._set_review_controls_enabled(False)
 
         # Info label
         self.label_info = QLabel("")
@@ -923,6 +978,9 @@ class MainWindow(QMainWindow):
             )
             return False
 
+        if not self._confirm_discard_unsaved_edits():
+            return False
+
         self._invalidate_document()
 
         # BGRA → BGR
@@ -962,6 +1020,9 @@ class MainWindow(QMainWindow):
                     return self._load_image_from_path(url.toLocalFile())
             return False
         else:
+            return False
+
+        if not self._confirm_discard_unsaved_edits():
             return False
 
         self._invalidate_document()
@@ -1006,6 +1067,9 @@ class MainWindow(QMainWindow):
         if mimedata.hasImage():
             qimg = QImage(mimedata.imageData())
             if not qimg.isNull():
+                if not self._confirm_discard_unsaved_edits():
+                    event.ignore()
+                    return
                 self._invalidate_document()
                 image = qimage_to_numpy(qimg)
                 self._current_image = image
@@ -1063,6 +1127,9 @@ class MainWindow(QMainWindow):
             self._set_status("OCR đang chạy, vui lòng đợi …")
             return
 
+        if not self._confirm_discard_unsaved_edits():
+            return
+
         self._invalidate_document()
         self._current_result = None
 
@@ -1107,6 +1174,12 @@ class MainWindow(QMainWindow):
 
         result: OCRResult = result_or_error
         self._current_result = result
+        self._structured_editor = StructuredDocumentEditor(result)
+        self._review_resolved_boxes.clear()
+        self._structured_saved = True
+        self._plain_text_mode_active = False
+        self._plain_text_saved = True
+        self._refresh_ocr_review_list()
 
         # Hiển thị kết quả text
         self.text_result.setPlainText(result.full_text)
@@ -1150,6 +1223,8 @@ class MainWindow(QMainWindow):
 
     def _create_document_session(self, result: OCRResult) -> None:
         """Generate the temporary DOCX first, then render that same file."""
+        self.btn_export_docx.setEnabled(False)
+        self.word_preview.set_notice("Đang cập nhật tài liệu Word và bản xem trước …")
         old_session = self._document_session
         old_worker = self._document_worker
         if old_session is not None:
@@ -1208,6 +1283,15 @@ class MainWindow(QMainWindow):
         self.word_preview.set_notice("Chưa có tài liệu. Chạy OCR để tạo bản xem trước Word.")
         self.btn_export_docx.setEnabled(False)
         self._document_dirty = False
+        self._structured_editor = None
+        self._review_resolved_boxes.clear()
+        self._structured_saved = True
+        self._plain_text_mode_active = False
+        self._plain_text_saved = True
+        self.ocr_review_list.clear()
+        self.ocr_review_crop.setText("Ảnh crop sẽ hiển thị tại đây")
+        self.ocr_review_evidence.setText("Chưa chọn vùng")
+        self._set_review_controls_enabled(False)
         session, self._document_session = self._document_session, None
         worker = self._document_worker
         if session is not None:
@@ -1321,6 +1405,10 @@ class MainWindow(QMainWindow):
                 temp_path = Path(tmp.name)
             shutil.copyfile(self._document_session.docx_path, temp_path)
             os.replace(temp_path, target)
+            if self._plain_text_mode_active:
+                self._plain_text_saved = True
+            elif self._structured_editor is not None and self._structured_editor.dirty:
+                self._structured_saved = True
             self._set_status(f"✅ Đã lưu Word: {os.path.basename(path)}")
             QMessageBox.information(self, "Đã lưu Word", f"Đã lưu tài liệu tại:\n{target}")
             logger.info(f"Result exported to DOCX: {target}")
@@ -1334,10 +1422,18 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_clear(self) -> None:
         """Xoá ảnh và kết quả."""
+        if not self._confirm_discard_unsaved_edits():
+            return
         self._invalidate_document()
         self._current_image = None
         self._current_pixmap = None
         self._current_result = None
+        self._structured_editor = None
+        self._review_resolved_boxes.clear()
+        self.ocr_review_list.clear()
+        self.ocr_review_crop.setText("Ảnh crop sẽ hiển thị tại đây")
+        self.ocr_review_evidence.setText("Chưa chọn vùng")
+        self._set_review_controls_enabled(False)
         self._image_path = None
         self._active_spell_errors = []
 
@@ -1578,11 +1674,252 @@ class MainWindow(QMainWindow):
             self._set_status("Văn bản đã chỉnh sửa — đã xoá các đánh dấu cũ.")
         self._mark_document_dirty_if_changed()
 
+    def _set_review_controls_enabled(self, enabled: bool) -> None:
+        for widget in (self.ocr_review_list, self.ocr_review_candidates,
+                       self.ocr_review_edit, self.btn_review_confirm,
+                       self.btn_review_cancel, self.btn_review_next):
+            widget.setEnabled(enabled)
+        editor = self._structured_editor
+        self.btn_review_undo.setEnabled(enabled and editor is not None and editor.can_undo)
+        self.btn_review_redo.setEnabled(enabled and editor is not None and editor.can_redo)
+
+    def _refresh_ocr_review_list(self, selected_box: Optional[int] = None) -> None:
+        self.ocr_review_list.blockSignals(True)
+        self.ocr_review_list.clear()
+        result = self._current_result
+        if result is not None:
+            for index, box in enumerate(result.boxes):
+                needs_review = bool(box.metadata.get("needs_review")) and index not in self._review_resolved_boxes
+                marker = "⚠ " if needs_review else "✓ "
+                text = " ".join(box.text.split())
+                item = QListWidgetItem(f"{marker}{index + 1}: {text[:72]}")
+                item.setData(Qt.UserRole, index)
+                self.ocr_review_list.addItem(item)
+                if selected_box == index:
+                    self.ocr_review_list.setCurrentItem(item)
+        self.ocr_review_list.blockSignals(False)
+        self._set_review_controls_enabled(result is not None and bool(result.boxes))
+        if selected_box is not None and result is not None:
+            self._on_review_box_selected(self.ocr_review_list.currentRow())
+
+    def _selected_review_box_index(self) -> Optional[int]:
+        item = self.ocr_review_list.currentItem()
+        value = item.data(Qt.UserRole) if item is not None else None
+        return value if isinstance(value, int) else None
+
+    def _on_review_box_selected(self, _row: int) -> None:
+        index = self._selected_review_box_index()
+        result = self._current_result
+        image = self._current_image
+        if index is None or result is None or image is None or index >= len(result.boxes):
+            self.ocr_review_crop.setText("Chưa chọn vùng")
+            self.ocr_review_evidence.setText("Chưa chọn vùng")
+            return
+        box = result.boxes[index]
+        height, width = image.shape[:2]
+        points = np.asarray(box.bbox, dtype=np.int32)
+        x1 = max(0, int(points[:, 0].min()))
+        y1 = max(0, int(points[:, 1].min()))
+        x2 = min(width, int(points[:, 0].max()) + 1)
+        y2 = min(height, int(points[:, 1].max()) + 1)
+        if x2 > x1 and y2 > y1:
+            crop = image[y1:y2, x1:x2]
+            pixmap = numpy_to_qpixmap(crop).scaled(
+                self.ocr_review_crop.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.ocr_review_crop.setPixmap(pixmap)
+        else:
+            self.ocr_review_crop.setText("Không có crop hợp lệ cho vùng này")
+
+        candidates = box.metadata.get("candidates", [])
+        evidence_lines = [f"Văn bản chính: {box.text}"]
+        evidence_lines.append("Trạng thái: cần xem lại" if box.metadata.get("needs_review") else "Trạng thái: không gắn cờ xem lại")
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                evidence_lines.append(f"{candidate.get('recognizer', 'OCR')}: {candidate.get('text', '')}")
+        mapping = box.metadata.get("alternate_mapping", {})
+        if isinstance(mapping, dict):
+            evidence_lines.append(f"Ánh xạ ứng viên phụ: {mapping.get('status', 'không rõ')}")
+        self.ocr_review_evidence.setText("\n".join(evidence_lines))
+
+        self.ocr_review_candidates.blockSignals(True)
+        self.ocr_review_candidates.clear()
+        self.ocr_review_candidates.addItem("Chọn ứng viên đã đối chiếu…", None)
+        for candidate_index, candidate in enumerate(candidates):
+            if isinstance(candidate, dict) and isinstance(candidate.get("text"), str):
+                name = candidate.get("recognizer", "OCR")
+                self.ocr_review_candidates.addItem(f"{name}: {candidate['text']}", candidate_index)
+        self.ocr_review_candidates.setCurrentIndex(0)
+        self.ocr_review_candidates.blockSignals(False)
+        self.ocr_review_edit.setText(box.text)
+
+        annotated = OCREngine.draw_boxes(image, result, color=(108, 92, 231), thickness=2, show_text=False)
+        cv2.polylines(annotated, [points.reshape((-1, 1, 2))], True, (0, 0, 255), 4)
+        self._show_image(annotated)
+
+    def _on_review_candidate_selected(self, combo_index: int) -> None:
+        if combo_index <= 0:
+            return
+        candidate_index = self.ocr_review_candidates.itemData(combo_index)
+        box_index = self._selected_review_box_index()
+        if box_index is None or self._current_result is None or not isinstance(candidate_index, int):
+            return
+        candidates = self._current_result.boxes[box_index].metadata.get("candidates", [])
+        if 0 <= candidate_index < len(candidates):
+            self.ocr_review_edit.setText(candidates[candidate_index].get("text", ""))
+
+    def _cancel_review_edit(self) -> None:
+        box_index = self._selected_review_box_index()
+        if box_index is not None and self._current_result is not None:
+            self.ocr_review_edit.setText(self._current_result.boxes[box_index].text)
+        self.ocr_review_candidates.setCurrentIndex(0)
+
+    def _confirm_review_edit(self) -> None:
+        box_index = self._selected_review_box_index()
+        if box_index is None or self._structured_editor is None or self._current_result is None:
+            return
+        new_text = self.ocr_review_edit.text()
+        if new_text == self._current_result.boxes[box_index].text:
+            self._review_resolved_boxes.add(box_index)
+            self._refresh_ocr_review_list(selected_box=box_index)
+            self._set_status("Đã xác nhận giữ nguyên nội dung vùng OCR.")
+            return
+        combo_index = self.ocr_review_candidates.currentIndex()
+        candidate_index = self.ocr_review_candidates.itemData(combo_index) if combo_index > 0 else None
+        try:
+            if isinstance(candidate_index, int):
+                candidates = self._current_result.boxes[box_index].metadata.get("candidates", [])
+                if candidates[candidate_index].get("text") == new_text:
+                    self._structured_editor.apply_candidate(box_index, candidate_index)
+                else:
+                    self._structured_editor.apply_box_correction(box_index, new_text)
+            else:
+                self._structured_editor.apply_box_correction(box_index, new_text)
+        except (EditOwnershipError, ValueError, IndexError) as exc:
+            self._set_status(f"Không áp dụng được sửa đổi: {exc}")
+            return
+        self._review_resolved_boxes.add(box_index)
+        self._structured_saved = False
+        self._plain_text_mode_active = False
+        self._publish_structured_edit(box_index)
+
+    def _publish_structured_edit(self, selected_box: int) -> None:
+        if self._structured_editor is None:
+            return
+        result = self._structured_editor.result
+        self._current_result = result
+        self.text_result.blockSignals(True)
+        self.text_result.setPlainText(result.full_text)
+        self.text_result.blockSignals(False)
+        self._document_dirty = False
+        self._plain_text_saved = True
+        self.btn_review_undo.setEnabled(self._structured_editor.can_undo)
+        self.btn_review_redo.setEnabled(self._structured_editor.can_redo)
+        self._refresh_ocr_review_list(selected_box=selected_box)
+        self._create_document_session(result)
+        self._set_status("Đã áp dụng sửa đổi có cấu trúc. Lưu Word để ghi ra tệp.")
+
+    def _undo_structured_edit(self) -> None:
+        if self._structured_editor is None:
+            return
+        record = self._structured_editor.undo()
+        if record is None:
+            return
+        self._review_resolved_boxes.discard(record.target.box_index)
+        self._structured_saved = False
+        self._publish_structured_edit(record.target.box_index)
+
+    def _redo_structured_edit(self) -> None:
+        if self._structured_editor is None:
+            return
+        record = self._structured_editor.redo()
+        if record is None:
+            return
+        self._review_resolved_boxes.add(record.target.box_index)
+        self._structured_saved = False
+        self._publish_structured_edit(record.target.box_index)
+
+    def _select_next_review_box(self) -> None:
+        result = self._current_result
+        if result is None:
+            return
+        start = self._selected_review_box_index()
+        order = list(range((start + 1) if start is not None else 0, len(result.boxes)))
+        order.extend(range(0, (start + 1) if start is not None else 0))
+        target = next((index for index in order
+                       if result.boxes[index].metadata.get("needs_review")
+                       and index not in self._review_resolved_boxes), None)
+        if target is None:
+            self._set_status("Không còn vùng nào được gắn cờ cần xem lại.")
+            return
+        for row in range(self.ocr_review_list.count()):
+            if self.ocr_review_list.item(row).data(Qt.UserRole) == target:
+                self.ocr_review_list.setCurrentRow(row)
+                self.document_tabs.setCurrentWidget(self.ocr_review_list.parentWidget())
+                return
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.label_image and event.type() == QEvent.MouseButtonRelease:
+            pixmap = self.label_image.pixmap()
+            image = self._current_image
+            result = self._current_result
+            if pixmap is not None and image is not None and result is not None and not pixmap.isNull():
+                offset_x = (self.label_image.width() - pixmap.width()) // 2
+                offset_y = (self.label_image.height() - pixmap.height()) // 2
+                local = event.pos()
+                px, py = local.x() - offset_x, local.y() - offset_y
+                if 0 <= px < pixmap.width() and 0 <= py < pixmap.height():
+                    source_x = px * image.shape[1] / pixmap.width()
+                    source_y = py * image.shape[0] / pixmap.height()
+                    matches = []
+                    for index, box in enumerate(result.boxes):
+                        polygon = np.asarray(box.bbox, dtype=np.float32)
+                        if polygon.shape == (4, 2) and cv2.pointPolygonTest(
+                            polygon, (float(source_x), float(source_y)), False
+                        ) >= 0:
+                            area = abs(cv2.contourArea(polygon))
+                            matches.append((area, index))
+                    if matches:
+                        selected = min(matches)[1]
+                        for row in range(self.ocr_review_list.count()):
+                            if self.ocr_review_list.item(row).data(Qt.UserRole) == selected:
+                                self.ocr_review_list.setCurrentRow(row)
+                                self.document_tabs.setCurrentWidget(self.ocr_review_list.parentWidget())
+                                return True
+        return super().eventFilter(watched, event)
+
     def _mark_document_dirty_if_changed(self) -> None:
-        if self._current_result is not None and self._current_result.full_text != self.text_result.toPlainText():
-            self._document_dirty = True
-            self.word_preview.set_notice("Văn bản đã chỉnh sửa. Khi lưu Word, cấu trúc bảng OCR gốc sẽ không được áp dụng để tránh lệch dữ liệu.")
+        if self._current_result is None:
+            return
+        changed = self._current_result.full_text != self.text_result.toPlainText()
+        self._document_dirty = changed
+        self._plain_text_mode_active = changed
+        self._plain_text_saved = not changed
+        if changed:
+            self.word_preview.set_notice(
+                "Bạn đang sửa toàn văn. Lưu Word ở chế độ này sẽ tạo tài liệu thuần và không giữ cấu trúc bảng OCR. "
+                "Muốn giữ cấu trúc, hãy dùng tab Rà soát OCR."
+            )
             self.btn_export_docx.setEnabled(True)
+        else:
+            self._set_status("Nội dung toàn văn đã trở về bản có cấu trúc hiện tại.")
+
+    def _confirm_discard_unsaved_edits(self) -> bool:
+        structured_unsaved = bool(
+            self._structured_editor is not None
+            and self._structured_editor.dirty
+            and not self._structured_saved
+            and not self._plain_text_mode_active
+        )
+        plain_unsaved = bool(self._plain_text_mode_active and not self._plain_text_saved)
+        if not (structured_unsaved or plain_unsaved):
+            return True
+        answer = QMessageBox.question(
+            self, "Thay đổi chưa lưu",
+            "Có sửa đổi chưa lưu ra tệp Word. Bạn có muốn bỏ các sửa đổi này không?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
 
     def _regenerate_edited_document(self) -> None:
         if not self._document_dirty:
@@ -1609,6 +1946,9 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def closeEvent(self, event) -> None:
+        if not self._confirm_discard_unsaved_edits():
+            event.ignore()
+            return
         if not self.word_preview.wait_for_idle(1000):
             self._set_status("Đang hoàn tất hiển thị trang PDF. Đóng cửa sổ lần nữa sau khi kết thúc.")
             event.ignore()

@@ -35,7 +35,7 @@ import threading
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
@@ -124,6 +124,7 @@ def _recognition_evidence(
     alternate_text: str = "",
     alternate_confidence: Optional[float] = None,
     alternate_name: str = "paddleocr",
+    alternate_mapping: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Keep same-crop candidates and flag disagreements without score voting.
 
@@ -140,15 +141,268 @@ def _recognition_evidence(
         candidates.append({
             "recognizer": alternate_name, "text": alternate_text,
             "confidence": alternate_confidence, "crop_id": crop_id, "crop_bbox": crop_bbox,
+            "mapping": alternate_mapping or {"status": "unspecified"},
         })
     disagreement = bool(primary and alternate and primary.strip() != alternate.strip())
+    # Không có benchmark đủ rộng để phân xử tự động giữa hai mô hình. Vì vậy
+    # metadata chỉ đưa ra tập lựa chọn cần người xem; văn bản xuất ra vẫn là
+    # candidate chính. Confidence chỉ được giữ để truy vết, không dùng để xếp hạng.
+    if disagreement:
+        recommendation = {
+            "status": "human_review_required",
+            "candidate_indices": list(range(len(candidates))),
+            "selected_index": None,
+            "reason": "verified_candidates_disagree",
+        }
+    elif not primary and alternate:
+        recommendation = {
+            "status": "human_review_required",
+            "candidate_indices": [1],
+            "selected_index": None,
+            "reason": "primary_candidate_missing",
+        }
+    else:
+        recommendation = {
+            "status": "primary_retained",
+            "candidate_indices": [0],
+            "selected_index": 0,
+            "reason": "single_candidate" if not alternate else "candidate_texts_agree",
+        }
     return {
         "candidates": candidates,
         "arbitration": "disagreement_preserved" if disagreement else "agreement" if alternate else "single_candidate",
         "needs_review": disagreement or primary_confidence is None,
         "confidence_source": primary_name if primary_confidence is not None else None,
         "confidence_comparable_across_models": False,
+        "alternate_mapping": alternate_mapping or {"status": "unspecified"},
         "selected_candidate": 0,
+        "candidate_recommendation": recommendation,
+    }
+
+
+def _prepare_polygon(points: List[List[float]]) -> Optional[Tuple[np.ndarray, float, Tuple[float, float, float, float]]]:
+    polygon = np.asarray(points[:4], dtype=np.float32)
+    if polygon.shape != (4, 2) or not np.isfinite(polygon).all():
+        return None
+    area = float(abs(cv2.contourArea(polygon)))
+    if area <= 0:
+        return None
+    bounds = (float(polygon[:, 0].min()), float(polygon[:, 1].min()),
+              float(polygon[:, 0].max()), float(polygon[:, 1].max()))
+    return polygon, area, bounds
+
+
+def _paddle_result_value(result: Any, key: str, default: Any = None) -> Any:
+    if hasattr(result, "get"):
+        return result.get(key, default)
+    return getattr(result, key, default)
+
+
+def _paddle_result_records(result: Any) -> Dict[str, Any]:
+    """Extract PaddleX 3.x detections and recognition records conservatively.
+
+    PaddleX 3.7 appends rec_polys, rec_texts and rec_scores together only for
+    recognitions passing its score threshold. Therefore dt_polys cannot be
+    indexed against rec_texts. rec_polys is the explicit geometry paired with
+    each returned recognition text. If that geometry contract is unavailable
+    or its cardinality disagrees, recognition candidates are withheld.
+    """
+    raw_detections = _paddle_result_value(result, "dt_polys", [])
+    if raw_detections is None:
+        raw_detections = []
+    raw_rec_polygons = _paddle_result_value(result, "rec_polys", None)
+    raw_texts = _paddle_result_value(result, "rec_texts", None)
+    raw_scores = _paddle_result_value(result, "rec_scores", None)
+    if raw_texts is None:
+        raw_texts = []
+    if raw_scores is None:
+        raw_scores = []
+
+    def as_polygon(value: Any) -> Optional[List[List[float]]]:
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        try:
+            polygon = [[float(point[0]), float(point[1])] for point in value[:4]]
+        except (TypeError, ValueError, IndexError):
+            return None
+        return polygon if len(polygon) == 4 else None
+
+    detections = []
+    for detection_index, raw_polygon in enumerate(raw_detections):
+        polygon = as_polygon(raw_polygon)
+        if polygon is not None:
+            detections.append({"detection_index": detection_index, "polygon": polygon})
+
+    if raw_rec_polygons is None:
+        return {"detections": detections, "recognitions": [],
+                "recognition_status": "unknown_missing_rec_polys",
+                "raw_counts": {"dt_polys": len(raw_detections), "rec_polys": None,
+                               "rec_texts": len(raw_texts), "rec_scores": len(raw_scores)}}
+
+    if hasattr(raw_rec_polygons, "tolist"):
+        raw_rec_polygons = raw_rec_polygons.tolist()
+    if len(raw_rec_polygons) != len(raw_texts):
+        return {"detections": detections, "recognitions": [],
+                "recognition_status": "unknown_rec_polygon_text_count_mismatch",
+                "raw_counts": {"dt_polys": len(raw_detections), "rec_polys": len(raw_rec_polygons),
+                               "rec_texts": len(raw_texts), "rec_scores": len(raw_scores)}}
+
+    recognitions = []
+    for recognition_index, (raw_polygon, text) in enumerate(zip(raw_rec_polygons, raw_texts)):
+        polygon = as_polygon(raw_polygon)
+        if polygon is None:
+            continue
+        score = None
+        if recognition_index < len(raw_scores):
+            try:
+                score = float(raw_scores[recognition_index])
+            except (TypeError, ValueError):
+                score = None
+        recognitions.append({"recognition_index": recognition_index, "polygon": polygon,
+                             "text": str(text), "score": score,
+                             "score_status": "available" if score is not None else "unknown"})
+    return {"detections": detections, "recognitions": recognitions,
+            "recognition_status": "verified_rec_polys_text_alignment",
+            "raw_counts": {"dt_polys": len(raw_detections), "rec_polys": len(raw_rec_polygons),
+                           "rec_texts": len(raw_texts), "rec_scores": len(raw_scores)}}
+
+
+def _prepared_polygon_overlap(
+    first: Optional[Tuple[np.ndarray, float, Tuple[float, float, float, float]]],
+    second: Optional[Tuple[np.ndarray, float, Tuple[float, float, float, float]]],
+) -> Tuple[float, float]:
+    """Return (intersection over smaller polygon, IoU) in one shared pixel space."""
+    if first is None or second is None:
+        return 0.0, 0.0
+    a, area_a, bounds_a = first
+    b, area_b, bounds_b = second
+    ax1, ay1, ax2, ay2 = bounds_a
+    bx1, by1, bx2, by2 = bounds_b
+    if ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1:
+        return 0.0, 0.0
+    try:
+        intersection, _ = cv2.intersectConvexConvex(
+            a, b
+        )
+    except cv2.error:
+        return 0.0, 0.0
+    intersection = max(0.0, float(intersection))
+    return intersection / min(area_a, area_b), intersection / max(area_a + area_b - intersection, 1e-9)
+
+
+def _map_candidate_polygons_to_regions(
+    paddle_polygons: List[List[List[float]]],
+    target_polygons: List[List[List[float]]],
+    min_containment: float = 0.55,
+    min_iou: float = 0.25,
+) -> List[Dict[str, Any]]:
+    """Map original Paddle detections to final OCR regions by geometry only.
+
+    A match is emitted only for a reciprocal, unique one-to-one overlap. Merged
+    regions, duplicate detections and other ambiguous relations remain unmapped.
+    All polygons must be expressed in the same coordinate space.
+    """
+    prepared_targets = [_prepare_polygon(polygon) for polygon in target_polygons]
+    prepared_paddles = [_prepare_polygon(polygon) for polygon in paddle_polygons]
+    overlaps = [[_prepared_polygon_overlap(target, paddle) for paddle in prepared_paddles]
+                for target in prepared_targets]
+    eligible = [[j for j, (containment, iou) in enumerate(row)
+                 if containment >= min_containment and iou >= min_iou]
+                for row in overlaps]
+    reverse: Dict[int, List[int]] = {}
+    for target_index, candidates in enumerate(eligible):
+        for candidate_index in candidates:
+            reverse.setdefault(candidate_index, []).append(target_index)
+
+    mapped: List[Dict[str, Any]] = []
+    for target_index, candidates in enumerate(eligible):
+        if len(candidates) != 1:
+            mapped.append({"status": "unmapped" if not candidates else "ambiguous",
+                           "reason": "no_geometric_overlap" if not candidates else "multiple_paddle_detections",
+                           "candidate_indices": candidates})
+            continue
+        candidate_index = candidates[0]
+        if len(reverse.get(candidate_index, [])) != 1:
+            mapped.append({"status": "ambiguous", "reason": "paddle_detection_matches_multiple_regions",
+                           "candidate_indices": candidates})
+            continue
+        containment, iou = overlaps[target_index][candidate_index]
+        mapped.append({"status": "matched", "reason": "unique_reciprocal_geometric_overlap",
+                       "candidate_indices": candidates, "candidate_index": candidate_index,
+                       "containment": round(containment, 4), "iou": round(iou, 4),
+                       "coordinate_space": "preprocessed_image"})
+    return mapped
+
+
+def _resolve_region_candidate_source(
+    mapping: Dict[str, Any],
+    source_detection_indices: List[int],
+    detection_records: List[Dict[str, Any]],
+    recognition_records: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Optional[int]]:
+    """Require a verified source detection for a VietOCR region candidate."""
+    if len(source_detection_indices) > 1:
+        return ({"status": "ambiguous", "reason": "region_merges_multiple_detection_polygons",
+                 "candidate_indices": mapping.get("candidate_indices", [])}, None)
+    if len(source_detection_indices) != 1 or mapping.get("status") != "matched":
+        return mapping, None
+    recognition_index = mapping.get("candidate_index")
+    if not isinstance(recognition_index, int) or not 0 <= recognition_index < len(recognition_records):
+        return ({"status": "unmapped", "reason": "recognition_record_index_invalid",
+                 "candidate_indices": mapping.get("candidate_indices", [])}, None)
+    detection_index = source_detection_indices[0]
+    if not 0 <= detection_index < len(detection_records):
+        return ({"status": "unmapped", "reason": "detection_record_index_invalid",
+                 "candidate_indices": mapping.get("candidate_indices", [])}, None)
+    recognition = recognition_records[recognition_index]
+    detection = detection_records[detection_index]
+    source_link = recognition.get("source_detection_mapping", {})
+    verified = (
+        source_link.get("status") == "matched"
+        and recognition.get("source_detection_result_index") == detection.get("result_index")
+        and recognition.get("source_detection_index") == detection.get("detection_index")
+    )
+    if not verified:
+        return ({"status": "unmapped", "reason": "recognition_detection_link_not_verified",
+                 "candidate_indices": mapping.get("candidate_indices", [])}, None)
+    return mapping, recognition_index
+
+
+def _notify_diagnostic_observer(
+    observer: Optional[Callable[[Dict[str, Any], Optional[np.ndarray]], None]],
+    event: Dict[str, Any],
+    image: Optional[np.ndarray] = None,
+) -> None:
+    """Send opt-in evidence to an observer without changing recognition flow."""
+    if observer is None:
+        return
+    try:
+        observer(event, image)
+    except Exception as exc:
+        # Diagnostics must not affect OCR results; avoid logging document text.
+        logger.warning("OCR diagnostic observer failed (%s)", type(exc).__name__)
+
+
+def _describe_perspective_crop(points: List[List[float]]) -> Dict[str, Any]:
+    """Describe the same perspective transform used by get_rotate_crop_image."""
+    pts = np.asarray(points, dtype=np.float32)
+    if len(pts) < 4:
+        return {"valid": False}
+    width = int(max(np.linalg.norm(pts[0] - pts[1]), np.linalg.norm(pts[2] - pts[3])))
+    height = int(max(np.linalg.norm(pts[0] - pts[3]), np.linalg.norm(pts[1] - pts[2])))
+    if width <= 4 or height <= 4:
+        return {"valid": False, "rectified_size_before_padding": [width, height]}
+    destination = np.asarray([[0, 0], [width, 0], [width, height], [0, height]], dtype=np.float32)
+    matrix = cv2.getPerspectiveTransform(pts[:4], destination)
+    rotated = height * 1.5 >= width and height > 40
+    return {
+        "valid": True,
+        "homography_source_to_rectified": matrix.tolist(),
+        "rectified_size_before_rotation_and_padding": [width, height],
+        "rotate_90_degrees_ccw_after_warp": rotated,
+        "padding_px_after_rotation": {"top": 6, "bottom": 8, "left": 8, "right": 18},
+        "interpolation": "INTER_CUBIC",
+        "border_mode": "BORDER_REPLICATE",
     }
 def _table_source_box_indices(table: OCRTable, box_index_by_id: Dict[int, int]) -> List[int]:
     """Return result-local indexes owned by a table, without duplicate row/cell links."""
@@ -670,7 +924,8 @@ class OCREngine:
         paddle_texts: List[str],
         paddle_scores: List[float],
         img_bgr: np.ndarray,
-    ) -> Tuple[List[List[List[float]]], List[str], List[float]]:
+        return_source_indices: bool = False,
+    ) -> Any:
         """
         Gộp các sub-box nằm ngang kề sát nhau trên cùng 1 dòng trước khi đưa vào VietOCR
         (Intra-Cell Horizontal Box Merging):
@@ -680,6 +935,8 @@ class OCREngine:
         -> Gộp 2 box thành 1 box duy nhất để VietOCR đọc nguyên cụm (ví dụ 'ấp' + '2' -> 'ấp 2').
         """
         if len(polygons) <= 1:
+            if return_source_indices:
+                return polygons, paddle_texts, paddle_scores, [[index] for index in range(len(polygons))]
             return polygons, paddle_texts, paddle_scores
 
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if len(img_bgr.shape) == 3 else img_bgr
@@ -701,6 +958,7 @@ class OCREngine:
             sc = paddle_scores[i] if i < len(paddle_scores) else 0.8
             boxes_info.append({
                 "poly": poly,
+                "source_indices": [i],
                 "text": txt,
                 "score": sc,
                 "x_min": x_min, "x_max": x_max,
@@ -783,6 +1041,7 @@ class OCREngine:
                     comb_score = min(b1["score"], b2["score"])
                     new_boxes.append({
                         "poly": new_poly,
+                        "source_indices": b1["source_indices"] + b2["source_indices"],
                         "text": comb_text,
                         "score": comb_score,
                         "x_min": mx_min, "x_max": mx_max,
@@ -798,6 +1057,8 @@ class OCREngine:
         out_polys = [b["poly"] for b in boxes_info]
         out_texts = [b["text"] for b in boxes_info]
         out_scores = [b["score"] for b in boxes_info]
+        if return_source_indices:
+            return out_polys, out_texts, out_scores, [b["source_indices"] for b in boxes_info]
         return out_polys, out_texts, out_scores
 
     # ------------------------------------------------------------------
@@ -811,6 +1072,7 @@ class OCREngine:
         denoise: bool = True,
         max_side: int = 2560,
         include_diagnostics: bool = False,
+        diagnostic_observer: Optional[Callable[[Dict[str, Any], Optional[np.ndarray]], None]] = None,
     ) -> OCRResult:
         """
         Nhận dạng chữ từ ảnh với pipeline Hybrid:
@@ -823,6 +1085,7 @@ class OCREngine:
         t0 = time.perf_counter()
 
         # 1. Đọc ảnh
+        source_path = str(source) if isinstance(source, (str, Path)) else None
         if isinstance(source, (str, Path)):
             source = str(source)
             if not os.path.isfile(source):
@@ -841,6 +1104,10 @@ class OCREngine:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
         orig_h, orig_w = image.shape[:2]
+        _notify_diagnostic_observer(diagnostic_observer, {
+            "event": "source_image", "coordinate_space": "source_pixels",
+            "image_size": [orig_w, orig_h], "source_path": source_path,
+        }, image)
         preprocessing_steps: List[dict] = []
         diagnostic_report = None
         if include_diagnostics:
@@ -869,6 +1136,12 @@ class OCREngine:
         proc_h, proc_w = processed_image.shape[:2]
         scale_x = orig_w / float(proc_w)
         scale_y = orig_h / float(proc_h)
+        _notify_diagnostic_observer(diagnostic_observer, {
+            "event": "preprocessed_page", "coordinate_space": "preprocessed_pixels",
+            "image_size": [proc_w, proc_h], "scale_to_source": [scale_x, scale_y],
+            "preprocessing_enabled": preprocess, "denoise": denoise,
+            "max_side": max_side,
+        }, processed_image)
 
         # Thêm padding viền an toàn (16px) trước khi chạy DBNet Detection
         # để bảo toàn 100% dấu thanh và nét chữ nằm sát mép trên/mép biên ảnh
@@ -879,71 +1152,228 @@ class OCREngine:
             borderType=cv2.BORDER_CONSTANT,
             value=[255, 255, 255],
         )
+        _notify_diagnostic_observer(diagnostic_observer, {
+            "event": "paddle_detector_input", "coordinate_space": "preprocessed_plus_padding",
+            "image_size": [int(padded_det_img.shape[1]), int(padded_det_img.shape[0])],
+            "padding_px": {"top": pad_det, "bottom": pad_det, "left": pad_det, "right": pad_det},
+        }, padded_det_img)
 
         logger.debug("Running PaddleOCR Text Detection …")
-        polygons: List[List[List[float]]] = []
-        paddle_texts: List[str] = []
-        paddle_scores: List[float] = []
+        detection_records: List[Dict[str, Any]] = []
+        recognition_records: List[Dict[str, Any]] = []
+        raw_result_diagnostics: List[Dict[str, Any]] = []
+        raw_alignment_statuses: List[str] = []
+        collect_raw_diagnostics = include_diagnostics or diagnostic_observer is not None
+
+        def unpad_polygon(polygon: List[List[float]]) -> List[List[float]]:
+            return [[max(0.0, min(float(proc_w), x - pad_det)),
+                     max(0.0, min(float(proc_h), y - pad_det))] for x, y in polygon]
+
+        def append_parsed_result(result_index: int, parsed: Dict[str, Any]) -> None:
+            result_detections = []
+            for record in parsed["detections"]:
+                detection = {
+                    **record,
+                    "detection_record_index": len(detection_records),
+                    "result_index": result_index,
+                    "polygon_detector_output": record["polygon"],
+                    "polygon_preprocessed": unpad_polygon(record["polygon"]),
+                }
+                result_detections.append(detection)
+                detection_records.append(detection)
+
+            result_recognitions = []
+            for record in parsed["recognitions"]:
+                recognition = {
+                    **record,
+                    "recognition_record_index": len(recognition_records),
+                    "result_index": result_index,
+                    "polygon_detector_output": record["polygon"],
+                    "polygon_preprocessed": unpad_polygon(record["polygon"]),
+                }
+                result_recognitions.append(recognition)
+                recognition_records.append(recognition)
+
+            detection_to_recognition = _map_candidate_polygons_to_regions(
+                [item["polygon_preprocessed"] for item in result_detections],
+                [item["polygon_preprocessed"] for item in result_recognitions],
+            )
+            for recognition, link in zip(result_recognitions, detection_to_recognition):
+                recognition["source_detection_mapping"] = link
+                if link.get("status") == "matched":
+                    recognition["source_detection_index"] = result_detections[
+                        link["candidate_index"]
+                    ]["detection_index"]
+                    recognition["source_detection_result_index"] = result_index
+            raw_alignment_statuses.append(parsed["recognition_status"])
+            if collect_raw_diagnostics:
+                raw_result_diagnostics.append({
+                    "result_index": result_index,
+                    "recognition_status": parsed["recognition_status"],
+                    "raw_counts": parsed["raw_counts"],
+                    "detections": result_detections,
+                    "recognitions": result_recognitions,
+                })
+            if diagnostic_observer is not None:
+                _notify_diagnostic_observer(diagnostic_observer, {
+                    "event": "paddle_raw_result_alignment",
+                    "result_index": result_index,
+                    "coordinate_space": "predict_input_pixels_then_unpadded_preprocessed_pixels",
+                    "recognition_status": parsed["recognition_status"],
+                    "raw_counts": parsed["raw_counts"],
+                    "detections": result_detections,
+                    "recognitions": result_recognitions,
+                    "transforms": {"remove_detector_padding_px": pad_det,
+                                   "clamp_to_preprocessed_size": [proc_w, proc_h]},
+                })
 
         # 3. Chạy Detection qua PaddleOCR
         detector = self._ocr
         assert detector is not None, "PaddleOCR detector not initialized"
         try:
             results = detector.predict(padded_det_img)
-            for res in results:
-                dt_polys = res.get("dt_polys", []) if hasattr(res, "get") else getattr(res, "dt_polys", [])
-                rec_texts = res.get("rec_texts", []) if hasattr(res, "get") else getattr(res, "rec_texts", [])
-                rec_scores = res.get("rec_scores", []) if hasattr(res, "get") else getattr(res, "rec_scores", [])
-
-                for i, poly in enumerate(dt_polys):
-                    if hasattr(poly, "tolist"):
-                        poly = poly.tolist()
-                    if len(poly) >= 4:
-                        # Ánh xạ toạ độ từ ảnh đệm về toạ độ ảnh tiền xử lý
-                        unpadded_poly = [
-                            [
-                                max(0.0, min(float(proc_w), pt[0] - pad_det)),
-                                max(0.0, min(float(proc_h), pt[1] - pad_det)),
-                            ]
-                            for pt in poly[:4]
-                        ]
-                        polygons.append(unpadded_poly)
-                        paddle_texts.append(rec_texts[i] if i < len(rec_texts) else "")
-                        paddle_scores.append(float(rec_scores[i]) if i < len(rec_scores) else 0.8)
+            for result_index, res in enumerate(results):
+                append_parsed_result(result_index, _paddle_result_records(res))
         except Exception as exc_det:
             logger.warning(f"Detection via predict failed, falling back to .ocr(): {exc_det}")
+            detection_records = []
+            recognition_records = []
+            raw_result_diagnostics = []
+            raw_alignment_statuses = []
             try:
-                raw_results = detector.ocr(padded_det_img, cls=self.use_angle_cls)
-                if raw_results and raw_results[0]:
-                    for line in raw_results[0]:
+                try:
+                    raw_results = detector.ocr(padded_det_img, cls=self.use_angle_cls)
+                except TypeError as exc_legacy_signature:
+                    # PaddleOCR 3.x keeps ocr() as a wrapper around predict(),
+                    # whose signature no longer accepts the legacy `cls` kwarg.
+                    if "cls" not in str(exc_legacy_signature):
+                        raise
+                    raw_results = detector.ocr(padded_det_img)
+                if raw_results and _paddle_result_value(raw_results[0], "dt_polys") is not None:
+                    for result_index, result in enumerate(raw_results):
+                        append_parsed_result(result_index, _paddle_result_records(result))
+                elif raw_results and raw_results[0]:
+                    legacy_lines = raw_results[0]
+                    for line_index, line in enumerate(legacy_lines):
                         bbox_points = line[0]
-                        unpadded_poly = [
-                            [
-                                max(0.0, min(float(proc_w), pt[0] - pad_det)),
-                                max(0.0, min(float(proc_h), pt[1] - pad_det)),
-                            ]
-                            for pt in bbox_points[:4]
-                        ]
-                        polygons.append(unpadded_poly)
-                        paddle_texts.append(line[1][0])
-                        paddle_scores.append(float(line[1][1]))
+                        raw_polygon = [[float(pt[0]), float(pt[1])] for pt in bbox_points[:4]]
+                        if len(raw_polygon) != 4:
+                            continue
+                        confidence = None
+                        try:
+                            confidence = float(line[1][1])
+                        except (TypeError, ValueError, IndexError):
+                            pass
+                        paired_polygon = unpad_polygon(raw_polygon)
+                        detection_records.append({
+                            "detection_index": line_index, "result_index": 0,
+                            "polygon_detector_output": raw_polygon,
+                            "polygon_preprocessed": paired_polygon,
+                        })
+                        recognition_records.append({
+                            "recognition_index": line_index, "result_index": 0,
+                            "polygon_detector_output": raw_polygon,
+                            "polygon_preprocessed": paired_polygon,
+                            "text": str(line[1][0]), "score": confidence,
+                            "score_status": "available" if confidence is not None else "unknown",
+                            "source_detection_index": line_index,
+                            "source_detection_result_index": 0,
+                            "source_detection_mapping": {"status": "matched",
+                                "reason": "legacy_row_contains_polygon_text_score_together",
+                                "coordinate_space": "preprocessed_image"},
+                        })
+                    raw_alignment_statuses.append("verified_legacy_row_polygon_text_pairing")
+                    legacy_diagnostics = {
+                        "result_index": 0,
+                        "recognition_status": "verified_legacy_row_polygon_text_pairing",
+                        "raw_counts": {"dt_polys": len(detection_records),
+                                       "rec_polys": len(recognition_records),
+                                       "rec_texts": len(recognition_records),
+                                       "rec_scores": sum(item["score"] is not None for item in recognition_records)},
+                        "detections": detection_records,
+                        "recognitions": recognition_records,
+                    }
+                    if collect_raw_diagnostics:
+                        raw_result_diagnostics.append(legacy_diagnostics)
+                    if diagnostic_observer is not None:
+                        _notify_diagnostic_observer(diagnostic_observer, {
+                            "event": "paddle_raw_result_alignment",
+                            "coordinate_space": "predict_input_pixels_then_unpadded_preprocessed_pixels",
+                            **legacy_diagnostics,
+                            "transforms": {"remove_detector_padding_px": pad_det,
+                                           "clamp_to_preprocessed_size": [proc_w, proc_h]},
+                        })
             except Exception as exc_raw:
                 logger.error(f"Detection fallback failed: {exc_raw}")
 
-        # 3.b. Gộp các sub-box nằm ngang kề sát nhau trên cùng 1 ô / dòng
-        polygons, paddle_texts, paddle_scores = self._merge_horizontally_adjacent_subboxes(
-            polygons, paddle_texts, paddle_scores, processed_image
+        # 3.b. Only combine detections when VietOCR will read the fused image
+        # region. PaddleOCR text belongs to each original polygon and must not
+        # be concatenated and later presented as a prediction for one polygon.
+        use_vietocr = (self.lang == "vi" and self._vietocr is not None)
+        polygons = [record["polygon_preprocessed"] for record in detection_records]
+        if not use_vietocr:
+            polygons = [record["polygon_preprocessed"] for record in recognition_records]
+        geometric_merge_applied = False
+        region_source_detection_groups: List[List[int]] = []
+        paddle_texts = [record["text"] for record in recognition_records]
+        paddle_scores = [record["score"] for record in recognition_records]
+        if use_vietocr:
+            polygons, _, _, region_source_detection_groups = self._merge_horizontally_adjacent_subboxes(
+                polygons, [""] * len(polygons), [0.0] * len(polygons), processed_image,
+                return_source_indices=True,
+            )
+            geometric_merge_applied = any(len(group) > 1 for group in region_source_detection_groups)
+        raw_region_mappings = _map_candidate_polygons_to_regions(
+            [record["polygon_preprocessed"] for record in recognition_records], polygons
         )
+        unverified_result_statuses = [
+            status for status in raw_alignment_statuses
+            if status not in {"verified_rec_polys_text_alignment",
+                              "verified_legacy_row_polygon_text_pairing"}
+        ]
+        region_paddle_texts: List[str] = []
+        region_paddle_scores: List[Optional[float]] = []
+        region_paddle_records: List[Optional[Dict[str, Any]]] = []
+        paddle_candidate_mappings: List[Dict[str, Any]] = []
+        for region_index, mapping in enumerate(raw_region_mappings):
+            if not mapping.get("candidate_indices") and unverified_result_statuses:
+                mapping = {"status": "unknown", "reason": unverified_result_statuses[0],
+                           "candidate_indices": []}
+            recognition_index = mapping.get("candidate_index") if mapping.get("status") == "matched" else None
+            record = recognition_records[recognition_index] if recognition_index is not None else None
+            mapping = dict(mapping)
+            if use_vietocr:
+                mapping, recognition_index = _resolve_region_candidate_source(
+                    mapping, region_source_detection_groups[region_index],
+                    detection_records, recognition_records,
+                )
+                record = recognition_records[recognition_index] if recognition_index is not None else None
+            if record is not None:
+                mapping["recognition_index"] = record["recognition_index"]
+                mapping["recognition_record_index"] = record["recognition_record_index"]
+                mapping["recognition_result_index"] = record["result_index"]
+                mapping["recognition_polygon_preprocessed"] = record["polygon_preprocessed"]
+                mapping["source_detection_mapping"] = record.get("source_detection_mapping", {
+                    "status": "unknown", "reason": "source_detection_link_unavailable"})
+                mapping["source_detection_index"] = record.get("source_detection_index")
+            region_paddle_records.append(record)
+            paddle_candidate_mappings.append(mapping)
+            region_paddle_texts.append(record["text"] if record is not None else "")
+            region_paddle_scores.append(record["score"] if record is not None else None)
         if diagnostic_report is not None:
             diagnostic_report["detection"] = {
                 "count_after_geometric_merge": len(polygons),
                 "coordinate_space": "preprocessed_image",
                 "scale_to_original": [scale_x, scale_y],
+                "predict_results": raw_result_diagnostics,
+                "detections": detection_records,
+                "recognitions": recognition_records,
                 "polygons": [
                     {
                         "polygon": [[float(x), float(y)] for x, y in polygon[:4]],
-                        "paddle_text": paddle_texts[index] if index < len(paddle_texts) else "",
-                        "confidence": paddle_scores[index] if index < len(paddle_scores) else None,
+                        "paddle_text": region_paddle_texts[index],
+                        "confidence": region_paddle_scores[index],
+                        "paddle_mapping": paddle_candidate_mappings[index],
                     }
                     for index, polygon in enumerate(polygons)
                 ],
@@ -951,42 +1381,102 @@ class OCREngine:
 
         # 4. Text Recognition: Sử dụng VietOCR cho tiếng Việt hoặc PaddleOCR
         boxes: List[OCRBox] = []
-        use_vietocr = (self.lang == "vi" and self._vietocr is not None)
 
         if use_vietocr:
             logger.debug(f"Recognizing {len(polygons)} text lines with VietOCR ({self.vietocr_model_name}) …")
 
         for idx, poly in enumerate(polygons):
+            paddle_text = region_paddle_texts[idx]
+            paddle_conf = region_paddle_scores[idx]
+            original_poly = [
+                [float(pt[0] * scale_x), float(pt[1] * scale_y)] for pt in poly[:4]
+            ]
             # Tính toạ độ nguyên trên ảnh gốc
             bbox_int = [
                 [int(round(pt[0] * scale_x)), int(round(pt[1] * scale_y))]
                 for pt in poly[:4]
             ]
+            if diagnostic_observer is not None:
+                source_rectified_crop = get_rotate_crop_image(image, np.array(original_poly))
+                _notify_diagnostic_observer(diagnostic_observer, {
+                    "event": "source_rectified_crop", "crop_id": idx,
+                    "coordinate_space": "source_pixels", "polygon_source": original_poly,
+                    "source_bbox_rounded": bbox_int,
+                    "crop_transform": "perspective_rectification_then_6_8_8_18_px_white_padding",
+                    "perspective_transform_source": _describe_perspective_crop(original_poly),
+                    "mapping": {"source_x_per_preprocessed_x": scale_x,
+                                "source_y_per_preprocessed_y": scale_y,
+                                "detector_padding_removed_px": pad_det},
+                }, source_rectified_crop)
 
             text = ""
             conf: Optional[float] = None
             crop_bgr: Optional[np.ndarray] = None
+            recognizer_name = "none"
 
             if use_vietocr:
                 # Cắt (crop) vùng chữ từ ảnh tiền xử lý với padding viền an toàn
                 crop_bgr = get_rotate_crop_image(processed_image, np.array(poly))
                 if crop_bgr is not None and crop_bgr.size > 0:
+                    _notify_diagnostic_observer(diagnostic_observer, {
+                        "event": "preprocessed_rectified_crop", "crop_id": idx,
+                        "coordinate_space": "preprocessed_pixels",
+                        "polygon_preprocessed": [[float(x), float(y)] for x, y in poly[:4]],
+                        "polygon_padded_detector": [[float(x + pad_det), float(y + pad_det)] for x, y in poly[:4]],
+                        "polygon_source": original_poly,
+                        "source_bbox_rounded": bbox_int,
+                        "perspective_transform_preprocessed": _describe_perspective_crop(poly),
+                        "perspective_transform_source": _describe_perspective_crop(original_poly),
+                        "mapping": {"source_x_per_preprocessed_x": scale_x,
+                                    "source_y_per_preprocessed_y": scale_y,
+                                    "detector_padding_removed_px": pad_det,
+                                    "geometric_merge_applied": geometric_merge_applied},
+                        "crop_transform": "perspective_rectification_then_6_8_8_18_px_white_padding",
+                        "stage": "before_clean_crop_borders",
+                    }, crop_bgr)
+                    _notify_diagnostic_observer(diagnostic_observer, {
+                        "event": "paddle_polygon_crop_preview", "crop_id": idx,
+                        "stage": "perspective_crop_of_preprocessed_detector_page",
+                        "recognizer_input_exact": False,
+                        "reason": "PaddleOCR predict API returns text and polygon but does not expose its internal recognition tensor/crop",
+                    }, crop_bgr)
                     # 1. Tẩy đường kẻ bảng ở sát biên lát cắt (tránh nhận nhầm [, |, F, ])
                     crop_bgr = clean_crop_borders(crop_bgr)
+                    _notify_diagnostic_observer(diagnostic_observer, {
+                        "event": "vietocr_border_cleaned_crop", "crop_id": idx,
+                        "stage": "after_clean_crop_borders_before_split_or_model",
+                        "polygon_preprocessed": [[float(x), float(y)] for x, y in poly[:4]],
+                        "polygon_source": original_poly,
+                    }, crop_bgr)
 
                     # 2. Kiểm tra dải hoa văn trang trí / đường kẻ lặp ở tầng thị giác
                     if is_decorative_pattern_crop(crop_bgr):
                         text = ""
                         conf = 0.0
                     else:
+                        recognizer_name = f"vietocr:{self.vietocr_model_name}"
                         try:
                             # 3. Tách dòng rất dài có chấm lửng thành các sub-crops tránh attention drift nuốt chữ
                             sub_crops = split_dotted_line_crop(crop_bgr)
                             if len(sub_crops) > 1 and self._vietocr is not None:
                                 sub_texts = []
                                 sub_confs = []
-                                for sc in sub_crops:
+                                for subcrop_index, sc in enumerate(sub_crops):
                                     sc_padded = pad_small_crop_for_vietocr(sc)
+                                    _notify_diagnostic_observer(diagnostic_observer, {
+                                        "event": "vietocr_subcrop_before_padding", "crop_id": idx,
+                                        "subcrop_index": subcrop_index,
+                                        "split_count": len(sub_crops),
+                                        "stage": "split_dotted_line_crop_output",
+                                    }, sc)
+                                    _notify_diagnostic_observer(diagnostic_observer, {
+                                        "event": "vietocr_recognizer_input", "crop_id": idx,
+                                        "subcrop_index": subcrop_index,
+                                        "split_count": len(sub_crops),
+                                        "stage": "after_pad_small_crop_for_vietocr",
+                                        "recognizer": f"vietocr:{self.vietocr_model_name}",
+                                        "color_conversion": "BGR_to_RGB_for_PIL",
+                                    }, sc_padded)
                                     sc_rgb = cv2.cvtColor(sc_padded, cv2.COLOR_BGR2RGB)
                                     sc_pil = Image.fromarray(sc_rgb)
                                     p_res = self._vietocr.predict(sc_pil, return_prob=True)
@@ -996,6 +1486,16 @@ class OCREngine:
                                     else:
                                         t_sub = str(p_res).strip()
                                         c_sub = None
+                                    _notify_diagnostic_observer(diagnostic_observer, {
+                                        "event": "recognition_subcandidate",
+                                        "crop_id": idx,
+                                        "subcrop_index": subcrop_index,
+                                        "recognizer": f"vietocr:{self.vietocr_model_name}",
+                                        "text": t_sub,
+                                        "confidence": c_sub,
+                                        "confidence_scale_calibrated_with_other_model": False,
+                                        "recognizer_input_exact": True,
+                                    })
                                     if t_sub:
                                         sub_texts.append(t_sub)
                                         sub_confs.append(c_sub)
@@ -1009,10 +1509,20 @@ class OCREngine:
                             else:
                                 # 4. Đệm khung trắng chuẩn tỷ lệ cho ô hẹp & chữ số (05, 01, 1, 2)
                                 crop_bgr_padded = pad_small_crop_for_vietocr(crop_bgr)
+                                _notify_diagnostic_observer(diagnostic_observer, {
+                                    "event": "vietocr_recognizer_input", "crop_id": idx,
+                                    "subcrop_index": None,
+                                    "stage": "after_pad_small_crop_for_vietocr",
+                                    "recognizer": f"vietocr:{self.vietocr_model_name}",
+                                    "color_conversion": "BGR_to_RGB_for_PIL",
+                                    "polygon_preprocessed": [[float(x), float(y)] for x, y in poly[:4]],
+                                    "polygon_source": original_poly,
+                                }, crop_bgr_padded)
                                 crop_rgb = cv2.cvtColor(crop_bgr_padded, cv2.COLOR_BGR2RGB)
                                 crop_pil = Image.fromarray(crop_rgb)
                                 if self._vietocr is not None:
                                     pred_res = self._vietocr.predict(crop_pil, return_prob=True)
+                                    recognizer_name = f"vietocr:{self.vietocr_model_name}"
                                 else:
                                     pred_res = ("", 0.0)
                                 if isinstance(pred_res, tuple):
@@ -1024,24 +1534,32 @@ class OCREngine:
                                     conf = None
                         except Exception as err:
                             logger.debug(f"VietOCR line predict error: {err}")
-                            text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                            conf = paddle_scores[idx] if idx < len(paddle_scores) else None
+                            text = paddle_text
+                            conf = paddle_conf
+                            recognizer_name = "paddleocr" if paddle_text else "none"
                 else:
-                    text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                    conf = paddle_scores[idx] if idx < len(paddle_scores) else None
+                    text = paddle_text
+                    conf = paddle_conf
+                    recognizer_name = "paddleocr" if paddle_text else "none"
             else:
                 # Tiếng Anh hoặc ngôn ngữ khác dùng kết quả từ PaddleOCR
-                text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-                conf = paddle_scores[idx] if idx < len(paddle_scores) else None
+                if diagnostic_observer is not None:
+                    paddle_preview = get_rotate_crop_image(processed_image, np.array(poly))
+                    _notify_diagnostic_observer(diagnostic_observer, {
+                        "event": "paddle_polygon_crop_preview", "crop_id": idx,
+                        "stage": "perspective_crop_of_preprocessed_detector_page",
+                        "recognizer_input_exact": False,
+                        "reason": "PaddleOCR predict API returns text and polygon but does not expose its internal recognition tensor/crop",
+                    }, paddle_preview)
+                text = paddle_text
+                conf = paddle_conf
+                recognizer_name = "paddleocr" if paddle_text else "none"
 
             raw_recognized_text = text
             # NFC is non-semantic; retain recognizer output separately.
             text = unicodedata.normalize("NFC", text)
 
             # Bỏ qua dòng trống, dòng ảo giác lặp từ hoặc ký tự rác, hoặc quá thấp độ tin cậy
-            paddle_text = paddle_texts[idx] if idx < len(paddle_texts) else ""
-            paddle_conf = paddle_scores[idx] if idx < len(paddle_scores) else None
-            recognizer_name = f"vietocr:{self.vietocr_model_name}" if use_vietocr else "paddleocr"
             # These are two predictions for the same detected polygon. Their
             # confidence scales are not calibrated against each other; retain
             # both and flag disagreement instead of choosing by score.
@@ -1049,9 +1567,41 @@ class OCREngine:
             recognition_metadata = _recognition_evidence(
                 crop_id=idx, crop_bbox=bbox_int, primary_name=recognizer_name,
                 primary_text=raw_recognized_text, primary_confidence=conf,
-                alternate_text=paddle_text if use_vietocr else "",
+                alternate_text=paddle_text if use_vietocr and recognizer_name != "paddleocr" else "",
                 alternate_confidence=paddle_conf, alternate_name="paddleocr",
+                alternate_mapping=paddle_candidate_mappings[idx],
             )
+            _notify_diagnostic_observer(diagnostic_observer, {
+                "event": "recognition_candidate",
+                "crop_id": idx,
+                "recognizer": recognizer_name,
+                "text": raw_recognized_text,
+                "confidence": conf,
+                "confidence_scale_calibrated_with_other_model": False,
+                "bbox_source": bbox_int,
+                "polygon_preprocessed": [[float(x), float(y)] for x, y in poly[:4]],
+                "polygon_source": original_poly,
+                "paddle_candidate_mapping": paddle_candidate_mappings[idx],
+                "paddle_recognition_record": region_paddle_records[idx],
+                "crop_mapping": recognition_metadata,
+                "recognizer_input_exact": recognizer_name.startswith("vietocr:"),
+            })
+            if use_vietocr and recognizer_name != "paddleocr":
+                _notify_diagnostic_observer(diagnostic_observer, {
+                    "event": "recognition_candidate",
+                    "crop_id": idx,
+                    "recognizer": "paddleocr",
+                    "text": paddle_text,
+                    "confidence": paddle_conf,
+                    "confidence_scale_calibrated_with_other_model": False,
+                    "bbox_source": bbox_int,
+                    "polygon_preprocessed": [[float(x), float(y)] for x, y in poly[:4]],
+                    "polygon_source": original_poly,
+                    "paddle_candidate_mapping": paddle_candidate_mappings[idx],
+                    "paddle_recognition_record": region_paddle_records[idx],
+                    "recognizer_input_exact": False,
+                    "input_artifact_event": "paddle_detector_input",
+                })
             if accepted:
                 boxes.append(OCRBox(text=text, confidence=float(conf) if conf is not None else None, bbox=bbox_int,
                                     raw_text=raw_recognized_text, metadata=recognition_metadata))
@@ -1222,7 +1772,17 @@ class OCREngine:
             emitted_table_blocks.add(table_index)
         for order, block in enumerate(document_blocks):
             block.order = order
-        infer_visual_document_styles(document_blocks, boxes, image)
+        style_diagnostics: Optional[List[dict]] = [] if diagnostic_observer is not None else None
+        infer_visual_document_styles(
+            document_blocks, boxes, image, diagnostics=style_diagnostics
+        )
+        if style_diagnostics is not None:
+            for style_record in style_diagnostics:
+                _notify_diagnostic_observer(diagnostic_observer, {
+                    "event": "style_analysis",
+                    "coordinate_space": "source_pixels",
+                    **style_record,
+                })
 
         raw_parts: List[str] = []
         for block in document_blocks:
