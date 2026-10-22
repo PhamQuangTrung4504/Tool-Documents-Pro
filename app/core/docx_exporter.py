@@ -34,8 +34,8 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
         from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-untyped,import-not-found]
         from docx.enum.table import WD_TABLE_ALIGNMENT  # type: ignore[import-untyped,import-not-found]
         from docx.enum.section import WD_ORIENT  # type: ignore[import-untyped,import-not-found]
-        from docx.oxml import parse_xml  # type: ignore[import-untyped,import-not-found]
-        from docx.oxml.ns import nsdecls  # type: ignore[import-untyped,import-not-found]
+        from docx.oxml import OxmlElement, parse_xml  # type: ignore[import-untyped,import-not-found]
+        from docx.oxml.ns import nsdecls, qn  # type: ignore[import-untyped,import-not-found]
     except ImportError:
         logger.error("python-docx is not installed. Cannot export to DOCX.")
         return False
@@ -161,36 +161,54 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
 
         # 2. Xây dựng tập hợp các dòng text thuộc bảng để CHẶN TUYỆT ĐỐI việc in lặp ra paragraph
         # Gom tất cả các cell và hàng của mọi bảng trong result.tables
-        table_cell_signatures = set()
+        table_cell_signatures = {}
+        table_row_signatures = {}
         for tbl in result.tables:
+            row_signatures = []
+            cell_signatures = set()
             for row in tbl.grid:
-                # Toàn bộ nội dung hàng nối lại
-                row_joined = " ".join(c.strip() for c in row if c.strip())
-                if row_joined:
-                    table_cell_signatures.add(re.sub(r"\s+", " ", row_joined.lower()))
+                row_parts = []
                 for cell in row:
-                    c_clean = cell.strip()
-                    if c_clean:
-                        table_cell_signatures.add(re.sub(r"\s+", " ", c_clean.lower()))
+                    signature = re.sub(r"[^\w]", "", cell.casefold())
+                    if signature:
+                        row_parts.append(signature)
+                        if len(signature) >= 4:
+                            cell_signatures.add(signature)
+                row_signatures.append("".join(row_parts))
+            table_row_signatures[id(tbl)] = [signature for signature in row_signatures if signature]
+            table_cell_signatures[id(tbl)] = cell_signatures
+
+        def _table_signature(line_s: str) -> str:
+            return re.sub(r"[^\w]", "", line_s.casefold())
 
         def _is_table_first_row(line_s: str, tbl: OCRTable) -> bool:
-            """Bảng chỉ có thể bắt đầu bằng dòng có ít nhất 2 cột chứa dấu '|'."""
-            if " | " not in line_s and line_s.count("|") < 1:
+            """Match the header's cell content without depending on text delimiters."""
+            line_signature = _table_signature(line_s)
+            if not line_signature or not tbl.grid:
                 return False
-            parts = [p.strip() for p in line_s.split("|") if p.strip()]
-            return len(parts) >= 2
+            if line_signature in table_row_signatures.get(id(tbl), []):
+                return True
+            header_cells = [
+                _table_signature(cell)
+                for cell in tbl.grid[0]
+                if _table_signature(cell)
+            ]
+            if len(header_cells) < 2:
+                return False
+            matching_cells = sum(
+                1 for cell_signature in header_cells
+                if len(cell_signature) >= 3 and cell_signature in line_signature
+            )
+            return matching_cells >= min(2, len(header_cells))
 
         def _is_table_row_line(line_s: str, tbl: OCRTable) -> bool:
-            """Kiểm tra một dòng text có thuộc bảng hay không."""
-            if " | " in line_s or line_s.count("|") >= 1:
+            """Match structured row/cell text, never a plain-text pipe delimiter."""
+            signature = _table_signature(line_s)
+            if not signature:
+                return False
+            if signature in table_row_signatures.get(id(tbl), []):
                 return True
-            s_clean = re.sub(r"\s+", " ", line_s.strip().lower())
-            if s_clean in table_cell_signatures:
-                return True
-            # Kiểm tra dòng số thứ tự hoặc tổng cộng lẻ: '1', '2', 'Tổng cộng'
-            if re.match(r"^(?:\d{1,2}|Tổng\s+cộng)$", line_s.strip(), re.IGNORECASE):
-                return True
-            return False
+            return signature in table_cell_signatures.get(id(tbl), set())
 
         def _render_word_table(tbl: OCRTable) -> Any:
             """Vẽ đúng 1 bảng Word từ OCRTable."""
@@ -199,28 +217,22 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             doc_table: Any = doc.add_table(rows=len(tbl.grid), cols=tbl.num_cols)
             doc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             doc_table.style = "Table Grid"
+            doc_table.autofit = False
 
-            # Tính độ rộng cột theo tỷ lệ
-            total_width_inches = 10.5 if is_wide else 6.5
+            # Use the current section's usable width so portrait and landscape
+            # tables stay inside the page margins.
+            total_width_inches = (
+                section.page_width - section.left_margin - section.right_margin
+            ) / Inches(1)
             col_max_lens = [
                 max((len(tbl.grid[r][c].strip()) for r in range(len(tbl.grid))), default=5)
                 for c in range(tbl.num_cols)
             ]
-            total_len = max(1, sum(col_max_lens))
-            col_widths_inches = []
-            for c_i, c_len in enumerate(col_max_lens):
-                if is_wide:
-                    min_w = 0.35 if c_i in {0, 3, 4, 13, 14} else 0.55
-                    max_w = 2.0
-                else:
-                    min_w = 0.6
-                    max_w = 4.0
-                w_inch = max(min_w, min(max_w, (c_len / total_len) * total_width_inches))
-                col_widths_inches.append(w_inch)
-
-            sum_w = sum(col_widths_inches)
-            if sum_w > 0:
-                col_widths_inches = [(w / sum_w) * total_width_inches for w in col_widths_inches]
+            total_len = max(1, sum(max(1, length) for length in col_max_lens))
+            col_widths_inches = [
+                total_width_inches * max(1, length) / total_len
+                for length in col_max_lens
+            ]
 
             # tblHeader: Lặp tiêu đề bảng ở mỗi trang Word nếu bảng dài
             if len(tbl.grid) > 0:
@@ -305,6 +317,71 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                     for c_i in range(min(len(row_data), tbl.num_cols)):
                         cell = doc_table.cell(r_i, c_i)
                         cell.text = _clean_cell_content(row_data[c_i], c_i)
+
+            # Diagonal cell borders are stored as explicit topology metadata and
+            # emitted as editable Word table-cell borders, not rasterized content.
+            for source_cell in tbl.cells:
+                if source_cell.diagonal_border not in {"tl2br", "tr2bl"}:
+                    continue
+                word_cell = doc_table.cell(source_cell.row_start, source_cell.col_start)
+                if source_cell.bbox and source_cell.boxes:
+                    x1, y1, x2, y2 = source_cell.bbox
+                    cell_w = max(1, x2 - x1)
+                    cell_h = max(1, y2 - y1)
+                    box_info = []
+                    for box in source_cell.boxes:
+                        left = min(point[0] for point in box.bbox)
+                        right = max(point[0] for point in box.bbox)
+                        top = min(point[1] for point in box.bbox)
+                        bottom = max(point[1] for point in box.bbox)
+                        box_info.append({
+                            "box": box,
+                            "cx": (left + right) / 2.0,
+                            "cy": (top + bottom) / 2.0,
+                            "height": max(1, bottom - top),
+                        })
+                    median_height = sorted(item["height"] for item in box_info)[len(box_info) // 2]
+                    text_lines = []
+                    for item in sorted(box_info, key=lambda value: (value["cy"], value["cx"])):
+                        existing = next((
+                            line for line in text_lines
+                            if abs(item["cy"] - line["cy"]) <= 0.55 * median_height
+                        ), None)
+                        if existing is None:
+                            text_lines.append({"cy": item["cy"], "items": [item]})
+                        else:
+                            existing["items"].append(item)
+
+                    first_paragraph = True
+                    for line in sorted(text_lines, key=lambda value: value["cy"]):
+                        line_items = sorted(line["items"], key=lambda value: value["cx"])
+                        line_text = " ".join(item["box"].text.strip() for item in line_items if item["box"].text.strip())
+                        if not line_text:
+                            continue
+                        center_x = sum(item["cx"] for item in line_items) / len(line_items)
+                        center_y = sum(item["cy"] for item in line_items) / len(line_items)
+                        relative_x = min(1.0, max(0.0, (center_x - x1) / cell_w))
+                        if source_cell.diagonal_border == "tl2br":
+                            diagonal_y = y1 + relative_x * cell_h
+                            alignment = WD_ALIGN_PARAGRAPH.RIGHT if center_y < diagonal_y else WD_ALIGN_PARAGRAPH.LEFT
+                        else:
+                            diagonal_y = y1 + (1.0 - relative_x) * cell_h
+                            alignment = WD_ALIGN_PARAGRAPH.LEFT if center_y < diagonal_y else WD_ALIGN_PARAGRAPH.RIGHT
+                        paragraph = word_cell.paragraphs[0] if first_paragraph else word_cell.add_paragraph()
+                        first_paragraph = False
+                        paragraph.clear()
+                        paragraph.alignment = alignment
+                        paragraph.add_run(line_text)
+
+                tc_pr = word_cell._tc.get_or_add_tcPr()
+                borders = tc_pr.find(qn("w:tcBorders"))
+                if borders is None:
+                    borders = OxmlElement("w:tcBorders")
+                    tc_pr.append(borders)
+                diagonal = OxmlElement(f"w:{source_cell.diagonal_border}")
+                diagonal.set(qn("w:val"), "single")
+                diagonal.set(qn("w:sz"), "8")
+                borders.append(diagonal)
 
             # Định dạng font, cỡ chữ, căn lề và độ rộng cột
             for r_i, row in enumerate(doc_table.rows):

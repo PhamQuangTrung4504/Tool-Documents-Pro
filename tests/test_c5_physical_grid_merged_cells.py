@@ -17,6 +17,7 @@ Kiểm thử Phase C5: Physical Grid Cell Topology Engine
 from __future__ import annotations
 
 import os
+import zipfile
 from pathlib import Path
 from typing import List, Tuple
 
@@ -24,7 +25,7 @@ import cv2
 import numpy as np
 from app.core.docx_exporter import export_to_docx
 from app.core.layout_analyzer import reconstruct_document_layout
-from app.core.models import OCRBox, OCRResult
+from app.core.models import OCRBox, OCRResult, OCRTable
 from app.core.table_engines import (
     PhysicalGridTopologyEngine,
     extract_physical_table_topology,
@@ -201,6 +202,95 @@ class TestC5PhysicalGridTopologyEngine:
         ho_ten = next((c for c in tbl.cells if "Họ tên" in c.text), None)
         assert ho_ten is not None
         assert ho_ten.row_span == 2, f"Cột Họ tên phải gộp dọc rowspan=2, thực tế: {ho_ten.row_span}"
+
+    def test_open_table_suffix_is_kept_inside_table_and_partitioned_by_text_geometry(self):
+        """Continue a clipped ruled table through its visible, unruled suffix."""
+        image = np.full((300, 400, 3), 255, dtype=np.uint8)
+        x_edges = [20, 80, 200, 300, 380]
+        y_edges = [50, 100, 140, 180]
+        for y in y_edges:
+            cv2.line(image, (x_edges[0], y), (x_edges[-1], y), (0, 0, 0), 2)
+        for x in x_edges:
+            cv2.line(image, (x, y_edges[0]), (x, image.shape[0] - 1), (0, 0, 0), 2)
+
+        boxes = [
+            _create_box("Header", 30, 60, 70, 80),
+            _create_box("Column", 100, 60, 180, 80),
+            _create_box("Existing row", 100, 110, 180, 130),
+            _create_box("A-17", 38, 202, 65, 218),
+            _create_box("First item", 100, 202, 170, 218),
+            _create_box("B-28", 38, 242, 65, 258),
+            _create_box("Second item", 100, 242, 180, 258),
+            _create_box("C-39", 38, 272, 65, 288),
+            _create_box("Third item", 100, 272, 175, 288),
+        ]
+
+        table = extract_physical_table_topology(image, boxes)
+        assert table is not None
+        assert table.bbox[3] == image.shape[0]
+        assert table.num_rows == 5
+        assert table.grid[-3][0] == "A-17"
+        assert table.grid[-3][1] == "First item"
+        assert table.grid[-2][0] == "B-28"
+        assert table.grid[-2][1] == "Second item"
+        assert table.grid[-1][0] == "C-39"
+        assert table.grid[-1][1] == "Third item"
+
+    def test_diagonal_cell_border_is_preserved_in_docx_ooxml(self, tmp_path: Path):
+        image = np.full((200, 240, 3), 255, dtype=np.uint8)
+        x_edges = [20, 120, 220]
+        y_edges = [20, 100, 180]
+        for y in y_edges:
+            cv2.line(image, (x_edges[0], y), (x_edges[-1], y), (0, 0, 0), 2)
+        for x in x_edges:
+            cv2.line(image, (x, y_edges[0]), (x, y_edges[-1]), (0, 0, 0), 2)
+        cv2.line(image, (x_edges[0], y_edges[0]), (x_edges[1], y_edges[1]), (0, 0, 0), 2)
+        boxes = [
+            _create_box("Top left", 35, 40, 85, 60),
+            _create_box("Top right", 145, 40, 195, 60),
+            _create_box("Bottom left", 35, 130, 85, 150),
+            _create_box("Bottom right", 145, 130, 195, 150),
+        ]
+
+        table = extract_physical_table_topology(image, boxes)
+        assert table is not None
+        diagonal_cell = next(cell for cell in table.cells if cell.bbox == [20, 20, 120, 100])
+        assert diagonal_cell.diagonal_border == "tl2br"
+
+        output = tmp_path / "diagonal.docx"
+        result = OCRResult(
+            boxes=boxes,
+            full_text="Top left | Top right\nBottom left | Bottom right",
+            tables=[table],
+        )
+        assert export_to_docx(result, str(output))
+        with zipfile.ZipFile(output) as archive:
+            document_xml = archive.read("word/document.xml")
+        assert b"w:tl2br" in document_xml
+
+    def test_docx_table_position_uses_structured_cells_without_pipe_delimiters(self, tmp_path: Path):
+        table = OCRTable(
+            grid=[["Name", "Amount"], ["Paper", "10"]],
+            bbox=[20, 40, 380, 150],
+            num_rows=2,
+            num_cols=2,
+        )
+        result = OCRResult(
+            full_text="Report title\nName Amount\nPaper 10\nEnd note",
+            tables=[table],
+        )
+        output = tmp_path / "structured.docx"
+        assert export_to_docx(result, str(output))
+        document = __import__("docx").Document(output)
+        assert len(document.tables) == 1
+        assert [[cell.text for cell in row.cells] for row in document.tables[0].rows] == [
+            ["Name", "Amount"],
+            ["Paper", "10"],
+        ]
+        assert [paragraph.text for paragraph in document.paragraphs if paragraph.text] == [
+            "Report title",
+            "End note",
+        ]
 
     def test_02_multiline_intra_cell_aggregation_never_fragments_rows(self):
         """Xác minh 9 dòng rời và 10 dòng rời trong 1 ô được gom thành 1 dòng duy nhất."""

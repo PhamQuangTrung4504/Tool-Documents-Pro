@@ -1,0 +1,41 @@
+{
+  "sample_id": "test_sample",
+  "category": "bordered",
+  "elapsed_ms": 12.5,
+  "metrics": {
+    "table_detected_exact": 0.0,
+    "cell_exact_match_rate": 0.0
+  },
+  "diagnostics": [
+    {
+      "row_idx": 0,
+      "col_idx": 1,
+      "expected_text": "B",
+      "actual_text": "C",
+      "failure_mode": "TEXT_MISMATCH"
+    }
+  ],
+  "ground_truth": {
+    "sample_id": "test_sample",
+    "category": "bordered",
+    "expected_grid": [
+      [
+        "A",
+        "B"
+      ],
+      [
+        "1",
+        "2"
+      ]
+    ],
+    "expected_non_table_lines": [
+      "TIÊU ĐỀ"
+    ],
+    "metadata": {
+      "note": "test metadata"
+    }
+  },
+  "predicted_tables": [],
+  "predicted_lines_count": 0,
+  "input_boxes_count": 2
+}

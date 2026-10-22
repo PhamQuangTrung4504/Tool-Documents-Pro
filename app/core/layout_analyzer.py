@@ -943,6 +943,7 @@ def reconstruct_document_layout(
     boxes: List[OCRBox],
     image: Optional[np.ndarray] = None,
     vietocr_model: Any = None,
+    diagnostics: Optional[dict] = None,
 ) -> LayoutResult:
     """
     Phân tích toàn diện bố cục tài liệu (Document Layout Reconstruction):
@@ -952,6 +953,9 @@ def reconstruct_document_layout(
     Trả về: LayoutResult(grouped_lines, tables, parallel_header)
     """
     if not boxes:
+        if diagnostics is not None:
+            diagnostics["selected_engine"] = "none"
+            diagnostics["reason"] = "no_ocr_boxes"
         return LayoutResult([], [], parallel_header=None)
 
     box_info = _box_info_list(boxes)
@@ -967,20 +971,37 @@ def reconstruct_document_layout(
     if image is not None:
         from app.core.table_engines import extract_physical_table_topology
         target_ocr_boxes = [b["box"] for b in box_info]
-        phys_tbl = extract_physical_table_topology(image, target_ocr_boxes, vietocr_model=vietocr_model)
+        physical_diagnostics = {} if diagnostics is not None else None
+        phys_tbl = extract_physical_table_topology(
+            image,
+            target_ocr_boxes,
+            vietocr_model=vietocr_model,
+            diagnostics=physical_diagnostics,
+        )
+        if diagnostics is not None:
+            diagnostics["physical_grid_candidate"] = physical_diagnostics
         if phys_tbl is not None:
             is_complex_grid = (
                 phys_tbl.num_cols >= 6 or any(c.is_merged for c in phys_tbl.cells)
             )
-            is_scorecard = any(
-                any(kw in c.strip().lower() for kw in ["tiêu chí đánh giá", "điểm tối đa", "điểm tự chấm"])
-                for row in phys_tbl.grid for c in row
-            )
-            if is_complex_grid and not is_scorecard:
+            if is_complex_grid:
+                if diagnostics is not None:
+                    diagnostics["selected_engine"] = "physical_grid_topology"
+                physical_box_ids = {
+                    id(box)
+                    for cell in phys_tbl.cells
+                    for box in cell.boxes
+                }
                 tbl_top = phys_tbl.bbox[1]
                 tbl_bottom = phys_tbl.bbox[3]
-                pre_tbl_boxes = [b for b in box_info if b["cy"] < tbl_top - 4]
-                post_tbl_boxes = [b for b in box_info if b["cy"] > tbl_bottom + 4]
+                pre_tbl_boxes = [
+                    b for b in box_info
+                    if id(b["box"]) not in physical_box_ids and b["cy"] < tbl_top - 4
+                ]
+                post_tbl_boxes = [
+                    b for b in box_info
+                    if id(b["box"]) not in physical_box_ids and b["cy"] > tbl_bottom + 4
+                ]
 
                 # Chạy detect_parallel_administrative_header CHỈ TRÊN pre_tbl_boxes
                 if pre_tbl_boxes:
@@ -1063,6 +1084,8 @@ def reconstruct_document_layout(
             is_scorecard_or_standard_v1 = True
 
     if is_scorecard_or_standard_v1 and tbl_v1 is not None:
+        if diagnostics is not None:
+            diagnostics["selected_engine"] = "legacy_anchor_table"
         pre_lines = header_lines + _group_boxes_sliding_window(
             pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
         )
@@ -1080,12 +1103,16 @@ def reconstruct_document_layout(
     target_ocr_boxes = [b["box"] for b in target_boxes_for_table]
     hybrid_res = unified_hybrid_engine(target_ocr_boxes, image=image)
     if len(hybrid_res[1]) > 0:
+        if diagnostics is not None:
+            diagnostics["selected_engine"] = "unified_hybrid"
         tbl = hybrid_res[1][0]
         all_lines = header_lines + hybrid_res[0]
         return LayoutResult(all_lines, [tbl], parallel_header=parallel_hdr)
 
     # 4. Fallback cuối: Nếu UnifiedHybrid không tìm thấy nhưng detect_and_reconstruct_table có bảng
     if tbl_v1 is not None:
+        if diagnostics is not None:
+            diagnostics["selected_engine"] = "legacy_anchor_fallback"
         pre_lines = header_lines + _group_boxes_sliding_window(
             pre_tbl_v1, page_min_x, page_w, gutter_thresh, median_h
         )
@@ -1097,6 +1124,8 @@ def reconstruct_document_layout(
 
     # 3. Nếu không có bảng: Gom nhóm các dòng còn lại
     if header_lines:
+        if diagnostics is not None:
+            diagnostics["selected_engine"] = "line_grouping_with_parallel_header"
         rem_lines = _group_boxes_sliding_window(
             rem_boxes, page_min_x, page_w, gutter_thresh, median_h
         )
@@ -1106,6 +1135,8 @@ def reconstruct_document_layout(
     standard_lines = _group_boxes_sliding_window(
         box_info, page_min_x, page_w, gutter_thresh, median_h
     )
+    if diagnostics is not None:
+        diagnostics["selected_engine"] = "line_grouping"
     return LayoutResult(standard_lines, [], parallel_header=None)
 
 

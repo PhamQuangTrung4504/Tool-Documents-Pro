@@ -69,6 +69,7 @@ class TableCell:
     text: str = ""
     bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] của khung ô vật lý
     boxes: List[OCRBox] = field(default_factory=list)
+    diagonal_border: Optional[str] = None  # OOXML border name: "tl2br" or "tr2bl"
 
     @property
     def row_span(self) -> int:
@@ -167,6 +168,7 @@ class OCRResult:
     raw_full_text: str = ""                             # Văn bản gốc ban đầu trước khi khôi phục ký tự
     audit_trail: List[dict] = field(default_factory=list)  # Nhật ký vết các phép sửa tự động
     parallel_header: Optional[ParallelHeader] = None      # Tiêu đề hành chính 2 khối song song
+    diagnostics: Optional[Dict[str, Any]] = None  # Chỉ được tạo khi caller bật diagnostics
 
     @property
     def text(self) -> str:

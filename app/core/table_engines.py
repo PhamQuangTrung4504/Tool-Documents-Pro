@@ -628,6 +628,54 @@ def _segment_coverage(segments: List[Tuple[float, float]]) -> float:
     return total_len
 
 
+def _detect_diagonal_cell_borders(image: np.ndarray, cells: List[TableCell]) -> None:
+    """Attach diagonal OOXML border metadata only for corner-spanning rulings."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    img_h, img_w = gray.shape[:2]
+    for cell in cells:
+        if cell.bbox is None:
+            continue
+        x1, y1, x2, y2 = cell.bbox
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(img_w, x2), min(img_h, y2)
+        crop = gray[y1:y2, x1:x2]
+        crop_h, crop_w = crop.shape[:2]
+        if min(crop_w, crop_h) < 12:
+            continue
+
+        edges = cv2.Canny(crop, 50, 150)
+        diagonal_length = float(np.hypot(crop_w, crop_h))
+        min_line_length = max(18, int(0.65 * diagonal_length))
+        lines = cv2.HoughLinesP(
+            edges,
+            rho=1,
+            theta=np.pi / 180.0,
+            threshold=max(12, int(0.22 * diagonal_length)),
+            minLineLength=min_line_length,
+            maxLineGap=max(3, int(0.08 * min(crop_w, crop_h))),
+        )
+        if lines is None:
+            continue
+
+        corners = {
+            "tl2br": ((0.0, 0.0), (float(crop_w - 1), float(crop_h - 1))),
+            "tr2bl": ((float(crop_w - 1), 0.0), (0.0, float(crop_h - 1))),
+        }
+        endpoint_tolerance = max(3.0, 0.12 * min(crop_w, crop_h))
+        for raw_line in lines.reshape(-1, 4):
+            ax, ay, bx, by = (float(value) for value in raw_line)
+            if float(np.hypot(bx - ax, by - ay)) < min_line_length:
+                continue
+            for border_name, (corner_a, corner_b) in corners.items():
+                direct_error = np.hypot(ax - corner_a[0], ay - corner_a[1]) + np.hypot(bx - corner_b[0], by - corner_b[1])
+                reverse_error = np.hypot(bx - corner_a[0], by - corner_a[1]) + np.hypot(ax - corner_b[0], ay - corner_b[1])
+                if min(direct_error, reverse_error) <= 2.0 * endpoint_tolerance:
+                    cell.diagonal_border = border_name
+                    break
+            if cell.diagonal_border:
+                break
+
+
 def _filter_empty_rows(
     grid: List[List[str]],
     cells: List[TableCell],
@@ -841,6 +889,7 @@ def extract_physical_table_topology(
     min_cols: int = 2,
     min_rows: int = 2,
     vietocr_model: Any = None,
+    diagnostics: Optional[dict] = None,
 ) -> Optional[OCRTable]:
     """
     Trích xuất cấu trúc bảng dựa trên hình thái học lưới ô vật lý (Physical Grid Cell Topology).
@@ -963,6 +1012,89 @@ def extract_physical_table_topology(
     valid_y.sort()
     valid_x.sort()
 
+    # A table may continue below its last horizontal ruling and be clipped at
+    # the image edge. In that case vertical rulings are direct evidence of the
+    # remaining table extent. Reconstruct unruled suffix rows from the detected
+    # text baselines, using the median OCR-box height as the scale; do not infer
+    # any text or row identifiers.
+    inferred_suffix_boundaries: List[float] = []
+    if len(valid_y) >= 2 and len(valid_x) >= 2:
+        edge_verticals = [
+            x
+            for x in valid_x
+            if any(
+                abs(seg_x - x) <= 8.0
+                and y1 <= valid_y[-1] + 8.0
+                and y2 >= img_h - 1
+                for y1, y2, seg_x in v_segments
+            )
+        ]
+        lower_boxes = []
+        if len(edge_verticals) >= 2:
+            for box in boxes:
+                info = _box_to_dict(box)
+                if (
+                    info["cy"] > valid_y[-1]
+                    and info["right"] > valid_x[0]
+                    and info["left"] < valid_x[-1]
+                ):
+                    lower_boxes.append((box, info))
+
+        if len(edge_verticals) >= 2 and len(lower_boxes) >= 2:
+            median_text_height = float(np.median([item["h"] for _, item in lower_boxes]))
+            same_line_tolerance = 0.55 * median_text_height
+            line_groups: List[List[dict]] = []
+            for _, item in sorted(lower_boxes, key=lambda pair: (pair[1]["cy"], pair[1]["left"])):
+                matching_group = next(
+                    (
+                        group
+                        for group in reversed(line_groups)
+                        if abs(item["cy"] - float(np.mean([entry["cy"] for entry in group])))
+                        <= same_line_tolerance
+                    ),
+                    None,
+                )
+                if matching_group is None:
+                    line_groups.append([item])
+                else:
+                    matching_group.append(item)
+
+            # Adjacent baseline groups separated by no more than one median
+            # character height are treated as wrapped lines in one table row.
+            row_groups: List[List[dict]] = []
+            for group in line_groups:
+                if not row_groups:
+                    row_groups.append(list(group))
+                    continue
+                previous = row_groups[-1]
+                previous_center = float(np.mean([entry["cy"] for entry in previous]))
+                current_center = float(np.mean([entry["cy"] for entry in group]))
+                if current_center - previous_center <= median_text_height:
+                    previous.extend(group)
+                else:
+                    row_groups.append(list(group))
+
+            if len(row_groups) >= 2:
+                for previous, current in zip(row_groups, row_groups[1:]):
+                    previous_bottom = max(entry["bottom"] for entry in previous)
+                    current_top = min(entry["top"] for entry in current)
+                    if current_top > previous_bottom:
+                        boundary = (previous_bottom + current_top) / 2.0
+                    else:
+                        previous_center = float(np.mean([entry["cy"] for entry in previous]))
+                        current_center = float(np.mean([entry["cy"] for entry in current]))
+                        boundary = (previous_center + current_center) / 2.0
+                    if valid_y[-1] < boundary < img_h:
+                        inferred_suffix_boundaries.append(boundary)
+
+                # The bottom edge is clipped, so cap the reconstruction at the
+                # image boundary rather than extending beyond visible evidence.
+                if inferred_suffix_boundaries and inferred_suffix_boundaries[-1] < img_h:
+                    inferred_suffix_boundaries.append(float(img_h))
+
+    original_row_count = len(valid_y) - 1
+    valid_y.extend(inferred_suffix_boundaries)
+
     N = len(valid_y) - 1
     M = len(valid_x) - 1
 
@@ -1019,6 +1151,13 @@ def extract_physical_table_topology(
                 if density >= 0.25:
                     has_h_wall[r][c] = True
 
+    # The suffix boundaries above are inferred from consistent row geometry in
+    # a region with continuous vertical rulings. They define row partitions in
+    # the same way as observed horizontal rules, without claiming those rules
+    # were physically present in the scan.
+    for boundary_idx in range(original_row_count, N - 1):
+        has_h_wall[boundary_idx] = [True for _ in range(M)]
+
     visited = [[False for _ in range(M)] for _ in range(N)]
     cells: List[TableCell] = []
 
@@ -1059,6 +1198,8 @@ def extract_physical_table_topology(
                 bbox=cell_bbox,
             )
             cells.append(cell)
+
+    _detect_diagonal_cell_borders(image, cells)
 
     # Bước 4 — Gom Toàn Bộ Dòng Chữ Trong Cùng 1 Khung Ô Thành 1 Dòng Duy Nhất
     for b in boxes:
@@ -1165,37 +1306,6 @@ def extract_physical_table_topology(
     # Bước 4.b — Khôi phục nét chữ cho các ô bị DBNet bỏ sót (Empty-Cell Ink Recovery)
     _recover_missing_cell_ink(cells, image, vietocr_model=vietocr_model)
 
-    # Bước 4.c — Suy luận ngữ cảnh cho cột đồng nhất (ví dụ cột Tên ấp: 'ấp 2', hoặc cột TT: '1')
-    for c in range(M):
-        col_cells = [cell for cell in cells if cell.col_start == c]
-        non_empty_texts = [cell.text.strip() for cell in col_cells if cell.text.strip()]
-        if not non_empty_texts:
-            continue
-
-        # Cột Tên ấp: nếu đa số ô khác là 'ấp 2' và ô này có vết mực
-        from collections import Counter
-        counts = Counter(non_empty_texts)
-        most_common_text, most_common_count = counts.most_common(1)[0]
-        if most_common_count >= 2 and most_common_text.lower() in {"ấp 2", "ấp 1", "ấp 3"}:
-            for cell in col_cells:
-                if (not cell.text.strip() or cell.text.lower() in {"ấy", "p2", "ây", "2"}) and getattr(cell, "_has_ink", False):
-                    cell.text = most_common_text
-                    x1, y1, x2, y2 = cell.bbox if cell.bbox else (0, 0, 0, 0)
-                    cell.boxes.append(
-                        OCRBox(text=most_common_text, confidence=0.9, bbox=[[x1, y1], [x2, y1], [x2, y2], [x1, y2]], raw_text=most_common_text)
-                    )
-
-        # Cột TT / STT: nếu ô hàng 1 bị sót giữa hàng (1) và hàng 2
-        if c == 0:
-            for idx_c, cell in enumerate(col_cells):
-                if not cell.text.strip() and getattr(cell, "_has_ink", False):
-                    if idx_c + 1 < len(col_cells) and col_cells[idx_c + 1].text.strip() == "2":
-                        cell.text = "1"
-                        x1, y1, x2, y2 = cell.bbox if cell.bbox else (0, 0, 0, 0)
-                        cell.boxes.append(
-                            OCRBox(text="1", confidence=0.9, bbox=[[x1, y1], [x2, y1], [x2, y2], [x1, y2]], raw_text="1")
-                        )
-
     grid: List[List[str]] = [["" for _ in range(M)] for _ in range(N)]
     row_boxes: List[List[OCRBox]] = [[] for _ in range(N)]
 
@@ -1210,7 +1320,7 @@ def extract_physical_table_topology(
     grid, cells, row_boxes, N = _filter_empty_rows(grid, cells, row_boxes, N, M)
 
     table_bbox = [int(valid_x[0]), int(valid_y[0]), int(valid_x[-1]), int(valid_y[-1])]
-    return OCRTable(
+    result = OCRTable(
         grid=grid,
         bbox=table_bbox,
         num_rows=N,
@@ -1218,6 +1328,32 @@ def extract_physical_table_topology(
         row_boxes=row_boxes,
         cells=cells,
     )
+    if diagnostics is not None:
+        box_indexes = {id(box): index for index, box in enumerate(boxes)}
+        diagnostics.update({
+            "image_dimensions": [img_w, img_h],
+            "horizontal_segments": [list(segment) for segment in h_segments],
+            "vertical_segments": [list(segment) for segment in v_segments],
+            "horizontal_grid_boundaries": [float(y) for y in valid_y],
+            "vertical_grid_boundaries": [float(x) for x in valid_x],
+            "inferred_open_suffix_boundaries": [float(y) for y in inferred_suffix_boundaries],
+            "table_bbox": list(table_bbox),
+            "table_dimensions": {"rows": N, "columns": M},
+            "cells": [
+                {
+                    "row_start": cell.row_start,
+                    "col_start": cell.col_start,
+                    "row_end": cell.row_end,
+                    "col_end": cell.col_end,
+                    "bbox": list(cell.bbox) if cell.bbox is not None else None,
+                    "text": cell.text,
+                    "box_indexes": [box_indexes[id(box)] for box in cell.boxes if id(box) in box_indexes],
+                    "diagonal_border": cell.diagonal_border,
+                }
+                for cell in cells
+            ],
+        })
+    return result
 
 
 def split_table_crossing_boxes(
@@ -1430,11 +1566,12 @@ class PhysicalGridTopologyEngine:
             return LayoutResult([], [], parallel_header=None)
 
         box_info = [_box_to_dict(b) for b in boxes]
+        table_box_ids = {id(box) for cell in tbl.cells for box in cell.boxes}
         tbl_top = tbl.bbox[1]
         tbl_bottom = tbl.bbox[3]
 
-        pre_boxes = [b for b in box_info if b["cy"] < tbl_top - 5]
-        post_boxes = [b for b in box_info if b["cy"] > tbl_bottom + 5]
+        pre_boxes = [b for b in box_info if id(b["box"]) not in table_box_ids and b["cy"] < tbl_top - 5]
+        post_boxes = [b for b in box_info if id(b["box"]) not in table_box_ids and b["cy"] > tbl_bottom + 5]
 
         heights = [b["h"] for b in box_info]
         median_h = float(np.median(heights)) if heights else 20.0

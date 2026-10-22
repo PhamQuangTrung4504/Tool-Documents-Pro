@@ -461,6 +461,7 @@ class OCREngine:
         min_side: int = 1000,
         denoise: bool = True,
         enhance_contrast: bool = True,
+        diagnostics: Optional[List[dict]] = None,
     ) -> np.ndarray:
         """
         Tiền xử lý ảnh tài liệu thích ứng theo chất lượng ảnh (Quality-Aware Adaptive Preprocessing):
@@ -476,13 +477,23 @@ class OCREngine:
 
         if len(image.shape) == 3 and image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+            if diagnostics is not None:
+                diagnostics.append({"stage": "channel_normalization", "transformation": "BGRA_to_BGR"})
         elif len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            if diagnostics is not None:
+                diagnostics.append({"stage": "channel_normalization", "transformation": "GRAY_to_BGR"})
 
         img_h, img_w = image.shape[:2]
 
         quality = assess_image_quality(image)
         is_clean = quality["is_clean_document"]
+        if diagnostics is not None:
+            diagnostics.append({
+                "stage": "quality_assessment",
+                "metrics": quality.copy(),
+                "branch": "clean_document" if is_clean else "low_quality_document",
+            })
 
         if is_clean:
             # Trường hợp 1: Ảnh sạch / Scan rõ / Chụp màn hình
@@ -493,6 +504,8 @@ class OCREngine:
                 up_w = int(round(img_w * scale_up))
                 up_h = int(round(img_h * scale_up))
                 image = cv2.resize(image, (up_w, up_h), interpolation=cv2.INTER_LANCZOS4)
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "resize", "from": [img_w, img_h], "to": [up_w, up_h], "interpolation": "LANCZOS4"})
                 img_h, img_w = up_h, up_w
             elif shortest_side < min_side:
                 scale_up = min(1.5, float(min_side) / max(1, shortest_side))
@@ -500,6 +513,8 @@ class OCREngine:
                     up_w = int(round(img_w * scale_up))
                     up_h = int(round(img_h * scale_up))
                     image = cv2.resize(image, (up_w, up_h), interpolation=cv2.INTER_LANCZOS4)
+                    if diagnostics is not None:
+                        diagnostics.append({"stage": "resize", "from": [img_w, img_h], "to": [up_w, up_h], "interpolation": "LANCZOS4"})
                     img_h, img_w = up_h, up_w
 
             if max(img_h, img_w) > max_side:
@@ -507,15 +522,23 @@ class OCREngine:
                 new_w = int(img_w * scale_down)
                 new_h = int(img_h * scale_down)
                 image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "resize", "from": [img_w, img_h], "to": [new_w, new_h], "interpolation": "AREA"})
 
+            if diagnostics is not None:
+                diagnostics.append({"stage": "preprocessing_complete", "dimensions": [image.shape[1], image.shape[0]]})
             return image
 
         # Trường hợp 2: Ảnh chụp tối / Bóng đổ / Mờ / Giấy ố vàng
         # Khử bất đồng nhất ánh sáng & làm phẳng nền giấy
         try:
             image = compensate_illumination(image)
+            if diagnostics is not None:
+                diagnostics.append({"stage": "illumination_compensation", "status": "applied"})
         except Exception as e_ill:
             logger.debug(f"Illumination compensation failed: {e_ill}")
+            if diagnostics is not None:
+                diagnostics.append({"stage": "illumination_compensation", "status": "failed", "reason": type(e_ill).__name__})
 
         shortest_side = min(img_h, img_w)
         if shortest_side < min_side:
@@ -524,6 +547,8 @@ class OCREngine:
                 up_w = int(img_w * scale_up)
                 up_h = int(img_h * scale_up)
                 image = cv2.resize(image, (up_w, up_h), interpolation=cv2.INTER_CUBIC)
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "resize", "from": [img_w, img_h], "to": [up_w, up_h], "interpolation": "CUBIC"})
                 img_h, img_w = up_h, up_w
 
         if max(img_h, img_w) > max_side:
@@ -531,6 +556,8 @@ class OCREngine:
             new_w = int(img_w * scale_down)
             new_h = int(img_h * scale_down)
             image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            if diagnostics is not None:
+                diagnostics.append({"stage": "resize", "from": [img_w, img_h], "to": [new_w, new_h], "interpolation": "AREA"})
 
         # CLAHE nhẹ (clipLimit=1.2) trên kênh L
         if enhance_contrast:
@@ -540,15 +567,25 @@ class OCREngine:
                 clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
                 cl = clahe.apply(l)
                 image = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
-            except Exception:
-                pass
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "contrast_enhancement", "status": "applied", "method": "CLAHE", "clip_limit": 1.2, "tile_grid": [8, 8]})
+            except Exception as exc:
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "contrast_enhancement", "status": "failed", "reason": type(exc).__name__})
 
         # Khử nhiễu nhẹ
         if denoise:
             try:
                 image = cv2.fastNlMeansDenoisingColored(image, None, 4, 4, 7, 21)
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "denoising", "status": "applied", "method": "fastNlMeansDenoisingColored"})
             except Exception:
                 image = cv2.bilateralFilter(image, d=5, sigmaColor=50, sigmaSpace=50)
+                if diagnostics is not None:
+                    diagnostics.append({"stage": "denoising", "status": "fallback", "method": "bilateralFilter"})
+
+        if diagnostics is not None:
+            diagnostics.append({"stage": "preprocessing_complete", "dimensions": [image.shape[1], image.shape[0]]})
 
         return image
 
@@ -698,6 +735,7 @@ class OCREngine:
         preprocess: bool = True,
         denoise: bool = True,
         max_side: int = 2560,
+        include_diagnostics: bool = False,
     ) -> OCRResult:
         """
         Nhận dạng chữ từ ảnh với pipeline Hybrid:
@@ -728,14 +766,30 @@ class OCREngine:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
         orig_h, orig_w = image.shape[:2]
+        preprocessing_steps: List[dict] = []
+        diagnostic_report = None
+        if include_diagnostics:
+            diagnostic_report = {
+                "schema_version": 1,
+                "image": {"dimensions": [orig_w, orig_h], "quality": assess_image_quality(image)},
+                "preprocessing": preprocessing_steps,
+                "detection": {},
+                "recognition": [],
+                "layout": {},
+            }
 
         # 2. Tiền xử lý ảnh
         if preprocess:
             processed_image = self.preprocess_image(
-                image, max_side=max_side, denoise=denoise
+                image,
+                max_side=max_side,
+                denoise=denoise,
+                diagnostics=preprocessing_steps if include_diagnostics else None,
             )
         else:
             processed_image = image
+            if include_diagnostics:
+                preprocessing_steps.append({"stage": "preprocessing", "status": "skipped"})
 
         proc_h, proc_w = processed_image.shape[:2]
         scale_x = orig_w / float(proc_w)
@@ -805,6 +859,20 @@ class OCREngine:
         polygons, paddle_texts, paddle_scores = self._merge_horizontally_adjacent_subboxes(
             polygons, paddle_texts, paddle_scores, processed_image
         )
+        if diagnostic_report is not None:
+            diagnostic_report["detection"] = {
+                "count_after_geometric_merge": len(polygons),
+                "coordinate_space": "preprocessed_image",
+                "scale_to_original": [scale_x, scale_y],
+                "polygons": [
+                    {
+                        "polygon": [[float(x), float(y)] for x, y in polygon[:4]],
+                        "paddle_text": paddle_texts[index] if index < len(paddle_texts) else "",
+                        "confidence": paddle_scores[index] if index < len(paddle_scores) else None,
+                    }
+                    for index, polygon in enumerate(polygons)
+                ],
+            }
 
         # 4. Text Recognition: Sử dụng VietOCR cho tiếng Việt hoặc PaddleOCR
         boxes: List[OCRBox] = []
@@ -890,23 +958,50 @@ class OCREngine:
                 text = paddle_texts[idx] if idx < len(paddle_texts) else ""
                 conf = paddle_scores[idx] if idx < len(paddle_scores) else 0.5
 
+            raw_recognized_text = text
             # Chuẩn hóa văn bản Unicode NFC và làm sạch hậu kiểm
             text = unicodedata.normalize("NFC", text)
             text = VietnameseTextPostProcessor.clean_and_restore(text)
             text = unicodedata.normalize("NFC", text)
 
             # Bỏ qua dòng trống, dòng ảo giác lặp từ hoặc ký tự rác, hoặc quá thấp độ tin cậy
-            if text and not is_decorative_or_hallucinated(text, crop_bgr) and conf >= self.drop_score:
+            accepted = bool(text and not is_decorative_or_hallucinated(text, crop_bgr) and conf >= self.drop_score)
+            if accepted:
                 boxes.append(OCRBox(text=text, confidence=conf, bbox=bbox_int, raw_text=text))
+            if diagnostic_report is not None:
+                diagnostic_report["recognition"].append({
+                    "box_index": idx,
+                    "bbox_original": [[int(x), int(y)] for x, y in bbox_int],
+                    "paddle_text": paddle_texts[idx] if idx < len(paddle_texts) else "",
+                    "paddle_confidence": paddle_scores[idx] if idx < len(paddle_scores) else None,
+                    "recognizer_raw_text": raw_recognized_text,
+                    "normalized_text": text,
+                    "confidence": float(conf),
+                    "accepted": accepted,
+                })
 
         # 5. Lọc nhiễu quét do cắt ngang viền ảnh (Border noise filtering)
+        box_count_before_border_filter = len(boxes)
         boxes = filter_border_noise_boxes(boxes, image_width=orig_w, image_height=orig_h)
+        box_count_after_border_filter = len(boxes)
 
         # 5.b. Tách các OCRBox bị DBNet gộp ngang xuyên qua vạch kẻ dọc của bảng
         boxes = split_table_crossing_boxes(boxes, image=image, vietocr_model=self._vietocr)
+        if diagnostic_report is not None:
+            diagnostic_report["detection"]["recognized_box_counts"] = {
+                "before_border_filter": box_count_before_border_filter,
+                "after_border_filter": box_count_after_border_filter,
+                "after_boundary_split": len(boxes),
+            }
+        diagnostic_input_boxes = list(boxes) if diagnostic_report is not None else []
 
         # 6. Gom nhóm các khối chữ theo dòng và tái dựng bố cục tài liệu (Layout Reconstruction)
-        layout_res = reconstruct_document_layout(boxes, image=image, vietocr_model=self._vietocr)
+        layout_res = reconstruct_document_layout(
+            boxes,
+            image=image,
+            vietocr_model=self._vietocr,
+            diagnostics=diagnostic_report["layout"] if diagnostic_report is not None else None,
+        )
         grouped_lines = layout_res[0]
         detected_tables = layout_res[1]
         parallel_hdr = getattr(layout_res, "parallel_header", None)
@@ -1143,6 +1238,61 @@ class OCREngine:
         # Khóa chốt bảo đảm full_text luôn được xử lý qua final_document_cleanup sau cùng
         full_text = final_document_cleanup(full_text)
 
+        if diagnostic_report is not None:
+            input_indexes = {id(box): index for index, box in enumerate(diagnostic_input_boxes)}
+            line_membership: Dict[int, List[int]] = {}
+            for line_index, line in enumerate(grouped_lines):
+                for box in line:
+                    if id(box) in input_indexes:
+                        line_membership.setdefault(input_indexes[id(box)], []).append(line_index)
+            table_membership: Dict[int, List[Tuple[int, int]]] = {}
+            for table_index, table in enumerate(detected_tables):
+                for cell in table.cells:
+                    for box in cell.boxes:
+                        if id(box) in input_indexes:
+                            table_membership.setdefault(input_indexes[id(box)], []).append((table_index, cell.row_start, cell.col_start))
+            diagnostic_report["layout"]["ownership"] = [
+                {
+                    "box_index": index,
+                    "line_indexes": line_membership.get(index, []),
+                    "table_cells": table_membership.get(index, []),
+                    "owner": "table_cell" if index in table_membership else "paragraph" if index in line_membership else "unassigned",
+                }
+                for index in range(len(diagnostic_input_boxes))
+            ]
+            diagnostic_report["layout"]["ownership_invariants"] = {
+                "recognized_box_count": len(diagnostic_input_boxes),
+                "unassigned_box_count": sum(
+                    not line_membership.get(index) and index not in table_membership
+                    for index in range(len(diagnostic_input_boxes))
+                ),
+                "duplicate_line_assignment_count": sum(
+                    max(0, len(line_membership.get(index, [])) - 1)
+                    for index in range(len(diagnostic_input_boxes))
+                ),
+            }
+            diagnostic_report["layout"]["final_tables"] = [
+                {
+                    "bbox": list(table.bbox),
+                    "rows": table.num_rows,
+                    "columns": table.num_cols,
+                    "grid": [list(row) for row in table.grid],
+                    "cells": [
+                        {
+                            "row_start": cell.row_start,
+                            "col_start": cell.col_start,
+                            "row_end": cell.row_end,
+                            "col_end": cell.col_end,
+                            "bbox": list(cell.bbox) if cell.bbox is not None else None,
+                            "text": cell.text,
+                            "diagonal_border": cell.diagonal_border,
+                        }
+                        for cell in table.cells
+                    ],
+                }
+                for table in detected_tables
+            ]
+
         elapsed = time.perf_counter() - t0
         result = OCRResult(
             boxes=boxes,
@@ -1155,6 +1305,7 @@ class OCREngine:
             raw_full_text=raw_full_text,
             audit_trail=audit_records,
             parallel_header=parallel_hdr,
+            diagnostics=diagnostic_report,
         )
 
         logger.info(
