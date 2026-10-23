@@ -10,7 +10,7 @@ Tính năng:
 - Hiển thị preview ảnh gốc + ảnh có bounding box
 - Chọn ngôn ngữ nhận dạng
 - Nút OCR / Copy / Export
-- Thanh trạng thái + progress bar
+- Thanh trạng thái và tiến trình ngay trong Word Preview
 - Phím tắt đầy đủ
 """
 
@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from threading import Event
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -31,29 +32,22 @@ from loguru import logger
 
 from PyQt5.QtCore import (
     QEvent,
-    QMimeData,
-    QPoint,
     QSize,
     Qt,
     QThread,
-    QTimer,
     pyqtSignal,
     pyqtSlot,
+    QSettings,
 )
 from PyQt5.QtGui import (
     QClipboard,
-    QColor,
     QDragEnterEvent,
     QDropEvent,
     QFont,
     QIcon,
     QImage,
     QKeySequence,
-    QPainter,
-    QPalette,
     QPixmap,
-    QTextCharFormat,
-    QTextCursor,
 )
 from PyQt5.QtWidgets import (
     QAction,
@@ -61,7 +55,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -71,8 +64,6 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QShortcut,
@@ -80,7 +71,6 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QStatusBar,
     QTabWidget,
-    QTextEdit,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -90,13 +80,14 @@ from PyQt5.QtWidgets import (
 from app.core.ocr_engine import (
     LANGUAGE_MAP,
     OCREngine,
+    OCRCancelledError,
     OCRResult,
     export_to_docx,
     format_confidence,
     get_display_languages,
     get_lang_code,
 )
-from app.core.spell_corrector import SpellError, check_text_spelling
+from app.core.spell_corrector import check_text_spelling
 from app.core.document_session import DocumentSession
 from app.core.structured_editing import EditOwnershipError, StructuredDocumentEditor
 from app.core.document_renderer import DocumentRenderService
@@ -107,11 +98,12 @@ from app.ui.word_preview import WordPreviewWidget
 # ---------------------------------------------------------------------------
 
 APP_TITLE = "Tool-Documents-Pro — OCR"
-MIN_WIDTH = 1100
+MIN_WIDTH = 1040
 MIN_HEIGHT = 720
 
-# Bảng màu Dark theme
-COLORS = {
+# Mã màu giao diện được tập trung để Light/Dark dùng chung thành phần.
+THEME_COLORS = {
+  "dark": {
     "bg_primary": "#0f0f14",
     "bg_secondary": "#16161d",
     "bg_card": "#1c1c26",
@@ -129,7 +121,26 @@ COLORS = {
     "text_muted": "#555570",
     "scrollbar_bg": "#1a1a24",
     "scrollbar_handle": "#333348",
+  },
+  "light": {
+    "bg_primary": "#f7f7f8", "bg_secondary": "#ffffff", "bg_card": "#ffffff",
+    "bg_input": "#f1f2f4", "border": "#e1e3e6", "border_focus": "#6c5ce7",
+    "accent": "#6c5ce7", "accent_hover": "#5b4bd6", "accent_pressed": "#4e40c4",
+    "success": "#168a65", "warning": "#a66a00", "danger": "#bd3c38",
+    "text_primary": "#202123", "text_secondary": "#62656a", "text_muted": "#858990",
+    "scrollbar_bg": "#f1f2f4", "scrollbar_handle": "#c5c8ce",
+  },
 }
+DESIGN_TOKENS = {
+    "font_family": "'Segoe UI', 'Arial', sans-serif",
+    "font_size": 13,
+    "space_small": 6,
+    "space_medium": 10,
+    "radius_small": 6,
+    "radius_medium": 8,
+    "radius_large": 12,
+}
+COLORS = THEME_COLORS["dark"]
 
 # ---------------------------------------------------------------------------
 # Image file filter
@@ -154,8 +165,9 @@ SUPPORTED_EXTENSIONS = {
 class OCRWorker(QThread):
     """Thread chạy OCR để không block giao diện."""
 
-    finished = pyqtSignal(object)  # OCRResult | Exception
+    result_ready = pyqtSignal(object)  # OCRResult | Exception
     progress = pyqtSignal(str)     # Thông báo tiến trình
+    progress_detail = pyqtSignal(int, int)  # Hoàn tất/tổng số vùng của giai đoạn nhận dạng
 
     def __init__(
         self,
@@ -166,21 +178,33 @@ class OCRWorker(QThread):
         super().__init__(parent)
         self._engine = engine
         self._image = image
+        self._cancel_event = Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
+            if self._cancel_event.is_set():
+                raise OCRCancelledError("OCR đã được hủy trước khi bắt đầu.")
             self.progress.emit("Đang tải model OCR …")
             self._engine._ensure_loaded()
+            if self._cancel_event.is_set():
+                raise OCRCancelledError("OCR đã được hủy sau khi tải model.")
 
             self.progress.emit("Đang nhận dạng …")
             result = self._engine.recognize(
                 self._image, preprocess=True, denoise=True,
+                progress_callback=self.progress.emit,
+                progress_detail_callback=self.progress_detail.emit,
+                cancel_event=self._cancel_event,
             )
-            self.finished.emit(result)
-
+            self.result_ready.emit(result)
+        except OCRCancelledError as exc:
+            self.result_ready.emit(exc)
         except Exception as exc:
             logger.exception("OCR worker error:")
-            self.finished.emit(exc)
+            self.result_ready.emit(exc)
 
 
 class SpellCheckWorker(QThread):
@@ -209,6 +233,7 @@ class DocumentWorker(QThread):
     """Create the session DOCX and render that same file to PDF off the UI thread."""
     docx_ready = pyqtSignal(str, object)
     rendered = pyqtSignal(str, object)
+    progress = pyqtSignal(str, str)
 
     def __init__(self, result: OCRResult, session: DocumentSession, generation: int, parent=None):
         super().__init__(parent)
@@ -217,6 +242,7 @@ class DocumentWorker(QThread):
         self.generation = generation
 
     def run(self) -> None:
+        self.progress.emit(self.session.session_id, "Đang xuất DOCX …")
         if not export_to_docx(self.result, str(self.session.docx_path)):
             self.docx_ready.emit(self.session.session_id, RuntimeError("Không thể tạo file Word tạm."))
             return
@@ -235,6 +261,7 @@ class DocumentWorker(QThread):
             return
         self.docx_ready.emit(self.session.session_id, self.session.docx_path)
         try:
+            self.progress.emit(self.session.session_id, "Đang chuyển Word thành PDF xem trước …")
             pdf = DocumentRenderService().render_docx(self.session.docx_path, self.session.pdf_path)
             self.rendered.emit(self.session.session_id, pdf)
         except Exception as exc:
@@ -279,24 +306,24 @@ def numpy_to_qpixmap(image: np.ndarray) -> QPixmap:
 # ---------------------------------------------------------------------------
 
 
-def build_stylesheet() -> str:
+def build_stylesheet(theme: str = "dark") -> str:
     """Tạo stylesheet cho toàn bộ ứng dụng."""
-    c = COLORS
+    c = THEME_COLORS.get(theme, THEME_COLORS["dark"])
     return f"""
     /* ===== GLOBAL ===== */
     QMainWindow, QWidget {{
         background-color: {c['bg_primary']};
         color: {c['text_primary']};
-        font-family: 'Segoe UI', 'Arial', sans-serif;
-        font-size: 13px;
+        font-family: {DESIGN_TOKENS['font_family']};
+        font-size: {DESIGN_TOKENS['font_size']}px;
     }}
 
     /* ===== TOOLBAR ===== */
     QToolBar {{
         background-color: {c['bg_secondary']};
         border-bottom: 1px solid {c['border']};
-        padding: 6px 10px;
-        spacing: 8px;
+        padding: {DESIGN_TOKENS['space_small']}px {DESIGN_TOKENS['space_medium']}px;
+        spacing: {DESIGN_TOKENS['space_medium']}px;
     }}
     QToolBar QToolButton {{
         background-color: transparent;
@@ -313,13 +340,15 @@ def build_stylesheet() -> str:
     QToolBar QToolButton:pressed {{
         background-color: {c['accent_pressed']};
     }}
+    QLabel#appBrand {{ font-size: 15px; font-weight: 700; color: {c['text_primary']}; padding: 0 8px; }}
+    QLabel#toolbarLabel {{ color: {c['text_secondary']}; padding-left: 4px; }}
 
     /* ===== BUTTONS ===== */
     QPushButton {{
         background-color: {c['bg_card']};
         color: {c['text_primary']};
         border: 1px solid {c['border']};
-        border-radius: 8px;
+        border-radius: {DESIGN_TOKENS['radius_medium']}px;
         padding: 8px 20px;
         font-weight: 600;
         font-size: 13px;
@@ -335,58 +364,6 @@ def build_stylesheet() -> str:
     QPushButton:disabled {{
         color: {c['text_muted']};
         border-color: {c['border']};
-    }}
-
-    QPushButton#btnOCR {{
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:1,
-            stop:0 {c['accent']}, stop:1 #a29bfe
-        );
-        color: #ffffff;
-        border: none;
-        font-size: 14px;
-        padding: 10px 28px;
-        border-radius: 10px;
-    }}
-    QPushButton#btnOCR:hover {{
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:1,
-            stop:0 {c['accent_hover']}, stop:1 #b8b0ff
-        );
-    }}
-    QPushButton#btnOCR:pressed {{
-        background-color: {c['accent_pressed']};
-    }}
-    QPushButton#btnOCR:disabled {{
-        background: {c['bg_input']};
-        color: {c['text_muted']};
-    }}
-
-    QPushButton#btnCopy {{
-        background-color: {c['success']};
-        color: #ffffff;
-        border: none;
-    }}
-    QPushButton#btnCopy:hover {{
-        background-color: #00d9a5;
-    }}
-
-    QPushButton#btnSpellCheck {{
-        background-color: #d63031;
-        color: #ffffff;
-        border: none;
-    }}
-    QPushButton#btnSpellCheck:hover {{
-        background-color: #e17055;
-    }}
-
-    QPushButton#btnClearSpell {{
-        background-color: #2d3436;
-        color: #dfe6e9;
-        border: 1px solid #4a4a5a;
-    }}
-    QPushButton#btnClearSpell:hover {{
-        background-color: #3b3b4f;
     }}
 
     /* ===== COMBO BOX ===== */
@@ -422,6 +399,11 @@ def build_stylesheet() -> str:
         selection-color: #ffffff;
         outline: none;
     }}
+
+    QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 10px; top: -1px; background: {c['bg_secondary']}; }}
+    QTabBar::tab {{ background: {c['bg_primary']}; color: {c['text_secondary']}; padding: 9px 14px; margin-right: 4px; border: 1px solid transparent; border-radius: 8px; }}
+    QTabBar::tab:selected {{ color: {c['text_primary']}; background: {c['bg_card']}; border-color: {c['border']}; }}
+    QTabBar::tab:hover:!selected {{ color: {c['text_primary']}; background: {c['bg_input']}; }}
 
     /* ===== GROUP BOX ===== */
     QGroupBox {{
@@ -473,22 +455,6 @@ def build_stylesheet() -> str:
         width: 0px;
     }}
 
-    /* ===== TEXT EDITOR ===== */
-    QPlainTextEdit {{
-        background-color: {c['bg_input']};
-        color: {c['text_primary']};
-        border: 1px solid {c['border']};
-        border-radius: 8px;
-        padding: 10px;
-        font-family: 'Consolas', 'Cascadia Code', monospace;
-        font-size: 13px;
-        selection-background-color: {c['accent']};
-        selection-color: #ffffff;
-    }}
-    QPlainTextEdit:focus {{
-        border-color: {c['accent']};
-    }}
-
     /* ===== STATUS BAR ===== */
     QStatusBar {{
         background-color: {c['bg_secondary']};
@@ -502,24 +468,25 @@ def build_stylesheet() -> str:
         padding: 0 6px;
     }}
 
-    /* ===== PROGRESS BAR ===== */
-    QProgressBar {{
-        background-color: {c['bg_input']};
+    QFrame#previewStatePanel {{
+        background-color: {c['bg_card']};
         border: 1px solid {c['border']};
-        border-radius: 6px;
-        text-align: center;
-        color: {c['text_primary']};
-        font-size: 11px;
-        min-height: 14px;
-        max-height: 14px;
+        border-radius: 12px;
     }}
-    QProgressBar::chunk {{
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:0,
-            stop:0 {c['accent']}, stop:1 #a29bfe
-        );
-        border-radius: 5px;
-    }}
+    QLabel#previewStateTitle {{ color: {c['text_primary']}; font-size: 20px; font-weight: 700; }}
+    QLabel#previewStateMessage {{ color: {c['text_secondary']}; font-size: 14px; }}
+    QPushButton#primaryButton {{ background-color: {c['accent']}; color: #fff; border: 0; border-radius: {DESIGN_TOKENS['radius_medium']}px; padding: 7px 16px; font-weight: 700; }}
+    QPushButton#primaryButton:hover {{ background-color: {c['accent_hover']}; }}
+    QPushButton#primaryButton:pressed {{ background-color: {c['accent_pressed']}; }}
+    QPushButton#primaryButton:disabled {{ background-color: {c['bg_input']}; color: {c['text_muted']}; }}
+    QPushButton#secondaryButton, QPushButton#iconButton {{ background-color: {c['bg_card']}; color: {c['text_primary']}; border: 1px solid {c['border']}; border-radius: {DESIGN_TOKENS['radius_medium']}px; padding: 6px 12px; }}
+    QPushButton#secondaryButton:hover, QPushButton#iconButton:hover {{ border-color: {c['accent']}; }}
+    QPushButton#iconButton {{ min-width: 32px; max-width: 36px; padding: 4px; }}
+    QPushButton:focus, QToolButton:focus, QComboBox:focus {{ border: 1px solid {c['border_focus']}; }}
+    QMenu {{ background: {c['bg_card']}; color: {c['text_primary']}; border: 1px solid {c['border']}; padding: 4px; }}
+    QMenu::item {{ padding: 7px 22px 7px 10px; border-radius: {DESIGN_TOKENS['radius_small']}px; }}
+    QMenu::item:selected {{ background: {c['bg_input']}; color: {c['text_primary']}; }}
+    QToolTip {{ background: {c['bg_card']}; color: {c['text_primary']}; border: 1px solid {c['border']}; padding: 5px 7px; }}
 
     /* ===== LABEL ===== */
     QLabel#labelTitle {{
@@ -564,6 +531,12 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._settings = QSettings("Tool-Documents-Pro", "Tool-Documents-Pro")
+        self._theme = str(self._settings.value("theme", "dark"))
+        if self._theme not in THEME_COLORS:
+            self._theme = "dark"
+        global COLORS
+        COLORS = THEME_COLORS[self._theme]
 
         # State
         self._current_image: Optional[np.ndarray] = None  # BGR
@@ -572,19 +545,14 @@ class MainWindow(QMainWindow):
         self._image_path: Optional[str] = None
         self._ocr_worker: Optional[OCRWorker] = None
         self._spell_worker: Optional[SpellCheckWorker] = None
-        self._active_spell_errors: List[SpellError] = []
-        self._is_replacing_suggestion: bool = False
         self._generation = 0
         self._document_session: Optional[DocumentSession] = None
         self._document_worker: Optional[DocumentWorker] = None
         self._document_workers: List[DocumentWorker] = []
         self._retired_sessions: Dict[str, DocumentSession] = {}
-        self._document_dirty = False
         self._structured_editor: Optional[StructuredDocumentEditor] = None
         self._review_resolved_boxes: Set[int] = set()
         self._structured_saved = True
-        self._plain_text_mode_active = False
-        self._plain_text_saved = True
 
         # Engine (lazy)
         self._engine: Optional[OCREngine] = None
@@ -609,7 +577,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
         self.resize(1280, 820)
-        self.setStyleSheet(build_stylesheet())
+        self.setStyleSheet(build_stylesheet(self._theme))
+        app = QApplication.instance()
+        if app is not None:
+            app.setFont(QFont("Segoe UI", 10))
 
         # Thiết lập AppUserModelID trên Windows để icon hiển thị đúng trên Windows Taskbar
         if sys.platform == "win32":
@@ -640,11 +611,17 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _init_toolbar(self) -> None:
-        tb = QToolBar("Toolbar")
+        tb = QToolBar("Tác vụ tài liệu")
         tb.setMovable(False)
         tb.setIconSize(QSize(20, 20))
         self.addToolBar(Qt.TopToolBarArea, tb)
 
+        app_name = QLabel("Tool-Documents-Pro")
+        app_name.setObjectName("appBrand")
+        tb.addWidget(app_name)
+        tb.addSeparator()
+
+        tb.setObjectName("mainToolbar")
         # --- Mở ảnh ---
         self.act_open = QAction("📂 Mở ảnh", self)
         self.act_open.setToolTip("Mở file ảnh (Ctrl+O)")
@@ -658,14 +635,11 @@ class MainWindow(QMainWindow):
         self.act_paste.setShortcut(QKeySequence("Ctrl+V"))
         self.act_paste.triggered.connect(self._on_paste_image)
         tb.addAction(self.act_paste)
-
         tb.addSeparator()
 
         # --- Chọn ngôn ngữ ---
-        lang_label = QLabel("  Ngôn ngữ: ")
-        lang_label.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: 12px;"
-        )
+        lang_label = QLabel("Ngôn ngữ")
+        lang_label.setObjectName("toolbarLabel")
         tb.addWidget(lang_label)
 
         self.combo_lang = QComboBox()
@@ -677,22 +651,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
 
         # --- Nút OCR ---
-        self.act_ocr = QAction("🔍 Nhận dạng (Ctrl+R)", self)
+        self.act_ocr = QAction("Nhận dạng OCR (Ctrl+R)", self)
         self.act_ocr.setToolTip("Chạy nhận dạng chữ")
         self.act_ocr.triggered.connect(self._on_run_ocr)
-        tb.addAction(self.act_ocr)
-
-        # --- Kiểm tra chính tả ---
-        self.act_spell_check = QAction("📝 Kiểm tra chính tả", self)
-        self.act_spell_check.setToolTip("Kiểm tra chính tả tiếng Việt trong khung văn bản (Ctrl+K)")
-        self.act_spell_check.triggered.connect(self._on_check_spelling)
-        tb.addAction(self.act_spell_check)
-
-        # --- Bỏ đánh dấu ---
-        self.act_clear_spell = QAction("🧹 Bỏ đánh dấu", self)
-        self.act_clear_spell.setToolTip("Xóa các đánh dấu chính tả (Ctrl+Shift+K)")
-        self.act_clear_spell.triggered.connect(self._on_clear_spelling_highlights)
-        tb.addAction(self.act_clear_spell)
 
         # --- Spacer ---
         spacer = QWidget()
@@ -700,11 +661,63 @@ class MainWindow(QMainWindow):
         spacer.setStyleSheet("background: transparent;")
         tb.addWidget(spacer)
 
-        # --- Xoá ---
-        self.act_clear = QAction("🗑️ Xoá", self)
-        self.act_clear.setToolTip("Xoá ảnh và kết quả")
+        # --- Hành động chính ---
+        self.btn_ocr = QPushButton("Nhận dạng OCR")
+        self.btn_ocr.setObjectName("primaryButton")
+        self.btn_ocr.setMinimumHeight(36)
+        self.btn_ocr.setToolTip("Chạy nhận dạng chữ (Ctrl+R)")
+        self.btn_ocr.clicked.connect(self._on_run_ocr)
+        tb.addWidget(self.btn_ocr)
+        self.act_ocr.triggered.connect(self._on_run_ocr)
+
+        self.btn_export_docx = QPushButton("Lưu Word")
+        self.btn_export_docx.setObjectName("secondaryButton")
+        self.btn_export_docx.setMinimumHeight(36)
+        self.btn_export_docx.setToolTip("Lưu bản Word đang được xem trước")
+        self.btn_export_docx.clicked.connect(self._on_export_docx)
+        tb.addWidget(self.btn_export_docx)
+
+        self.utility_menu = QMenu("Tiện ích", self)
+        self.btn_copy = QAction("Sao chép văn bản", self)
+        self.btn_copy.triggered.connect(self._on_copy_result)
+        self.act_spell_check = QAction("Kiểm tra chính tả", self)
+        self.act_spell_check.setToolTip("Dò soát nội dung OCR và xem các vị trí cần kiểm tra")
+        self.act_spell_check.triggered.connect(self._on_check_spelling)
+        self.btn_export = QAction("Xuất văn bản TXT…", self)
+        self.btn_export.triggered.connect(self._on_export_txt)
+        self.act_clear = QAction("Xóa tài liệu hiện tại…", self)
         self.act_clear.triggered.connect(self._on_clear)
-        tb.addAction(self.act_clear)
+        for action in (self.btn_copy, self.act_spell_check, self.btn_export):
+            self.utility_menu.addAction(action)
+        self.utility_menu.addSeparator()
+        self.utility_menu.addAction(self.act_clear)
+        utility_button = QToolButton()
+        utility_button.setText("Tiện ích")
+        utility_button.setPopupMode(QToolButton.InstantPopup)
+        utility_button.setMenu(self.utility_menu)
+        tb.addWidget(utility_button)
+
+        theme_menu = QMenu("Giao diện", self)
+        self.act_theme_light = QAction("Sáng", self)
+        self.act_theme_light.setCheckable(True)
+        self.act_theme_dark = QAction("Tối", self)
+        self.act_theme_dark.setCheckable(True)
+        self.act_theme_light.triggered.connect(lambda: self._apply_theme("light"))
+        self.act_theme_dark.triggered.connect(lambda: self._apply_theme("dark"))
+        theme_menu.addAction(self.act_theme_light)
+        theme_menu.addAction(self.act_theme_dark)
+        theme_menu.addSeparator()
+        self.act_reduce_motion = QAction("Giảm chuyển động", self)
+        self.act_reduce_motion.setCheckable(True)
+        self.act_reduce_motion.setChecked(
+            self._settings.value("reduce_motion", False, type=bool)
+        )
+        self.act_reduce_motion.toggled.connect(self._set_reduce_motion)
+        theme_menu.addAction(self.act_reduce_motion)
+        self.act_theme_menu = QAction("Giao diện", self)
+        self.act_theme_menu.setMenu(theme_menu)
+        tb.addAction(self.act_theme_menu)
+        self._sync_theme_actions()
 
     # ==================================================================
     # INIT — Central widget
@@ -717,9 +730,11 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 8, 10, 4)
         main_layout.setSpacing(8)
 
-        # Splitter: bên trái = ảnh, bên phải = kết quả
+        # Workspace chia đôi, có giới hạn tối thiểu để Preview luôn dùng được.
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(3)
+        splitter.setChildrenCollapsible(False)
+        self.workspace_splitter = splitter
         main_layout.addWidget(splitter, stretch=1)
 
         # ---------- LEFT: Image Panel ----------
@@ -729,13 +744,34 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(6)
 
         # Title
-        img_title = QLabel("📷  Ảnh đầu vào")
+        img_title = QLabel("Ảnh nguồn")
         img_title.setObjectName("labelTitle")
         left_layout.addWidget(img_title)
 
+        source_tools = QHBoxLayout()
+        self.source_zoom_out = QPushButton("−")
+        self.source_zoom_out.setObjectName("iconButton")
+        self.source_zoom_out.setToolTip("Thu nhỏ ảnh")
+        self.source_zoom_in = QPushButton("+")
+        self.source_zoom_in.setObjectName("iconButton")
+        self.source_zoom_in.setToolTip("Phóng to ảnh")
+        self.source_fit = QPushButton("Vừa khung")
+        self.source_fit.setObjectName("secondaryButton")
+        self.source_fit.setToolTip("Thu phóng ảnh vừa khung xem")
+        self.source_zoom = 1.0
+        self.source_fit_mode = True
+        self.source_zoom_out.clicked.connect(lambda: self._set_source_zoom(self.source_zoom / 1.15))
+        self.source_zoom_in.clicked.connect(lambda: self._set_source_zoom(self.source_zoom * 1.15))
+        self.source_fit.clicked.connect(self._fit_source_image)
+        source_tools.addStretch(1)
+        source_tools.addWidget(self.source_zoom_out)
+        source_tools.addWidget(self.source_zoom_in)
+        source_tools.addWidget(self.source_fit)
+        left_layout.addLayout(source_tools)
+
         # Scroll area chứa ảnh
         self.scroll_image = QScrollArea()
-        self.scroll_image.setWidgetResizable(True)
+        self.scroll_image.setWidgetResizable(False)
         self.scroll_image.setAlignment(Qt.AlignCenter)
 
         self.label_image = QLabel()
@@ -751,10 +787,14 @@ class MainWindow(QMainWindow):
         self.label_image.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
-        self.label_image.setMinimumSize(400, 300)
+        self.label_image.setMinimumSize(1, 1)
         self.scroll_image.setWidget(self.label_image)
 
         left_layout.addWidget(self.scroll_image, stretch=1)
+        self.label_source_name = QLabel("Chưa mở ảnh")
+        self.label_source_name.setObjectName("labelHint")
+        left_layout.addWidget(self.label_source_name)
+        left_panel.setMinimumWidth(340)
         splitter.addWidget(left_panel)
 
         # ---------- RIGHT: Result Panel ----------
@@ -764,25 +804,28 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(6)
 
         # Title
-        result_title = QLabel("📄  Xem trước tài liệu Word")
+        result_title = QLabel("Không gian Word")
         result_title.setObjectName("labelTitle")
         right_layout.addWidget(result_title)
 
         self.document_tabs = QTabWidget()
         self.word_preview = WordPreviewWidget()
+        self.word_preview.set_theme(self._theme)
+        self.word_preview.circular_progress.set_reduce_motion(
+            self._settings.value("reduce_motion", False, type=bool)
+        )
+        self.word_preview.preview_ready.connect(self._on_word_preview_ready)
+        self.word_preview.preview_failed.connect(self._on_word_preview_failed)
+        self.word_preview.cancel_requested.connect(self._request_ocr_cancel)
+        self.word_preview.retry_requested.connect(self._retry_processing)
+        self.processing_overlay = self.word_preview.state_panel
+        self.processing_title = self.word_preview.state_title
+        self.processing_message = self.word_preview.state_message
+        self.processing_indicator = self.word_preview.circular_progress
+        self.processing_cancel = self.word_preview.state_cancel
+        self.processing_retry = self.word_preview.state_retry
         self.document_tabs.addTab(self.word_preview, "Xem trước Word")
         right_layout.addWidget(self.document_tabs, stretch=1)
-
-        # Text editor (kept as an explicit editing/spell-check mode)
-        self.text_result = QPlainTextEdit()
-        self.text_result.setPlaceholderText(
-            "Kết quả OCR sẽ hiển thị tại đây …"
-        )
-        self.text_result.setReadOnly(False)
-        self.text_result.textChanged.connect(self._on_text_changed)
-        self.text_result.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.text_result.customContextMenuRequested.connect(self._on_text_context_menu)
-        self.document_tabs.addTab(self.text_result, "Chỉnh sửa toàn văn (Word thuần)")
 
         review_tab = QWidget()
         review_layout = QVBoxLayout(review_tab)
@@ -828,71 +871,16 @@ class MainWindow(QMainWindow):
         self.document_tabs.addTab(review_tab, "Rà soát OCR")
         self._set_review_controls_enabled(False)
 
+        right_panel.setMinimumWidth(500)
         # Info label
         self.label_info = QLabel("")
         self.label_info.setObjectName("labelHint")
         right_layout.addWidget(self.label_info)
 
-        # Separator
-        sep = QFrame()
-        sep.setObjectName("separator")
-        sep.setFrameShape(QFrame.HLine)
-        right_layout.addWidget(sep)
-
-        # Button row
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        self.btn_ocr = QPushButton("🔍  Nhận dạng OCR")
-        self.btn_ocr.setObjectName("btnOCR")
-        self.btn_ocr.setFixedHeight(42)
-        self.btn_ocr.clicked.connect(self._on_run_ocr)
-        btn_row.addWidget(self.btn_ocr)
-
-        self.btn_copy = QPushButton("📋  Sao chép")
-        self.btn_copy.setObjectName("btnCopy")
-        self.btn_copy.setFixedHeight(42)
-        self.btn_copy.clicked.connect(self._on_copy_result)
-        btn_row.addWidget(self.btn_copy)
-
-        self.btn_spell_check = QPushButton("📝  Kiểm tra chính tả")
-        self.btn_spell_check.setObjectName("btnSpellCheck")
-        self.btn_spell_check.setFixedHeight(42)
-        self.btn_spell_check.setToolTip("Dò soát và đánh dấu nghi vấn chính tả trên Textbox (Ctrl+K)")
-        self.btn_spell_check.clicked.connect(self._on_check_spelling)
-        btn_row.addWidget(self.btn_spell_check)
-
-        self.btn_clear_spell = QPushButton("🧹  Bỏ đánh dấu")
-        self.btn_clear_spell.setObjectName("btnClearSpell")
-        self.btn_clear_spell.setFixedHeight(42)
-        self.btn_clear_spell.setToolTip("Xóa định dạng đánh dấu chính tả (Ctrl+Shift+K)")
-        self.btn_clear_spell.clicked.connect(self._on_clear_spelling_highlights)
-        btn_row.addWidget(self.btn_clear_spell)
-
-        self.btn_export = QPushButton("💾  Xuất TXT")
-        self.btn_export.setFixedHeight(42)
-        self.btn_export.clicked.connect(self._on_export_txt)
-        btn_row.addWidget(self.btn_export)
-
-        self.btn_export_docx = QPushButton("📄  Lưu Word")
-        self.btn_export_docx.setObjectName("btnExportDocx")
-        self.btn_export_docx.setFixedHeight(42)
-        self.btn_export_docx.setToolTip("Lưu bản Word đang được xem trước vào vị trí bạn chọn")
-        self.btn_export_docx.clicked.connect(self._on_export_docx)
-        btn_row.addWidget(self.btn_export_docx)
-
-        right_layout.addLayout(btn_row)
         splitter.addWidget(right_panel)
 
         # Tỷ lệ splitter: 55% ảnh — 45% text
-        splitter.setSizes([620, 500])
-
-        # ---------- Bottom: Progress bar ----------
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # indeterminate
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(16)
-        main_layout.addWidget(self.progress_bar)
+        splitter.setSizes([560, 700])
 
     # ==================================================================
     # INIT — Status bar
@@ -920,7 +908,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+S"), self, self._on_export_txt)
         QShortcut(QKeySequence("Ctrl+Shift+C"), self, self._on_copy_result)
         QShortcut(QKeySequence("Ctrl+K"), self, self._on_check_spelling)
-        QShortcut(QKeySequence("Ctrl+Shift+K"), self, self._on_clear_spelling_highlights)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.close)
 
     # ==================================================================
@@ -937,21 +924,96 @@ class MainWindow(QMainWindow):
     def _set_status(self, msg: str) -> None:
         self.status_label.setText(msg)
 
+    def _apply_theme(self, theme: str) -> None:
+        if theme not in THEME_COLORS:
+            return
+        global COLORS
+        self._theme = theme
+        COLORS = THEME_COLORS[theme]
+        self._settings.setValue("theme", theme)
+        self.setStyleSheet(build_stylesheet(theme))
+        self.ocr_review_crop.setStyleSheet(
+            f"background: {COLORS['bg_input']}; border: 1px solid {COLORS['border']};"
+        )
+        self.word_preview.set_theme(theme)
+        self._sync_theme_actions()
+
+    def _sync_theme_actions(self) -> None:
+        if hasattr(self, "act_theme_light"):
+            self.act_theme_light.setChecked(self._theme == "light")
+            self.act_theme_dark.setChecked(self._theme == "dark")
+
+    def _set_reduce_motion(self, enabled: bool) -> None:
+        self._settings.setValue("reduce_motion", bool(enabled))
+        self._settings.sync()
+        if hasattr(self, "word_preview"):
+            self.word_preview.circular_progress.set_reduce_motion(enabled)
+
+    def _set_preview_processing_state(
+        self, state: str, message: str = "", cancellable: bool = False,
+    ) -> None:
+        """Hiển thị toàn bộ trạng thái xử lý trong Word Preview."""
+        if state == "file_ready":
+            self.word_preview.set_processing_state("empty", "Ảnh đã sẵn sàng. Chạy OCR để tạo tài liệu Word.")
+            return
+        if state == "completed":
+            self.word_preview.set_processing_state("completed")
+            return
+        if state == "processing":
+            worker = self._ocr_worker
+            if worker is not None and worker.isRunning() and worker._cancel_event.is_set():
+                state = "cancelling"
+        self.word_preview.set_processing_state(state, message, cancellable=cancellable)
+
+    def _request_ocr_cancel(self) -> None:
+        worker = self._ocr_worker
+        if worker is None or not worker.isRunning():
+            return
+        worker.request_cancel()
+        self._set_preview_processing_state(
+            "cancelling", "Đang hủy... Chờ bước nhận dạng hiện tại dừng an toàn."
+        )
+
+    def _retry_processing(self) -> None:
+        if self._current_result is not None:
+            self._set_preview_processing_state("processing", "Đang tạo lại DOCX và bản xem trước …")
+            self.btn_export_docx.setEnabled(False)
+            self._create_document_session(self._current_result)
+        else:
+            self._on_run_ocr()
+
     def _show_image(self, image: np.ndarray) -> None:
         """Hiển thị numpy image (BGR) lên label."""
         pix = numpy_to_qpixmap(image)
         self._current_pixmap = pix
 
-        # Scale vừa scroll area
-        available = self.scroll_image.size()
-        scaled = pix.scaled(
-            available, Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        self.label_image.setPixmap(scaled)
+        self._render_source_image()
         self.label_image.setAlignment(Qt.AlignCenter)
 
         h, w = image.shape[:2]
         self.status_size.setText(f"📐 {w} × {h} px")
+
+    def _render_source_image(self) -> None:
+        if self._current_pixmap is None or self._current_pixmap.isNull():
+            return
+        available = self.scroll_image.viewport().size()
+        size = available if self.source_fit_mode else self._current_pixmap.size() * self.source_zoom
+        scaled = self._current_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.label_image.setPixmap(scaled)
+        self.label_image.setFixedSize(scaled.size())
+
+    def _set_source_zoom(self, zoom: float) -> None:
+        self.source_fit_mode = False
+        self.source_zoom = max(0.25, min(4.0, zoom))
+        self._render_source_image()
+
+    def _fit_source_image(self) -> None:
+        self.source_fit_mode = True
+        self._render_source_image()
+
+    def _reset_source_view(self) -> None:
+        self.source_zoom = 1.0
+        self.source_fit_mode = True
 
     def _load_image_from_path(self, path: str) -> bool:
         """Đọc ảnh từ đường dẫn, hiển thị, lưu state."""
@@ -992,13 +1054,14 @@ class MainWindow(QMainWindow):
         self._current_image = image
         self._image_path = path
         self._current_result = None
+        self._reset_source_view()
+        self._set_preview_processing_state("file_ready")
         self._show_image(image)
 
         fname = os.path.basename(path)
         self.setWindowTitle(f"{APP_TITLE} — {fname}")
         self._set_status(f"Đã mở: {fname}")
         self.label_info.setText("")
-        self.text_result.clear()
 
         logger.info(f"Image loaded: {path} ({image.shape})")
         return True
@@ -1030,12 +1093,13 @@ class MainWindow(QMainWindow):
         self._current_image = image
         self._image_path = None
         self._current_result = None
+        self._reset_source_view()
+        self._set_preview_processing_state("file_ready")
         self._show_image(image)
 
         self.setWindowTitle(f"{APP_TITLE} — (Clipboard)")
         self._set_status("Đã dán ảnh từ clipboard")
         self.label_info.setText("")
-        self.text_result.clear()
 
         logger.info(f"Image loaded from clipboard ({image.shape})")
         return True
@@ -1075,8 +1139,9 @@ class MainWindow(QMainWindow):
                 self._current_image = image
                 self._image_path = None
                 self._current_result = None
+                self._reset_source_view()
+                self._set_preview_processing_state("file_ready")
                 self._show_image(image)
-                self.text_result.clear()
                 self.label_info.setText("")
                 self.setWindowTitle(f"{APP_TITLE} — (Dropped)")
                 self._set_status("Đã nhận ảnh kéo thả")
@@ -1132,26 +1197,73 @@ class MainWindow(QMainWindow):
 
         self._invalidate_document()
         self._current_result = None
+        self._set_preview_processing_state("empty")
+        self.document_tabs.setCurrentWidget(self.word_preview)
+        if self._current_image is not None:
+            self._show_image(self._current_image)
 
         # Disable controls
         self.btn_ocr.setEnabled(False)
         self.act_ocr.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.text_result.clear()
         self.label_info.setText("")
         self._set_status("Đang khởi tạo OCR …")
 
         engine = self._get_engine()
 
         self._ocr_worker = OCRWorker(engine, self._current_image, self)
-        self._ocr_worker.progress.connect(self._on_ocr_progress)
         generation = self._generation
-        self._ocr_worker.finished.connect(lambda result, g=generation: self._on_ocr_finished(result, g))
+        worker = self._ocr_worker
+        worker.progress.connect(
+            lambda msg, g=generation, w=worker: self._on_ocr_progress(msg, g, w)
+        )
+        worker.progress_detail.connect(
+            lambda done, total, g=generation, w=worker:
+                self._on_ocr_progress_detail(done, total, g, w)
+        )
+        worker.result_ready.connect(lambda result, g=generation: self._on_ocr_finished(result, g))
+        worker.finished.connect(lambda w=worker: self._on_ocr_thread_stopped(w))
+        self._set_preview_processing_state(
+            "processing", "Đang khởi tạo OCR …", cancellable=True
+        )
         self._ocr_worker.start()
 
-    @pyqtSlot(str)
-    def _on_ocr_progress(self, msg: str) -> None:
+    def _on_ocr_thread_stopped(self, worker: OCRWorker) -> None:
+        """Dọn trạng thái nút khi luồng kết thúc, kể cả kết quả job đã cũ."""
+        if worker is self._ocr_worker:
+            self._ocr_worker = None
+        self.btn_ocr.setEnabled(True)
+        self.act_ocr.setEnabled(True)
+
+    def _on_ocr_progress(
+        self, msg: str, generation: Optional[int] = None, worker=None,
+    ) -> None:
+        if generation is not None and generation != self._generation:
+            return
+        worker = worker or self._ocr_worker
+        if worker is not self._ocr_worker:
+            return
+        cancel_requested = worker is not None and worker._cancel_event.is_set()
+        if cancel_requested:
+            msg = "Đang hủy... Chờ bước nhận dạng hiện tại dừng an toàn."
         self._set_status(msg)
+        cancellable = (
+            worker is not None and worker.isRunning()
+            and not cancel_requested
+        )
+        self._set_preview_processing_state("processing", msg, cancellable=cancellable)
+
+    def _on_ocr_progress_detail(
+        self, completed: int, total: int, generation: int, worker: OCRWorker,
+    ) -> None:
+        """Tiến độ đếm vùng thuộc riêng giai đoạn nhận dạng OCR."""
+        if generation != self._generation or worker is not self._ocr_worker:
+            return
+        if worker._cancel_event.is_set() or total <= 0:
+            return
+        self.word_preview.set_recognition_progress(completed, total)
+        self._set_status(
+            f"Đang nhận dạng văn bản: {min(max(0, completed), total)}/{total} vùng"
+        )
 
     @pyqtSlot(object)
     def _on_ocr_finished(self, result_or_error, generation: Optional[int] = None) -> None:
@@ -1160,15 +1272,15 @@ class MainWindow(QMainWindow):
             return
         self.btn_ocr.setEnabled(True)
         self.act_ocr.setEnabled(True)
-        self.progress_bar.setVisible(False)
 
         if isinstance(result_or_error, Exception):
             err_msg = str(result_or_error)
+            if isinstance(result_or_error, OCRCancelledError):
+                self._set_status("Đã hủy tác vụ OCR.")
+                self._set_preview_processing_state("cancelled", "Đã hủy nhận dạng. Có thể chạy lại khi cần.")
+                return
             self._set_status(f"Lỗi OCR: {err_msg}")
-            QMessageBox.critical(
-                self, "Lỗi OCR",
-                f"Không thể nhận dạng:\n\n{err_msg}",
-            )
+            self._set_preview_processing_state("failed", f"Không thể nhận dạng. {err_msg}")
             logger.error(f"OCR failed: {err_msg}")
             return
 
@@ -1177,26 +1289,10 @@ class MainWindow(QMainWindow):
         self._structured_editor = StructuredDocumentEditor(result)
         self._review_resolved_boxes.clear()
         self._structured_saved = True
-        self._plain_text_mode_active = False
-        self._plain_text_saved = True
         self._refresh_ocr_review_list()
-
-        # Hiển thị kết quả text
-        self.text_result.setPlainText(result.full_text)
-        self._document_dirty = False
-        self.word_preview.set_notice("Đang tạo tài liệu Word và bản xem trước …")
+        self._set_preview_processing_state("processing", "Đang dựng DOCX và bản xem trước Word …")
         self.btn_export_docx.setEnabled(False)
         self._create_document_session(result)
-
-        # Vẽ bounding box lên ảnh
-        if self._current_image is not None and result.boxes:
-            annotated = OCREngine.draw_boxes(
-                self._current_image, result,
-                color=(108, 92, 231),  # accent color
-                thickness=2,
-                show_text=False,
-            )
-            self._show_image(annotated)
 
         # Cập nhật info
         avg_conf = result.average_confidence
@@ -1223,8 +1319,9 @@ class MainWindow(QMainWindow):
 
     def _create_document_session(self, result: OCRResult) -> None:
         """Generate the temporary DOCX first, then render that same file."""
+        self.document_tabs.setCurrentWidget(self.word_preview)
+        self._set_preview_processing_state("processing", "Đang dựng DOCX và bản xem trước Word …")
         self.btn_export_docx.setEnabled(False)
-        self.word_preview.set_notice("Đang cập nhật tài liệu Word và bản xem trước …")
         old_session = self._document_session
         old_worker = self._document_worker
         if old_session is not None:
@@ -1237,11 +1334,20 @@ class MainWindow(QMainWindow):
         worker = DocumentWorker(result, self._document_session, self._generation, self)
         worker.docx_ready.connect(self._on_temp_docx_ready)
         worker.rendered.connect(self._on_preview_rendered)
+        worker.progress.connect(self._on_document_progress)
         worker.finished.connect(lambda w=worker: self._forget_document_worker(w))
         self._document_worker = worker
         self._document_workers.append(worker)
         self._set_status("Đang tạo tài liệu Word …")
         worker.start()
+
+    @pyqtSlot(str, str)
+    def _on_document_progress(self, session_id: str, message: str) -> None:
+        session = self._document_session
+        if session is None or session.session_id != session_id:
+            return
+        self._set_preview_processing_state("processing", message)
+        self._set_status(message)
 
     @pyqtSlot(str, object)
     def _on_temp_docx_ready(self, session_id: str, result_or_error) -> None:
@@ -1251,6 +1357,7 @@ class MainWindow(QMainWindow):
         if isinstance(result_or_error, Exception):
             self.btn_export_docx.setEnabled(False)
             self.word_preview.set_notice(f"Không tạo được DOCX: {result_or_error}")
+            self._set_preview_processing_state("failed", "Không tạo được DOCX. Bạn có thể thử lại.")
             self._set_status("OCR hoàn tất nhưng không tạo được file Word.")
             logger.error("Temporary DOCX generation failed ({})", type(result_or_error).__name__)
             return
@@ -1264,6 +1371,7 @@ class MainWindow(QMainWindow):
             return
         if isinstance(result_or_error, Exception):
             self.word_preview.set_notice(str(result_or_error))
+            self._set_preview_processing_state("failed", "Không tạo được bản xem trước Word. Bạn có thể thử lại.")
             self._set_status("DOCX đã sẵn sàng; không thể tạo bản xem trước.")
             logger.error(
                 "Document preview failed at renderer stage ({}, code={}).",
@@ -1272,22 +1380,29 @@ class MainWindow(QMainWindow):
             )
             return
         self.word_preview.set_pdf(Path(result_or_error))
-        self._set_status("Bản xem trước Word đã sẵn sàng.")
+        self._set_preview_processing_state("processing", "Đang hiển thị trang Word đầu tiên …")
+        self._set_status("PDF đã tạo. Đang hiển thị trang xem trước …")
+
+    @pyqtSlot(int)
+    def _on_word_preview_ready(self, page_count: int) -> None:
+        self.word_preview.show_success(page_count)
+        self._set_status(f"Bản xem trước Word đã sẵn sàng ({page_count} trang).")
+
+    @pyqtSlot(str)
+    def _on_word_preview_failed(self, message: str) -> None:
+        self._set_preview_processing_state("failed", message)
+        self._set_status("Không thể hiển thị bản xem trước Word.")
 
     def _invalidate_document(self) -> None:
         """Invalidate pending callbacks and clean only this window's owned session."""
         self._generation += 1
         self.btn_ocr.setEnabled(True)
         self.act_ocr.setEnabled(True)
-        self.progress_bar.setVisible(False)
         self.word_preview.set_notice("Chưa có tài liệu. Chạy OCR để tạo bản xem trước Word.")
         self.btn_export_docx.setEnabled(False)
-        self._document_dirty = False
         self._structured_editor = None
         self._review_resolved_boxes.clear()
         self._structured_saved = True
-        self._plain_text_mode_active = False
-        self._plain_text_saved = True
         self.ocr_review_list.clear()
         self.ocr_review_crop.setText("Ảnh crop sẽ hiển thị tại đây")
         self.ocr_review_evidence.setText("Chưa chọn vùng")
@@ -1313,7 +1428,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_copy_result(self) -> None:
         """Sao chép kết quả vào clipboard."""
-        text = self.text_result.toPlainText().strip()
+        text = self._current_document_text().strip()
         if not text:
             self._set_status("Chưa có kết quả để sao chép")
             return
@@ -1322,15 +1437,12 @@ class MainWindow(QMainWindow):
         clipboard.setText(text)
         self._set_status("✅ Đã sao chép kết quả vào clipboard")
 
-        # Flash hiệu ứng — đổi text nút tạm thời
-        original_text = self.btn_copy.text()
-        self.btn_copy.setText("✅  Đã sao chép!")
-        QTimer.singleShot(1500, lambda: self.btn_copy.setText(original_text))
+        self.statusBar().showMessage("Đã sao chép kết quả vào bộ nhớ tạm", 1800)
 
     @pyqtSlot()
     def _on_export_txt(self) -> None:
         """Lưu kết quả ra file TXT."""
-        text = self.text_result.toPlainText().strip()
+        text = self._current_document_text().strip()
         if not text:
             self._set_status("Chưa có kết quả để lưu")
             return
@@ -1362,11 +1474,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_export_docx(self) -> None:
         """Save the exact generated DOCX without modifying its session copy."""
-        if self._document_dirty:
-            self._regenerate_edited_document()
-            self._set_status("Đang cập nhật Word từ nội dung đã chỉnh sửa. Bấm Lưu Word khi DOCX sẵn sàng.")
-            return
-        text = self.text_result.toPlainText().strip()
+        text = self._current_document_text().strip()
         if not text or self._document_session is None or not self._document_session.docx_path.is_file():
             self._set_status("Chưa có kết quả để lưu")
             return
@@ -1405,9 +1513,7 @@ class MainWindow(QMainWindow):
                 temp_path = Path(tmp.name)
             shutil.copyfile(self._document_session.docx_path, temp_path)
             os.replace(temp_path, target)
-            if self._plain_text_mode_active:
-                self._plain_text_saved = True
-            elif self._structured_editor is not None and self._structured_editor.dirty:
+            if self._structured_editor is not None and self._structured_editor.dirty:
                 self._structured_saved = True
             self._set_status(f"✅ Đã lưu Word: {os.path.basename(path)}")
             QMessageBox.information(self, "Đã lưu Word", f"Đã lưu tài liệu tại:\n{target}")
@@ -1422,6 +1528,14 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_clear(self) -> None:
         """Xoá ảnh và kết quả."""
+        if self._current_image is not None or self._current_result is not None:
+            answer = QMessageBox.question(
+                self, "Xóa tài liệu hiện tại",
+                "Xóa ảnh nguồn và toàn bộ kết quả đang mở?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
         if not self._confirm_discard_unsaved_edits():
             return
         self._invalidate_document()
@@ -1435,17 +1549,15 @@ class MainWindow(QMainWindow):
         self.ocr_review_evidence.setText("Chưa chọn vùng")
         self._set_review_controls_enabled(False)
         self._image_path = None
-        self._active_spell_errors = []
 
         self.label_image.clear()
+        self.label_source_name.setText("Chưa mở ảnh")
         self.label_image.setText(
             "Kéo thả ảnh vào đây\n\n"
             "— hoặc —\n\n"
             "Ctrl+O  để mở file\n"
             "Ctrl+V  để dán từ clipboard"
         )
-        self.text_result.clear()
-        self.text_result.setExtraSelections([])
         self.label_info.setText("")
         self.status_size.setText("")
 
@@ -1453,27 +1565,24 @@ class MainWindow(QMainWindow):
         self._set_status("Đã xoá. Sẵn sàng.")
 
     # ==================================================================
-    # SLOTS — Spell Checking & Context Menu
+    # SLOTS — Spell Checking
     # ==================================================================
+
+    def _current_document_text(self) -> str:
+        if self._structured_editor is not None:
+            return self._structured_editor.result.full_text
+        return self._current_result.full_text if self._current_result is not None else ""
 
     @pyqtSlot()
     def _on_check_spelling(self) -> None:
-        """
-        Dò soát nội dung trong khung Textbox, phát hiện và bôi đỏ/gạch chân đỏ
-        các vị trí có dấu hiệu sai chính tả tiếng Việt.
-        NGUYÊN TẮC: CHỈ KIỂM TRA VÀ ĐÁNH DẤU, KHÔNG TỰ ĐỘNG SỬA HAY THAY ĐỔI VĂN BẢN.
-        """
-        text = self.text_result.toPlainText()
+        """Dò soát nội dung hiện tại mà không sửa văn bản OCR tự động."""
+        text = self._current_document_text()
         if not text or not text.strip():
             self._set_status("Không đủ dữ liệu để kiểm tra.")
             return
-
-        self.document_tabs.setCurrentWidget(self.text_result)
-
         if self._spell_worker is not None and self._spell_worker.isRunning():
             self._set_status("Đang kiểm tra chính tả, vui lòng đợi …")
             return
-
         self._set_status("Đang dò soát chính tả tiếng Việt theo ngữ cảnh …")
         self._spell_worker = SpellCheckWorker(text, self)
         self._spell_worker.finished.connect(self._on_spell_check_finished)
@@ -1481,198 +1590,27 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(list, str)
     def _on_spell_check_finished(self, results: list, checked_text: str) -> None:
-        """Callback khi kiểm tra chính tả hoàn thành."""
-        current_text = self.text_result.toPlainText()
+        """Báo cáo vị trí nghi vấn; việc sửa vẫn diễn ra qua Rà soát OCR."""
+        current_text = self._current_document_text()
         if current_text != checked_text:
-            logger.debug("Text was modified during spell check; discarding stale highlights.")
+            logger.debug("Document changed during spell check; discarding stale result.")
             return
-
-        self._active_spell_errors = list(results)
-
         if not results:
-            self.text_result.setExtraSelections([])
             self._set_status("Không phát hiện lỗi rõ ràng theo các quy tắc hiện có.")
-            logger.info("Spell check finished: 0 suspicious tokens found.")
             return
-
-        self._update_spell_highlights()
         count = len(results)
-        self._set_status(
-            f"Phát hiện {count} vị trí nghi vấn. Nhấp chuột phải vào từ được đánh dấu để xem gợi ý sửa."
+        details = []
+        for error in results[:30]:
+            suggestions = ", ".join(error.suggestions[:3]) or "không có gợi ý chắc chắn"
+            details.append(f"• {error.token} — gợi ý: {suggestions}")
+        if count > len(details):
+            details.append(f"… và {count - len(details)} vị trí khác.")
+        self._set_status(f"Phát hiện {count} vị trí cần đối chiếu; không tự sửa nội dung.")
+        QMessageBox.information(
+            self, "Kết quả kiểm tra chính tả",
+            f"Phát hiện {count} vị trí cần đối chiếu. Hãy chọn vùng tương ứng trong Rà soát OCR để sửa có cấu trúc.\n\n"
+            + "\n".join(details),
         )
-        logger.info(f"Spell check finished: {count} suspicious tokens highlighted.")
-
-    def _update_spell_highlights(self) -> None:
-        """Vẽ lại định dạng bôi đỏ cho các vị trí nghi vấn còn lại."""
-        if not self._active_spell_errors:
-            self.text_result.setExtraSelections([])
-            return
-
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#ff4d4f"))
-        fmt.setFontUnderline(True)
-        fmt.setUnderlineColor(QColor("#ff4d4f"))
-        fmt.setUnderlineStyle(QTextCharFormat.WaveUnderline)
-        fmt.setBackground(QColor(255, 77, 79, 40))
-
-        doc = self.text_result.document()
-        doc_len = doc.characterCount()
-        selections = []
-        for err in self._active_spell_errors:
-            if err.end_idx <= doc_len:
-                cursor = QTextCursor(doc)
-                cursor.setPosition(err.start_idx)
-                cursor.setPosition(err.end_idx, QTextCursor.KeepAnchor)
-                sel = QTextEdit.ExtraSelection()
-                sel.cursor = cursor
-                sel.format = fmt
-                selections.append(sel)
-
-        self.text_result.setExtraSelections(selections)
-
-    @pyqtSlot(QPoint)
-    def _on_text_context_menu(self, pos: QPoint) -> None:
-        """
-        Hiển thị menu chuột phải tương tác:
-        Nếu nhấp chuột vào token nghi vấn đã đánh dấu, hiển thị các lựa chọn gợi ý sửa
-        ở đầu menu (ví dụ: '✨ Đổi thành: kỹ sư', '🚫 Bỏ qua lỗi này').
-        """
-        cursor = self.text_result.cursorForPosition(pos)
-        click_pos = cursor.position()
-        doc_text = self.text_result.toPlainText()
-
-        # Tìm token nghi vấn tại vị trí con trỏ chuột
-        target_error: Optional[SpellError] = None
-        for err in self._active_spell_errors:
-            if err.start_idx <= click_pos <= err.end_idx:
-                if doc_text[err.start_idx:err.end_idx] == err.token:
-                    target_error = err
-                    break
-
-        menu = QMenu(self)
-
-        if target_error is not None:
-            # Tiêu đề thông tin lỗi
-            header_act = QAction(f"🔍 Nghi vấn: '{target_error.token}'", menu)
-            header_act.setEnabled(False)
-            menu.addAction(header_act)
-
-            if target_error.reason:
-                reason_act = QAction(f"ℹ️ {target_error.reason}", menu)
-                reason_act.setEnabled(False)
-                menu.addAction(reason_act)
-
-            menu.addSeparator()
-
-            # Danh sách các gợi ý sửa
-            if target_error.suggestions:
-                for sugg in target_error.suggestions:
-                    act = QAction(f"✨ Đổi thành: {sugg}", menu)
-                    act.triggered.connect(
-                        lambda checked, err=target_error, s=sugg: self._apply_spell_suggestion(err, s)
-                    )
-                    menu.addAction(act)
-            else:
-                no_sugg = QAction("Không có gợi ý chắc chắn", menu)
-                no_sugg.setEnabled(False)
-                menu.addAction(no_sugg)
-
-            menu.addSeparator()
-
-            # Tùy chọn bỏ qua lỗi này
-            act_ignore = QAction("🚫 Bỏ qua lỗi này", menu)
-            act_ignore.triggered.connect(
-                lambda checked, err=target_error: self._ignore_spell_error(err)
-            )
-            menu.addAction(act_ignore)
-
-            menu.addSeparator()
-
-        # Menu chỉnh sửa văn bản tiêu chuẩn (Undo, Redo, Cut, Copy, Paste, Select All)
-        std_menu = self.text_result.createStandardContextMenu()
-        menu.addActions(std_menu.actions())
-
-        menu.exec_(self.text_result.mapToGlobal(pos))
-
-    def _apply_spell_suggestion(self, err: SpellError, suggestion: str) -> None:
-        """Thay thế token nghi vấn bằng gợi ý sửa do người dùng chủ động chọn."""
-        doc_text = self.text_result.toPlainText()
-        if doc_text[err.start_idx:err.end_idx] != err.token:
-            self._set_status("Văn bản đã thay đổi so với vị trí đánh dấu — vui lòng kiểm tra lại.")
-            self._on_clear_spelling_highlights()
-            return
-
-        # Bảo toàn kiểu chữ (casing) của token gốc
-        replacement = suggestion
-        if err.token.isupper() and len(err.token) > 1:
-            replacement = suggestion.upper()
-        elif err.token and err.token[0].isupper() and not suggestion[0].isupper():
-            replacement = suggestion[0].upper() + suggestion[1:]
-
-        # Thay thế bằng QTextCursor với EditBlock để cho phép Undo (Ctrl+Z)
-        self._is_replacing_suggestion = True
-        try:
-            cursor = self.text_result.textCursor()
-            cursor.setPosition(err.start_idx)
-            cursor.setPosition(err.end_idx, QTextCursor.KeepAnchor)
-            cursor.beginEditBlock()
-            cursor.insertText(replacement)
-            cursor.endEditBlock()
-        finally:
-            self._is_replacing_suggestion = False
-
-        # Cập nhật vị trí các lỗi còn lại sau khi độ dài thay đổi
-        delta = len(replacement) - len(err.token)
-        remaining: List[SpellError] = []
-        for other in self._active_spell_errors:
-            if other is err or (other.start_idx == err.start_idx and other.end_idx == err.end_idx):
-                continue
-            if other.start_idx > err.start_idx:
-                other.start_idx += delta
-                other.end_idx += delta
-            remaining.append(other)
-
-        self._active_spell_errors = remaining
-        self._update_spell_highlights()
-
-        remaining_count = len(self._active_spell_errors)
-        if remaining_count > 0:
-            self._set_status(f"Đã đổi '{err.token}' → '{replacement}'. Còn {remaining_count} vị trí nghi vấn.")
-        else:
-            self._set_status(f"Đã đổi '{err.token}' → '{replacement}'. Đã xử lý hết nghi vấn.")
-        logger.info(f"Spell suggestion applied: '{err.token}' -> '{replacement}'")
-
-    def _ignore_spell_error(self, err: SpellError) -> None:
-        """Bỏ qua vị trí nghi vấn hiện tại."""
-        self._active_spell_errors = [
-            e for e in self._active_spell_errors
-            if not (e.start_idx == err.start_idx and e.end_idx == err.end_idx)
-        ]
-        self._update_spell_highlights()
-        remaining_count = len(self._active_spell_errors)
-        self._set_status(f"Đã bỏ qua '{err.token}'. Còn {remaining_count} vị trí nghi vấn.")
-        logger.info(f"Spell error ignored: '{err.token}'")
-
-    @pyqtSlot()
-    def _on_clear_spelling_highlights(self) -> None:
-        """Xóa toàn bộ đánh dấu chính tả trên Textbox mà không thay đổi nội dung."""
-        self._active_spell_errors = []
-        if self.text_result.extraSelections():
-            self.text_result.setExtraSelections([])
-        self._set_status("Đã xoá các đánh dấu chính tả.")
-        logger.info("Spell check highlights cleared.")
-
-    @pyqtSlot()
-    def _on_text_changed(self) -> None:
-        """Xóa hoặc cập nhật các đánh dấu cũ khi người dùng chỉnh sửa văn bản trực tiếp."""
-        if getattr(self, "_is_replacing_suggestion", False):
-            self._mark_document_dirty_if_changed()
-            return
-        if self._active_spell_errors:
-            self._active_spell_errors = []
-            self.text_result.setExtraSelections([])
-            self._set_status("Văn bản đã chỉnh sửa — đã xoá các đánh dấu cũ.")
-        self._mark_document_dirty_if_changed()
 
     def _set_review_controls_enabled(self, enabled: bool) -> None:
         for widget in (self.ocr_review_list, self.ocr_review_candidates,
@@ -1800,7 +1738,6 @@ class MainWindow(QMainWindow):
             return
         self._review_resolved_boxes.add(box_index)
         self._structured_saved = False
-        self._plain_text_mode_active = False
         self._publish_structured_edit(box_index)
 
     def _publish_structured_edit(self, selected_box: int) -> None:
@@ -1808,11 +1745,6 @@ class MainWindow(QMainWindow):
             return
         result = self._structured_editor.result
         self._current_result = result
-        self.text_result.blockSignals(True)
-        self.text_result.setPlainText(result.full_text)
-        self.text_result.blockSignals(False)
-        self._document_dirty = False
-        self._plain_text_saved = True
         self.btn_review_undo.setEnabled(self._structured_editor.can_undo)
         self.btn_review_redo.setEnabled(self._structured_editor.can_redo)
         self._refresh_ocr_review_list(selected_box=selected_box)
@@ -1888,31 +1820,13 @@ class MainWindow(QMainWindow):
                                 return True
         return super().eventFilter(watched, event)
 
-    def _mark_document_dirty_if_changed(self) -> None:
-        if self._current_result is None:
-            return
-        changed = self._current_result.full_text != self.text_result.toPlainText()
-        self._document_dirty = changed
-        self._plain_text_mode_active = changed
-        self._plain_text_saved = not changed
-        if changed:
-            self.word_preview.set_notice(
-                "Bạn đang sửa toàn văn. Lưu Word ở chế độ này sẽ tạo tài liệu thuần và không giữ cấu trúc bảng OCR. "
-                "Muốn giữ cấu trúc, hãy dùng tab Rà soát OCR."
-            )
-            self.btn_export_docx.setEnabled(True)
-        else:
-            self._set_status("Nội dung toàn văn đã trở về bản có cấu trúc hiện tại.")
-
     def _confirm_discard_unsaved_edits(self) -> bool:
         structured_unsaved = bool(
             self._structured_editor is not None
             and self._structured_editor.dirty
             and not self._structured_saved
-            and not self._plain_text_mode_active
         )
-        plain_unsaved = bool(self._plain_text_mode_active and not self._plain_text_saved)
-        if not (structured_unsaved or plain_unsaved):
+        if not structured_unsaved:
             return True
         answer = QMessageBox.question(
             self, "Thay đổi chưa lưu",
@@ -1921,13 +1835,6 @@ class MainWindow(QMainWindow):
         )
         return answer == QMessageBox.Yes
 
-    def _regenerate_edited_document(self) -> None:
-        if not self._document_dirty:
-            return
-        text = self.text_result.toPlainText()
-        self._document_dirty = False
-        self._create_document_session(OCRResult(full_text=text))
-
     # ==================================================================
     # RESIZE — Cập nhật ảnh khi resize cửa sổ
     # ==================================================================
@@ -1935,11 +1842,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self._current_pixmap and not self._current_pixmap.isNull():
-            available = self.scroll_image.size()
-            scaled = self._current_pixmap.scaled(
-                available, Qt.KeepAspectRatio, Qt.SmoothTransformation,
-            )
-            self.label_image.setPixmap(scaled)
+            if self.source_fit_mode:
+                self._render_source_image()
 
     # ==================================================================
     # CLOSE — Cleanup

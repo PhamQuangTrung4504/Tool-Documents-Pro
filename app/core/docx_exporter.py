@@ -200,10 +200,21 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
         import re
         doc: Any = docx.Document()
 
-        # Kiểm tra bảng rộng (num_cols >= 8) để tự động xoay khổ giấy Ngang (Landscape)
-        has_wide_table = bool(result.tables and any(tbl.num_cols >= 8 for tbl in result.tables))
+        # Chọn khổ A4 và hướng theo hình học ảnh nguồn khi có. Chỉ dùng
+        # số cột làm phương án dự phòng cho kết quả cũ thiếu kích thước ảnh.
+        source_is_landscape = (
+            result.image_width > 0
+            and result.image_height > 0
+            and result.image_width > result.image_height * 1.05
+        )
+        has_source_geometry = result.image_width > 0 and result.image_height > 0
+        has_wide_table = bool(
+            result.tables
+            and any(tbl.num_cols >= 8 for tbl in result.tables)
+        )
+        use_landscape = source_is_landscape or (not has_source_geometry and has_wide_table)
         section = doc.sections[0]
-        if has_wide_table:
+        if use_landscape:
             section.orientation = WD_ORIENT.LANDSCAPE
             section.page_width = Mm(297)
             section.page_height = Mm(210)
@@ -212,6 +223,9 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
             section.top_margin = Mm(15)
             section.bottom_margin = Mm(15)
         else:
+            section.orientation = WD_ORIENT.PORTRAIT
+            section.page_width = Mm(210)
+            section.page_height = Mm(297)
             section.top_margin = Inches(0.8)
             section.bottom_margin = Inches(0.8)
             section.left_margin = Inches(1.0)
@@ -520,10 +534,10 @@ def export_to_docx(result: OCRResult, output_path: str) -> bool:
                 "right": WD_ALIGN_PARAGRAPH.RIGHT,
                 "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
             }
-            p.alignment = alignment_map.get(
-                alignment,
-                WD_ALIGN_PARAGRAPH.CENTER if block.kind == "heading" else WD_ALIGN_PARAGRAPH.LEFT,
-            )
+            # Không suy ra căn giữa chỉ từ nhãn heading. None giữ style Word
+            # mặc định; căn lề được đặt trực tiếp chỉ khi có metadata ảnh.
+            if alignment in alignment_map:
+                p.alignment = alignment_map[alignment]
             if block.kind == "heading":
                 p.paragraph_format.space_before = Pt(6)
             run = p.add_run(line_str)

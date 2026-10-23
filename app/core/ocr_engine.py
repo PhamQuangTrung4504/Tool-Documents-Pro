@@ -33,6 +33,7 @@ import os
 import re
 import threading
 import time
+from threading import Event
 import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -452,6 +453,8 @@ from app.core.recognition_diagnostics import (
     compute_wer,
     find_out_of_vocab_chars,
 )
+
+
 from app.core.ngram_language_model import (
     ContextualCandidateScore,
     VietnameseNgramLanguageModel,
@@ -463,6 +466,10 @@ from app.core.ngram_language_model import (
 # ---------------------------------------------------------------------------
 # Biến Toàn Cục & Khóa Đa Luồng (Thread-safe Singleton)
 # ---------------------------------------------------------------------------
+
+
+class OCRCancelledError(RuntimeError):
+    """Raised when a worker requests cancellation at a safe pipeline boundary."""
 
 _GLOBAL_DETECTOR: Optional[Any] = None
 _GLOBAL_DETECTOR_LOCK = threading.Lock()
@@ -1073,6 +1080,9 @@ class OCREngine:
         max_side: int = 2560,
         include_diagnostics: bool = False,
         diagnostic_observer: Optional[Callable[[Dict[str, Any], Optional[np.ndarray]], None]] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_detail_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_event: Optional[Event] = None,
     ) -> OCRResult:
         """
         Nhận dạng chữ từ ảnh với pipeline Hybrid:
@@ -1081,8 +1091,30 @@ class OCREngine:
         3. VietOCR Transformer đọc từng dòng chữ tiếng Việt.
         4. Sắp xếp lại thứ tự đọc văn bản và chuẩn hóa văn bản.
         """
+        def report_progress(message: str) -> None:
+            if progress_callback is not None:
+                try:
+                    progress_callback(message)
+                except Exception as exc:
+                    logger.debug("Ignoring OCR progress observer failure ({})", type(exc).__name__)
+
+        def report_progress_detail(completed: int, total: int) -> None:
+            if progress_detail_callback is not None:
+                try:
+                    progress_detail_callback(completed, total)
+                except Exception as exc:
+                    logger.debug("Ignoring OCR detailed progress observer failure ({})", type(exc).__name__)
+
+        def check_cancelled() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise OCRCancelledError("OCR đã được hủy tại ranh giới an toàn của pipeline.")
+
+        check_cancelled()
         self._ensure_loaded()
+        check_cancelled()
         t0 = time.perf_counter()
+
+        report_progress("Đang đọc và tiền xử lý ảnh …")
 
         # 1. Đọc ảnh
         source_path = str(source) if isinstance(source, (str, Path)) else None
@@ -1134,6 +1166,7 @@ class OCREngine:
                 preprocessing_steps.append({"stage": "preprocessing", "status": "skipped"})
 
         proc_h, proc_w = processed_image.shape[:2]
+        check_cancelled()
         scale_x = orig_w / float(proc_w)
         scale_y = orig_h / float(proc_h)
         _notify_diagnostic_observer(diagnostic_observer, {
@@ -1142,6 +1175,7 @@ class OCREngine:
             "preprocessing_enabled": preprocess, "denoise": denoise,
             "max_side": max_side,
         }, processed_image)
+        report_progress("Đang phát hiện vùng chữ …")
 
         # Thêm padding viền an toàn (16px) trước khi chạy DBNet Detection
         # để bảo toàn 100% dấu thanh và nét chữ nằm sát mép trên/mép biên ảnh
@@ -1232,8 +1266,11 @@ class OCREngine:
         assert detector is not None, "PaddleOCR detector not initialized"
         try:
             results = detector.predict(padded_det_img)
+            check_cancelled()
             for result_index, res in enumerate(results):
                 append_parsed_result(result_index, _paddle_result_records(res))
+        except OCRCancelledError:
+            raise
         except Exception as exc_det:
             logger.warning(f"Detection via predict failed, falling back to .ocr(): {exc_det}")
             detection_records = []
@@ -1241,6 +1278,7 @@ class OCREngine:
             raw_result_diagnostics = []
             raw_alignment_statuses = []
             try:
+                check_cancelled()
                 try:
                     raw_results = detector.ocr(padded_det_img, cls=self.use_angle_cls)
                 except TypeError as exc_legacy_signature:
@@ -1303,6 +1341,8 @@ class OCREngine:
                             "transforms": {"remove_detector_padding_px": pad_det,
                                            "clamp_to_preprocessed_size": [proc_w, proc_h]},
                         })
+            except OCRCancelledError:
+                raise
             except Exception as exc_raw:
                 logger.error(f"Detection fallback failed: {exc_raw}")
 
@@ -1378,6 +1418,7 @@ class OCREngine:
                     for index, polygon in enumerate(polygons)
                 ],
             }
+        report_progress(f"Đã phát hiện {len(polygons)} vùng; đang nhận dạng …")
 
         # 4. Text Recognition: Sử dụng VietOCR cho tiếng Việt hoặc PaddleOCR
         boxes: List[OCRBox] = []
@@ -1385,7 +1426,13 @@ class OCREngine:
         if use_vietocr:
             logger.debug(f"Recognizing {len(polygons)} text lines with VietOCR ({self.vietocr_model_name}) …")
 
+        progress_interval = max(1, len(polygons) // 100)
         for idx, poly in enumerate(polygons):
+            check_cancelled()
+            # Preserve legacy textual progress for non-UI callers. The desktop
+            # UI consumes the numeric callback below to avoid resetting its ring.
+            if progress_detail_callback is None and idx % progress_interval == 0:
+                report_progress(f"Đang nhận dạng vùng {idx + 1}/{len(polygons)} …")
             paddle_text = region_paddle_texts[idx]
             paddle_conf = region_paddle_scores[idx]
             original_poly = [
@@ -1617,6 +1664,9 @@ class OCREngine:
                     **recognition_metadata,
                     "accepted": accepted,
                 })
+            # Count completed detector regions, including rejected/empty text.
+            # This is recognition-stage progress only, never whole-job progress.
+            report_progress_detail(idx + 1, len(polygons))
 
         # 5. Lọc nhiễu quét do cắt ngang viền ảnh (Border noise filtering)
         box_count_before_border_filter = len(boxes)
@@ -1634,6 +1684,8 @@ class OCREngine:
         diagnostic_input_boxes = list(boxes) if diagnostic_report is not None else []
 
         # 6. Gom nhóm các khối chữ theo dòng và tái dựng bố cục tài liệu (Layout Reconstruction)
+        check_cancelled()
+        report_progress("Đang tái dựng bố cục và bảng …")
         layout_res = reconstruct_document_layout(
             boxes,
             image=image,
@@ -1772,6 +1824,8 @@ class OCREngine:
             emitted_table_blocks.add(table_index)
         for order, block in enumerate(document_blocks):
             block.order = order
+        report_progress("Đang phân tích kiểu chữ và tổng hợp kết quả …")
+        check_cancelled()
         style_diagnostics: Optional[List[dict]] = [] if diagnostic_observer is not None else None
         infer_visual_document_styles(
             document_blocks, boxes, image, diagnostics=style_diagnostics
@@ -1902,6 +1956,8 @@ class OCREngine:
             f"avg_conf={confidence_summary}, "
             f"elapsed={elapsed:.2f}s"
         )
+        check_cancelled()
+        report_progress("Đang hoàn tất kết quả OCR …")
         return result
 
     # ------------------------------------------------------------------

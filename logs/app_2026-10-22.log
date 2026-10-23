@@ -96,3 +96,28 @@
 2026-10-22 16:58:55 | INFO     | app.core.ocr_engine:clear_cache:743 | OCREngine cache cleared.
 2026-10-22 16:58:55 | INFO     | app.ui.main_window:closeEvent:1968 | MainWindow closed.
 2026-10-22 16:58:55 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-22 22:45:30 | INFO     | __main__:main:71 | ============================================================
+2026-10-22 22:45:30 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-22 22:45:30 | INFO     | __main__:main:73 | ============================================================
+2026-10-22 22:45:30 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-22 22:45:30 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-22 22:45:32 | INFO     | app.ui.main_window:__init__:644 | MainWindow initialized.
+2026-10-22 22:45:32 | INFO     | __main__:main:131 | Application window opened.
+2026-10-22 22:46:23 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-22 22:46:23 | INFO     | app.ui.main_window:closeEvent:2170 | MainWindow closed.
+2026-10-22 22:46:23 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-22 22:47:27 | INFO     | __main__:main:71 | ============================================================
+2026-10-22 22:47:27 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-22 22:47:27 | INFO     | __main__:main:73 | ============================================================
+2026-10-22 22:47:27 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-22 22:47:27 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-22 22:47:29 | INFO     | app.ui.main_window:__init__:644 | MainWindow initialized.
+2026-10-22 22:47:29 | INFO     | __main__:main:131 | Application window opened.
+2026-10-22 22:47:31 | INFO     | app.ui.main_window:_load_image_from_path:1156 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban2.png ((1200, 987, 3))
+2026-10-22 22:47:32 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-22 22:47:34 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-22 22:47:36 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-22 22:47:38 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-22 22:47:38 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 5.67s.
+2026-10-22 22:47:38 | DEBUG    | app.core.ocr_engine:recognize:1187 | Running PaddleOCR Text Detection …
+2026-10-22 22:48:03 | DEBUG    | app.core.ocr_engine:recognize:1419 | Recognizing 46 text lines with VietOCR (vgg_transformer) …
