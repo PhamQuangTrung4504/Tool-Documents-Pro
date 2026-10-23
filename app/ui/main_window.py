@@ -22,7 +22,9 @@ import sys
 import tempfile
 import time
 import zipfile
-from threading import Event
+import traceback
+import threading
+from threading import Event, Lock, Thread
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -32,6 +34,7 @@ from loguru import logger
 
 from PyQt5.QtCore import (
     QEvent,
+    QTimer,
     QSize,
     Qt,
     QThread,
@@ -91,7 +94,9 @@ from app.core.spell_corrector import check_text_spelling
 from app.core.document_session import DocumentSession
 from app.core.structured_editing import EditOwnershipError, StructuredDocumentEditor
 from app.core.document_renderer import DocumentRenderService
+from app.core.ocr_process_worker import ocr_result_fingerprint
 from app.ui.word_preview import WordPreviewWidget
+from app.ui.ocr_process_adapter import OCRProcessClient, OCRProcessWorker
 
 # ---------------------------------------------------------------------------
 # Hằng số giao diện
@@ -141,6 +146,10 @@ DESIGN_TOKENS = {
     "radius_large": 12,
 }
 COLORS = THEME_COLORS["dark"]
+_DEBUG_OPENCV_THREADS = (
+    os.environ.get("TDP_OPENCV_THREADS")
+    if os.environ.get("TDP_UI_PERF") == "1" else None
+)
 
 # ---------------------------------------------------------------------------
 # Image file filter
@@ -157,6 +166,182 @@ SUPPORTED_EXTENSIONS = {
 }
 
 
+class _UiEventLoopLatencyProbe:
+    """Probe tùy chọn, lấy mẫu độ trễ callback Qt mà không ghi log liên tục."""
+
+    INTERVAL_MS = 50
+
+    def __init__(self, parent: QWidget) -> None:
+        self._timer = QTimer(parent)
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.setInterval(self.INTERVAL_MS)
+        self._timer.timeout.connect(self._sample)
+        self._next_deadline_ns = 0
+        self._started_ns = 0
+        self._samples: List[Tuple[int, float]] = []
+        self._stage_events: List[Dict[str, Any]] = []
+        self._event_lock = Lock()
+        self._heartbeat_lock = Lock()
+        self._last_heartbeat_ns = 0
+        self._watchdog_stop = Event()
+        self._watchdog: Optional[Thread] = None
+        self._gui_thread_id = threading.get_ident()
+        self._lag_stacks: List[Dict[str, Any]] = []
+        self._job_generation: Optional[int] = None
+
+    def start(self, job_generation: int) -> None:
+        self._timer.stop()
+        self._watchdog_stop.set()
+        self._job_generation = job_generation
+        self._samples = []
+        self._stage_events = []
+        self._lag_stacks = []
+        self._started_ns = time.perf_counter_ns()
+        self._next_deadline_ns = self._started_ns + self.INTERVAL_MS * 1_000_000
+        self._record_event("startup", "start", self._started_ns, self._started_ns, "ui")
+        with self._heartbeat_lock:
+            self._last_heartbeat_ns = self._started_ns
+        self._watchdog_stop = Event()
+        stop_event = self._watchdog_stop
+        self._watchdog = Thread(
+            target=self._watch_stalled_gui, args=(stop_event,),
+            name="TDP-GUI-perf-watchdog", daemon=True,
+        )
+        self._watchdog.start()
+        self._timer.start()
+
+    def record_stage_event(
+        self, job_generation: int, stage: str, transition: str, worker_timestamp_ns: int,
+    ) -> None:
+        """Lưu mốc do worker phát và thời điểm GUI nhận signal queued."""
+        if job_generation != self._job_generation or transition not in {"start", "end"}:
+            return
+        received_ns = time.perf_counter_ns()
+        self._record_event(stage, transition, int(worker_timestamp_ns), received_ns, "worker")
+
+    def _record_event(self, stage: str, transition: str, event_ns: int, received_ns: int, source: str) -> None:
+        with self._event_lock:
+            self._stage_events.append({
+                "stage": stage, "transition": transition, "timestamp_ns": event_ns,
+                "received_ns": received_ns, "source": source,
+            })
+
+    def _watch_stalled_gui(self, stop_event: Event) -> None:
+        """Lấy tối đa ba stack ngắn cho mỗi lần GUI vắng heartbeat kéo dài."""
+        episode_samples = 0
+        last_capture_ns = 0
+        while not stop_event.wait(0.05):
+            now_ns = time.perf_counter_ns()
+            with self._heartbeat_lock:
+                heartbeat_ns = self._last_heartbeat_ns
+            if now_ns - heartbeat_ns <= 100_000_000:
+                episode_samples = 0
+                last_capture_ns = 0
+                continue
+            if episode_samples >= 3 or now_ns - last_capture_ns < 250_000_000:
+                continue
+            frame = sys._current_frames().get(self._gui_thread_id)
+            if frame is not None:
+                with self._event_lock:
+                    self._lag_stacks.append({
+                        "timestamp_ns": now_ns,
+                        "elapsed_since_heartbeat_ms": round((now_ns - heartbeat_ns) / 1_000_000, 1),
+                        "stack": traceback.format_list(traceback.extract_stack(frame, limit=8)),
+                    })
+                    self._lag_stacks = self._lag_stacks[-12:]
+            episode_samples += 1
+            last_capture_ns = now_ns
+
+    def _sample(self) -> None:
+        now_ns = time.perf_counter_ns()
+        delay_ms = max(0.0, (now_ns - self._next_deadline_ns) / 1_000_000)
+        self._samples.append((now_ns, delay_ms))
+        with self._heartbeat_lock:
+            self._last_heartbeat_ns = now_ns
+        self._next_deadline_ns = now_ns + self.INTERVAL_MS * 1_000_000
+
+    @staticmethod
+    def _statistics(samples: List[float]) -> Dict[str, float | int]:
+        if not samples:
+            return {"n": 0, "max_ms": 0.0, "p95_ms": 0.0,
+                    "over_100ms": 0, "over_250ms": 0, "over_500ms": 0}
+        ordered = sorted(samples)
+        p95_index = min(len(ordered) - 1, max(0, int(len(ordered) * 0.95 + 0.999) - 1))
+        return {
+            "n": len(ordered),
+            "max_ms": round(ordered[-1], 1),
+            "p95_ms": round(ordered[p95_index], 1),
+            "over_100ms": sum(value > 100 for value in ordered),
+            "over_250ms": sum(value > 250 for value in ordered),
+            "over_500ms": sum(value > 500 for value in ordered),
+        }
+
+    def finish(self, reason: str) -> Dict[str, Any]:
+        self._timer.stop()
+        self._watchdog_stop.set()
+        with self._event_lock:
+            events = sorted(self._stage_events, key=lambda item: item["timestamp_ns"])
+            lag_stacks = list(self._lag_stacks)
+        intervals: List[Tuple[str, int, int]] = []
+        active_stage: Optional[str] = None
+        active_start_ns: Optional[int] = None
+        for event in events:
+            timestamp_ns = event["timestamp_ns"]
+            if event["transition"] == "start":
+                if active_stage is not None and active_start_ns is not None:
+                    intervals.append((active_stage, active_start_ns, timestamp_ns))
+                active_stage, active_start_ns = event["stage"], timestamp_ns
+            elif active_stage == event["stage"] and active_start_ns is not None:
+                intervals.append((active_stage, active_start_ns, timestamp_ns))
+                active_stage, active_start_ns = None, None
+        finish_ns = time.perf_counter_ns()
+        if active_stage is not None and active_start_ns is not None:
+            intervals.append((active_stage, active_start_ns, finish_ns))
+
+        samples_by_stage: Dict[str, List[float]] = {}
+        for sample_ns, delay_ms in self._samples:
+            owner = next((stage for stage, begin, end in reversed(intervals) if begin <= sample_ns <= end), "between_stages")
+            samples_by_stage.setdefault(owner, []).append(delay_ms)
+        by_stage = {stage: self._statistics(values) for stage, values in samples_by_stage.items()}
+        all_samples = [value for _, value in self._samples]
+        transition_delays = [max(0.0, (event["received_ns"] - event["timestamp_ns"]) / 1_000_000)
+                             for event in events if event["source"] == "worker"]
+        stage_durations = [
+            {"stage": stage, "duration_ms": round((end - begin) / 1_000_000, 1)}
+            for stage, begin, end in intervals
+        ]
+        attributed_stacks = []
+        for item in lag_stacks:
+            sample_ns = item.get("timestamp_ns", 0)
+            owner = next((stage for stage, begin, end in reversed(intervals)
+                          if begin <= sample_ns <= end), "between_stages")
+            attributed_stacks.append({
+                **item, "stage": owner,
+                "offset_ms": round((sample_ns - self._started_ns) / 1_000_000, 1),
+            })
+        summary = {
+            "job_generation": self._job_generation,
+            "reason": reason,
+            "interval_ms": self.INTERVAL_MS,
+            "interpretation": "độ trễ timer là tín hiệu đáp ứng GUI, không phải thời lượng chính xác của từng tác vụ",
+            "overall": self._statistics(all_samples),
+            "stages": by_stage,
+            "worker_stage_durations": stage_durations,
+            "worker_signal_delivery": self._statistics(transition_delays),
+            "stage_transitions": [
+                {"stage": event["stage"], "transition": event["transition"],
+                 "offset_ms": round((event["timestamp_ns"] - self._started_ns) / 1_000_000, 1),
+                 "gui_delivery_ms": round((event["received_ns"] - event["timestamp_ns"]) / 1_000_000, 1),
+                 "source": event["source"]}
+                for event in events
+            ],
+            "large_delay_gui_stacks": attributed_stacks,
+        }
+        logger.info("TDP_UI_PERF event-loop latency summary: {}", summary)
+        self._job_generation = None
+        return summary
+
+
 # ---------------------------------------------------------------------------
 # Worker thread — chạy OCR nền
 # ---------------------------------------------------------------------------
@@ -168,17 +353,53 @@ class OCRWorker(QThread):
     result_ready = pyqtSignal(object)  # OCRResult | Exception
     progress = pyqtSignal(str)     # Thông báo tiến trình
     progress_detail = pyqtSignal(int, int)  # Hoàn tất/tổng số vùng của giai đoạn nhận dạng
+    stage_event = pyqtSignal(int, str, str, object)  # perf_counter_ns cần giữ 64 bit
+    _opencv_debug_threads_applied: Optional[int] = None
 
     def __init__(
         self,
         engine: OCREngine,
         image: np.ndarray,
         parent: Optional[QThread] = None,
+        generation: int = 0,
     ) -> None:
         super().__init__(parent)
         self._engine = engine
         self._image = image
         self._cancel_event = Event()
+        self._generation = generation
+        self._active_perf_stage: Optional[str] = None
+
+    def _emit_stage_event(self, stage: str, transition: str, timestamp_ns: Optional[int] = None) -> None:
+        timestamp_ns = timestamp_ns or time.perf_counter_ns()
+        self.stage_event.emit(self._generation, stage, transition, timestamp_ns)
+        if transition == "start":
+            self._active_perf_stage = stage
+        elif self._active_perf_stage == stage:
+            self._active_perf_stage = None
+
+    def _apply_debug_opencv_thread_override(self) -> None:
+        if os.environ.get("TDP_UI_PERF") != "1":
+            return
+        requested = _DEBUG_OPENCV_THREADS
+        if not requested:
+            return
+        try:
+            count = int(requested)
+            if not 1 <= count <= 256:
+                raise ValueError
+        except ValueError:
+            logger.warning("TDP_OPENCV_THREADS phải là số nguyên trong khoảng 1..256; bỏ qua cấu hình.")
+            return
+        if self._opencv_debug_threads_applied is not None:
+            if self._opencv_debug_threads_applied != count:
+                logger.warning("Đã áp dụng cấu hình OpenCV {} luồng; cần khởi động lại tiến trình để thử {} luồng.",
+                               self._opencv_debug_threads_applied, count)
+            return
+        previous = cv2.getNumThreads()
+        cv2.setNumThreads(count)
+        type(self)._opencv_debug_threads_applied = count
+        logger.info("TDP_UI_PERF OpenCV thread experiment: before={}, requested={}, after={}", previous, count, cv2.getNumThreads())
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -188,7 +409,27 @@ class OCRWorker(QThread):
             if self._cancel_event.is_set():
                 raise OCRCancelledError("OCR đã được hủy trước khi bắt đầu.")
             self.progress.emit("Đang tải model OCR …")
+            self._apply_debug_opencv_thread_override()
+            self._emit_stage_event("model_loading", "start")
+            model_started = time.perf_counter()
             self._engine._ensure_loaded()
+            logger.debug("OCR model initialization (worker thread): {:.1f}ms", (time.perf_counter() - model_started) * 1000)
+            self._emit_stage_event("model_loading", "end")
+            if os.environ.get("TDP_UI_PERF") == "1":
+                thread_counts: Dict[str, Any] = {"opencv": cv2.getNumThreads()}
+                for module_name, thread_getters in (
+                    ("torch", {"intra_op": "get_num_threads", "inter_op": "get_num_interop_threads"}),
+                    ("paddle", {"threads": "get_num_threads"}),
+                ):
+                    module = sys.modules.get(module_name)
+                    for label, getter_name in thread_getters.items():
+                        getter = getattr(module, getter_name, None) if module is not None else None
+                        if callable(getter):
+                            try:
+                                thread_counts[f"{module_name}_{label}"] = getter()
+                            except Exception:
+                                thread_counts[f"{module_name}_{label}"] = "không truy vấn được"
+                logger.info("TDP_UI_PERF inference thread counts (no limits applied): {}", thread_counts)
             if self._cancel_event.is_set():
                 raise OCRCancelledError("OCR đã được hủy sau khi tải model.")
 
@@ -198,12 +439,21 @@ class OCRWorker(QThread):
                 progress_callback=self.progress.emit,
                 progress_detail_callback=self.progress_detail.emit,
                 cancel_event=self._cancel_event,
+                stage_callback=lambda stage, transition, timestamp_ns:
+                    self._emit_stage_event(stage, transition, timestamp_ns),
             )
+            if os.environ.get("TDP_UI_PERF") == "1":
+                logger.info("TDP_OCR_THREAD result generation={} boxes={} tables={} result_sha256={}",
+                            self._generation, len(result.boxes), len(result.tables), ocr_result_fingerprint(result))
             self.result_ready.emit(result)
         except OCRCancelledError as exc:
+            if self._active_perf_stage:
+                self._emit_stage_event(self._active_perf_stage, "end")
             self.result_ready.emit(exc)
         except Exception as exc:
             logger.exception("OCR worker error:")
+            if self._active_perf_stage:
+                self._emit_stage_event(self._active_perf_stage, "end")
             self.result_ready.emit(exc)
 
 
@@ -234,6 +484,7 @@ class DocumentWorker(QThread):
     docx_ready = pyqtSignal(str, object)
     rendered = pyqtSignal(str, object)
     progress = pyqtSignal(str, str)
+    stage_event = pyqtSignal(int, str, str, object)
 
     def __init__(self, result: OCRResult, session: DocumentSession, generation: int, parent=None):
         super().__init__(parent)
@@ -242,13 +493,36 @@ class DocumentWorker(QThread):
         self.generation = generation
 
     def run(self) -> None:
+        self.stage_event.emit(self.generation, "export", "start", time.perf_counter_ns())
+        rendered_path = None
+        render_error = None
+        try:
+            try:
+                rendered_path, render_error = self._export_docx()
+            except Exception as exc:
+                render_error = RuntimeError(f"Không thể tạo file Word tạm ({type(exc).__name__}).")
+        finally:
+            self.stage_event.emit(self.generation, "export", "end", time.perf_counter_ns())
+        if render_error is not None:
+            self.docx_ready.emit(self.session.session_id, render_error)
+            return
+        self.docx_ready.emit(self.session.session_id, self.session.docx_path)
+        self.stage_event.emit(self.generation, "preview_render", "start", time.perf_counter_ns())
+        try:
+            self.progress.emit(self.session.session_id, "Đang chuyển Word thành PDF xem trước …")
+            pdf = DocumentRenderService().render_docx(self.session.docx_path, self.session.pdf_path)
+            self.rendered.emit(self.session.session_id, pdf)
+        except Exception as exc:
+            self.rendered.emit(self.session.session_id, exc)
+        finally:
+            self.stage_event.emit(self.generation, "preview_render", "end", time.perf_counter_ns())
+
+    def _export_docx(self):
         self.progress.emit(self.session.session_id, "Đang xuất DOCX …")
         if not export_to_docx(self.result, str(self.session.docx_path)):
-            self.docx_ready.emit(self.session.session_id, RuntimeError("Không thể tạo file Word tạm."))
-            return
+            return None, RuntimeError("Không thể tạo file Word tạm.")
         if not self.session.docx_path.is_file() or self.session.docx_path.stat().st_size == 0:
-            self.docx_ready.emit(self.session.session_id, RuntimeError("File Word tạm không hợp lệ."))
-            return
+            return None, RuntimeError("File Word tạm không hợp lệ.")
         try:
             with zipfile.ZipFile(self.session.docx_path) as archive:
                 if "word/document.xml" not in archive.namelist():
@@ -257,15 +531,8 @@ class DocumentWorker(QThread):
                 if bad_member:
                     raise zipfile.BadZipFile(f"corrupt member: {bad_member}")
         except (OSError, zipfile.BadZipFile) as exc:
-            self.docx_ready.emit(self.session.session_id, RuntimeError(f"File Word tạm không hợp lệ: {exc}"))
-            return
-        self.docx_ready.emit(self.session.session_id, self.session.docx_path)
-        try:
-            self.progress.emit(self.session.session_id, "Đang chuyển Word thành PDF xem trước …")
-            pdf = DocumentRenderService().render_docx(self.session.docx_path, self.session.pdf_path)
-            self.rendered.emit(self.session.session_id, pdf)
-        except Exception as exc:
-            self.rendered.emit(self.session.session_id, exc)
+            return None, RuntimeError(f"File Word tạm không hợp lệ: {exc}")
+        return self.session.docx_path, None
 
 
 # ---------------------------------------------------------------------------
@@ -468,13 +735,8 @@ def build_stylesheet(theme: str = "dark") -> str:
         padding: 0 6px;
     }}
 
-    QFrame#previewStatePanel {{
-        background-color: {c['bg_card']};
-        border: 1px solid {c['border']};
-        border-radius: 12px;
-    }}
-    QLabel#previewStateTitle {{ color: {c['text_primary']}; font-size: 20px; font-weight: 700; }}
-    QLabel#previewStateMessage {{ color: {c['text_secondary']}; font-size: 14px; }}
+    QLabel#previewStateTitle {{ background: transparent; color: {c['text_primary']}; font-size: 16px; font-weight: 500; }}
+    QLabel#previewStateMessage {{ background: transparent; color: {c['text_secondary']}; font-size: 14px; }}
     QPushButton#primaryButton {{ background-color: {c['accent']}; color: #fff; border: 0; border-radius: {DESIGN_TOKENS['radius_medium']}px; padding: 7px 16px; font-weight: 700; }}
     QPushButton#primaryButton:hover {{ background-color: {c['accent_hover']}; }}
     QPushButton#primaryButton:pressed {{ background-color: {c['accent_pressed']}; }}
@@ -530,6 +792,7 @@ class MainWindow(QMainWindow):
     """Cửa sổ chính của ứng dụng OCR."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
+        init_started = time.perf_counter()
         super().__init__(parent)
         self._settings = QSettings("Tool-Documents-Pro", "Tool-Documents-Pro")
         self._theme = str(self._settings.value("theme", "dark"))
@@ -541,11 +804,27 @@ class MainWindow(QMainWindow):
         # State
         self._current_image: Optional[np.ndarray] = None  # BGR
         self._current_pixmap: Optional[QPixmap] = None
+        self._rendered_source_cache_key: Optional[int] = None
+        self._rendered_source_size: Optional[QSize] = None
         self._current_result: Optional[OCRResult] = None
         self._image_path: Optional[str] = None
         self._ocr_worker: Optional[OCRWorker] = None
+        # Nhánh tiến trình chỉ bật rõ ràng để A/B; mặc định vẫn là QThread hiện tại.
+        self._ocr_process_client: Optional[OCRProcessClient] = (
+            OCRProcessClient() if os.environ.get("TDP_OCR_PROCESS") == "1" else None
+        )
+        self._process_shutdown_started = False
+        self._close_approved = False
+        self._close_poll_timer = QTimer(self)
+        self._close_poll_timer.setInterval(100)
+        self._close_poll_timer.timeout.connect(self.close)
+        self._ui_perf_probe = (
+            _UiEventLoopLatencyProbe(self)
+            if os.environ.get("TDP_UI_PERF") == "1" else None
+        )
         self._spell_worker: Optional[SpellCheckWorker] = None
         self._generation = 0
+        self._ocr_progress_stage: Optional[str] = None
         self._document_session: Optional[DocumentSession] = None
         self._document_worker: Optional[DocumentWorker] = None
         self._document_workers: List[DocumentWorker] = []
@@ -567,6 +846,7 @@ class MainWindow(QMainWindow):
         # Accept drag & drop
         self.setAcceptDrops(True)
 
+        logger.debug("MainWindow GUI initialization: {:.1f}ms", (time.perf_counter() - init_started) * 1000)
         logger.info("MainWindow initialized.")
 
     # ==================================================================
@@ -815,6 +1095,7 @@ class MainWindow(QMainWindow):
             self._settings.value("reduce_motion", False, type=bool)
         )
         self.word_preview.preview_ready.connect(self._on_word_preview_ready)
+        self.word_preview.perf_stage_event.connect(self._on_ocr_stage_event)
         self.word_preview.preview_failed.connect(self._on_word_preview_failed)
         self.word_preview.cancel_requested.connect(self._request_ocr_cancel)
         self.word_preview.retry_requested.connect(self._retry_processing)
@@ -984,23 +1265,44 @@ class MainWindow(QMainWindow):
 
     def _show_image(self, image: np.ndarray) -> None:
         """Hiển thị numpy image (BGR) lên label."""
+        started = time.perf_counter()
         pix = numpy_to_qpixmap(image)
+        converted = time.perf_counter()
         self._current_pixmap = pix
-
         self._render_source_image()
+        rendered = time.perf_counter()
         self.label_image.setAlignment(Qt.AlignCenter)
 
         h, w = image.shape[:2]
         self.status_size.setText(f"📐 {w} × {h} px")
+        logger.debug(
+            "Source display timing: conversion={:.1f}ms scaling/layout={:.1f}ms total={:.1f}ms",
+            (converted - started) * 1000,
+            (rendered - converted) * 1000,
+            (rendered - started) * 1000,
+        )
 
     def _render_source_image(self) -> None:
         if self._current_pixmap is None or self._current_pixmap.isNull():
             return
         available = self.scroll_image.viewport().size()
         size = available if self.source_fit_mode else self._current_pixmap.size() * self.source_zoom
+        current = self.label_image.pixmap()
+        target_size = self._current_pixmap.size().scaled(size, Qt.KeepAspectRatio)
+        if (
+            current is not None and not current.isNull()
+            and current.size() == target_size
+            and self._rendered_source_cache_key == self._current_pixmap.cacheKey()
+            and self._rendered_source_size == target_size
+        ):
+            return
+        scale_started = time.perf_counter()
         scaled = self._current_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.label_image.setPixmap(scaled)
         self.label_image.setFixedSize(scaled.size())
+        self._rendered_source_cache_key = self._current_pixmap.cacheKey()
+        self._rendered_source_size = scaled.size()
+        logger.debug("Source image scaling: {:.1f}ms", (time.perf_counter() - scale_started) * 1000)
 
     def _set_source_zoom(self, zoom: float) -> None:
         self.source_fit_mode = False
@@ -1199,8 +1501,7 @@ class MainWindow(QMainWindow):
         self._current_result = None
         self._set_preview_processing_state("empty")
         self.document_tabs.setCurrentWidget(self.word_preview)
-        if self._current_image is not None:
-            self._show_image(self._current_image)
+        # Ảnh nguồn hiện có vẫn hiển thị; không chuyển đổi/co giãn lại khi bắt đầu OCR.
 
         # Disable controls
         self.btn_ocr.setEnabled(False)
@@ -1208,11 +1509,32 @@ class MainWindow(QMainWindow):
         self.label_info.setText("")
         self._set_status("Đang khởi tạo OCR …")
 
+        setup_started = time.perf_counter()
         engine = self._get_engine()
-
-        self._ocr_worker = OCRWorker(engine, self._current_image, self)
+        self._ocr_progress_stage = "startup"
         generation = self._generation
-        worker = self._ocr_worker
+        if self._ocr_process_client is not None:
+            process_engine_config = {
+                "lang": engine.lang, "use_gpu": engine.use_gpu,
+                "use_angle_cls": engine.use_angle_cls,
+                "det_db_thresh": engine.det_db_thresh,
+                "det_db_box_thresh": engine.det_db_box_thresh,
+                "det_db_unclip_ratio": engine.det_db_unclip_ratio,
+                "drop_score": engine.drop_score,
+                "rec_batch_num": engine.rec_batch_num,
+                "ocr_version": engine.ocr_version,
+                "vietocr_model_name": engine.vietocr_model_name,
+            }
+            worker = OCRProcessWorker(
+                self._ocr_process_client, self._current_image, process_engine_config,
+                self, generation=generation,
+            )
+            logger.warning("TDP_OCR_PROCESS=1: đang dùng OCR worker subprocess thử nghiệm; QThread mặc định bị giữ nguyên.")
+        else:
+            worker = OCRWorker(engine, self._current_image, self, generation=generation)
+        self._ocr_worker = worker
+        self.word_preview.set_perf_job_generation(generation)
+        worker.stage_event.connect(self._on_ocr_stage_event)
         worker.progress.connect(
             lambda msg, g=generation, w=worker: self._on_ocr_progress(msg, g, w)
         )
@@ -1222,9 +1544,12 @@ class MainWindow(QMainWindow):
         )
         worker.result_ready.connect(lambda result, g=generation: self._on_ocr_finished(result, g))
         worker.finished.connect(lambda w=worker: self._on_ocr_thread_stopped(w))
+        logger.debug("OCR worker construction and signal wiring: {:.1f}ms", (time.perf_counter() - setup_started) * 1000)
         self._set_preview_processing_state(
             "processing", "Đang khởi tạo OCR …", cancellable=True
         )
+        if self._ui_perf_probe is not None:
+            self._ui_perf_probe.start(generation)
         self._ocr_worker.start()
 
     def _on_ocr_thread_stopped(self, worker: OCRWorker) -> None:
@@ -1250,7 +1575,46 @@ class MainWindow(QMainWindow):
             worker is not None and worker.isRunning()
             and not cancel_requested
         )
-        self._set_preview_processing_state("processing", msg, cancellable=cancellable)
+        stage = self._classify_ocr_progress_stage(msg)
+        reset_progress = stage is not None and stage != self._ocr_progress_stage and stage in {"detection", "layout"}
+        if stage is not None:
+            self._ocr_progress_stage = stage
+        stage_titles = {
+            "startup": "Đang khởi tạo OCR",
+            "model_loading": "Đang tải mô hình OCR",
+            "tiền xử lý": "Đang chuẩn bị ảnh",
+            "detection": "Đang phát hiện vùng chữ",
+            "recognition": "Đang nhận dạng văn bản",
+            "layout": "Đang phân tích bố cục",
+        }
+        self.word_preview.update_processing_message(
+            msg, cancellable=cancellable, reset_progress=reset_progress,
+            title=stage_titles.get(stage),
+        )
+
+    @staticmethod
+    def _classify_ocr_progress_stage(message: str) -> Optional[str]:
+        lowered = message.casefold()
+        if "đọc và tiền xử lý" in lowered or "tiền xử lý ảnh" in lowered:
+            return "tiền xử lý"
+        if "tái dựng" in lowered or "bố cục" in lowered or "phân tích" in lowered:
+            return "layout"
+        if "nhận dạng vùng" in lowered or "đã phát hiện" in lowered or "đang nhận dạng" in lowered:
+            return "recognition"
+        if "đang phát hiện" in lowered or "detection" in lowered:
+            return "detection"
+        if "đang tải model" in lowered:
+            return "model_loading"
+        if "hoàn tất kết quả" in lowered:
+            return "finalizing"
+        return None
+
+    @pyqtSlot(int, str, str, object)
+    def _on_ocr_stage_event(self, generation: int, stage: str, transition: str, timestamp_ns: int) -> None:
+        if generation != self._generation:
+            return
+        if self._ui_perf_probe is not None:
+            self._ui_perf_probe.record_stage_event(generation, stage, transition, timestamp_ns)
 
     def _on_ocr_progress_detail(
         self, completed: int, total: int, generation: int, worker: OCRWorker,
@@ -1260,7 +1624,9 @@ class MainWindow(QMainWindow):
             return
         if worker._cancel_event.is_set() or total <= 0:
             return
-        self.word_preview.set_recognition_progress(completed, total)
+        self.word_preview.set_recognition_progress(
+            completed, total, cancellable=worker.isRunning()
+        )
         self._set_status(
             f"Đang nhận dạng văn bản: {min(max(0, completed), total)}/{total} vùng"
         )
@@ -1274,6 +1640,7 @@ class MainWindow(QMainWindow):
         self.act_ocr.setEnabled(True)
 
         if isinstance(result_or_error, Exception):
+            self._finish_ui_perf_probe("OCR thất bại hoặc bị hủy")
             err_msg = str(result_or_error)
             if isinstance(result_or_error, OCRCancelledError):
                 self._set_status("Đã hủy tác vụ OCR.")
@@ -1290,7 +1657,7 @@ class MainWindow(QMainWindow):
         self._review_resolved_boxes.clear()
         self._structured_saved = True
         self._refresh_ocr_review_list()
-        self._set_preview_processing_state("processing", "Đang dựng DOCX và bản xem trước Word …")
+        self._set_preview_processing_state("preparing_preview", "Đang chuẩn bị bản xem trước …")
         self.btn_export_docx.setEnabled(False)
         self._create_document_session(result)
 
@@ -1320,7 +1687,7 @@ class MainWindow(QMainWindow):
     def _create_document_session(self, result: OCRResult) -> None:
         """Generate the temporary DOCX first, then render that same file."""
         self.document_tabs.setCurrentWidget(self.word_preview)
-        self._set_preview_processing_state("processing", "Đang dựng DOCX và bản xem trước Word …")
+        self._set_preview_processing_state("preparing_preview", "Đang chuẩn bị bản xem trước …")
         self.btn_export_docx.setEnabled(False)
         old_session = self._document_session
         old_worker = self._document_worker
@@ -1335,6 +1702,7 @@ class MainWindow(QMainWindow):
         worker.docx_ready.connect(self._on_temp_docx_ready)
         worker.rendered.connect(self._on_preview_rendered)
         worker.progress.connect(self._on_document_progress)
+        worker.stage_event.connect(self._on_ocr_stage_event)
         worker.finished.connect(lambda w=worker: self._forget_document_worker(w))
         self._document_worker = worker
         self._document_workers.append(worker)
@@ -1346,7 +1714,7 @@ class MainWindow(QMainWindow):
         session = self._document_session
         if session is None or session.session_id != session_id:
             return
-        self._set_preview_processing_state("processing", message)
+        self._set_preview_processing_state("preparing_preview", message)
         self._set_status(message)
 
     @pyqtSlot(str, object)
@@ -1355,6 +1723,7 @@ class MainWindow(QMainWindow):
         if session is None or session.session_id != session_id:
             return
         if isinstance(result_or_error, Exception):
+            self._finish_ui_perf_probe("xuất DOCX thất bại")
             self.btn_export_docx.setEnabled(False)
             self.word_preview.set_notice(f"Không tạo được DOCX: {result_or_error}")
             self._set_preview_processing_state("failed", "Không tạo được DOCX. Bạn có thể thử lại.")
@@ -1370,6 +1739,7 @@ class MainWindow(QMainWindow):
         if session is None or session.session_id != session_id:
             return
         if isinstance(result_or_error, Exception):
+            self._finish_ui_perf_probe("tạo PDF xem trước thất bại")
             self.word_preview.set_notice(str(result_or_error))
             self._set_preview_processing_state("failed", "Không tạo được bản xem trước Word. Bạn có thể thử lại.")
             self._set_status("DOCX đã sẵn sàng; không thể tạo bản xem trước.")
@@ -1380,21 +1750,28 @@ class MainWindow(QMainWindow):
             )
             return
         self.word_preview.set_pdf(Path(result_or_error))
-        self._set_preview_processing_state("processing", "Đang hiển thị trang Word đầu tiên …")
         self._set_status("PDF đã tạo. Đang hiển thị trang xem trước …")
 
     @pyqtSlot(int)
     def _on_word_preview_ready(self, page_count: int) -> None:
         self.word_preview.show_success(page_count)
         self._set_status(f"Bản xem trước Word đã sẵn sàng ({page_count} trang).")
+        self._finish_ui_perf_probe("Preview sẵn sàng")
+
+    def _finish_ui_perf_probe(self, reason: str) -> None:
+        if self._ui_perf_probe is not None and self._ui_perf_probe._job_generation is not None:
+            self._ui_perf_probe.finish(reason)
 
     @pyqtSlot(str)
     def _on_word_preview_failed(self, message: str) -> None:
+        self._finish_ui_perf_probe("render trang Preview thất bại")
         self._set_preview_processing_state("failed", message)
         self._set_status("Không thể hiển thị bản xem trước Word.")
 
     def _invalidate_document(self) -> None:
         """Invalidate pending callbacks and clean only this window's owned session."""
+        if self._ui_perf_probe is not None and self._ui_perf_probe._job_generation is not None:
+            self._ui_perf_probe.finish("tài liệu/job bị thay thế")
         self._generation += 1
         self.btn_ocr.setEnabled(True)
         self.act_ocr.setEnabled(True)
@@ -1850,20 +2227,44 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def closeEvent(self, event) -> None:
-        if not self._confirm_discard_unsaved_edits():
-            event.ignore()
-            return
-        if not self.word_preview.wait_for_idle(1000):
-            self._set_status("Đang hoàn tất hiển thị trang PDF. Đóng cửa sổ lần nữa sau khi kết thúc.")
-            event.ignore()
-            return
+        if not self._close_approved:
+            if not self._confirm_discard_unsaved_edits():
+                event.ignore()
+                return
+            self._close_approved = True
+            # Không để kết quả hoặc callback của job đang đóng cửa sổ tạo Preview mới.
+            self._generation += 1
+
         running_workers = [worker for worker in (self._ocr_worker, self._spell_worker, *self._document_workers) if worker is not None and worker.isRunning()]
-        for worker in running_workers:
-            worker.wait(1000)
-        if any(worker.isRunning() for worker in running_workers):
-            self._set_status("Đang hoàn tất tác vụ nền. Đóng cửa sổ lần nữa sau khi kết thúc.")
+        preview_busy = not self.word_preview.wait_for_idle(0)
+        if running_workers or preview_busy:
+            ocr_worker = self._ocr_worker
+            if ocr_worker is not None and ocr_worker.isRunning() and not ocr_worker._cancel_event.is_set():
+                ocr_worker.request_cancel()
+                self._set_preview_processing_state(
+                    "cancelling", "Đang hủy tác vụ trước khi đóng ứng dụng …"
+                )
+            self._set_status("Đang dừng tác vụ nền an toàn. Cửa sổ sẽ đóng khi hoàn tất.")
+            if not self._close_poll_timer.isActive():
+                self._close_poll_timer.start()
             event.ignore()
             return
+        if self._ocr_process_client is not None and self._ocr_process_client.is_running:
+            if not self._process_shutdown_started:
+                self._process_shutdown_started = True
+                shutdown_thread = threading.Thread(
+                    target=self._ocr_process_client.shutdown,
+                    kwargs={"timeout": 2.0},
+                    name="TDP-OCR-process-shutdown", daemon=True,
+                )
+                shutdown_thread.start()
+            if not self._close_poll_timer.isActive():
+                self._close_poll_timer.start()
+            event.ignore()
+            return
+        self._close_poll_timer.stop()
+        if self._ui_perf_probe is not None and self._ui_perf_probe._job_generation is not None:
+            self._ui_perf_probe.finish("đóng cửa sổ")
         if self._document_session is not None:
             self._document_session.cleanup()
         for session in self._retired_sessions.values():

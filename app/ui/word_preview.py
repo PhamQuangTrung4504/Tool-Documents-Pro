@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import importlib
+import time
 from collections import OrderedDict
 from pathlib import Path
 
-from PyQt5.QtCore import QAbstractAnimation, Qt, QThread, QTimer, QVariantAnimation, pyqtSignal
+from PyQt5.QtCore import QAbstractAnimation, QEasingCurve, Qt, QThread, QTimer, QVariantAnimation, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget
 
@@ -19,6 +20,7 @@ class CircularProgressIndicator(QWidget):
         self._mode = "indeterminate"
         self._value = 0
         self._angle = 0.0
+        self._pulse_phase = 0.0
         self._check_progress = 0.0
         self._accent = QColor("#6c5ce7")
         self._success = QColor("#00b894")
@@ -30,7 +32,14 @@ class CircularProgressIndicator(QWidget):
         self._spin.setDuration(1250)
         self._spin.setLoopCount(-1)
         self._spin.valueChanged.connect(self._set_angle)
-        self._spin.start()
+        self._pulse = QVariantAnimation(self)
+        self._pulse.setStartValue(0.0)
+        self._pulse.setKeyValueAt(0.5, 1.0)
+        self._pulse.setEndValue(0.0)
+        self._pulse.setDuration(1600)
+        self._pulse.setLoopCount(-1)
+        self._pulse.setEasingCurve(QEasingCurve.InOutSine)
+        self._pulse.valueChanged.connect(self._set_pulse_phase)
         self._check_animation = QVariantAnimation(self)
         self._check_animation.setStartValue(0.0)
         self._check_animation.setEndValue(1.0)
@@ -45,8 +54,14 @@ class CircularProgressIndicator(QWidget):
         self._check_progress = float(value)
         self.update()
 
+    def _set_pulse_phase(self, value) -> None:
+        previous_alpha = self._pulse_color().alpha()
+        self._pulse_phase = float(value)
+        if self._pulse_color().alpha() != previous_alpha:
+            self.update()
+
     def set_theme(self, theme: str) -> None:
-        self._accent = QColor("#8b7cf6" if theme == "dark" else "#6554d9")
+        self._accent = QColor("#63c9bd" if theme == "dark" else "#348f86")
         self._success = QColor("#42d3a6" if theme == "dark" else "#008f70")
         self._track = QColor(255, 255, 255, 38) if theme == "dark" else QColor(24, 24, 32, 32)
         self.update()
@@ -55,27 +70,60 @@ class CircularProgressIndicator(QWidget):
         self._reduce_motion = bool(enabled)
         if enabled:
             self._spin.stop()
-        elif self._mode == "indeterminate" and self._spin.state() != QAbstractAnimation.Running:
-            self._spin.start()
+            self._pulse.stop()
+        elif self.isVisible():
+            self._start_activity_animation()
+
+    def _start_activity_animation(self) -> None:
+        if self._reduce_motion or not self.isVisible():
+            return
+        if self._mode == "indeterminate":
+            if self._spin.state() == QAbstractAnimation.Paused:
+                self._spin.resume()
+            elif self._spin.state() != QAbstractAnimation.Running:
+                self._spin.start()
+        if self._mode in {"indeterminate", "determinate"}:
+            if self._pulse.state() == QAbstractAnimation.Paused:
+                self._pulse.resume()
+            elif self._pulse.state() != QAbstractAnimation.Running:
+                self._pulse.start()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._start_activity_animation()
+
+    def hideEvent(self, event) -> None:
+        for animation in (self._spin, self._pulse):
+            if animation.state() == QAbstractAnimation.Running:
+                animation.pause()
+        super().hideEvent(event)
 
     def set_indeterminate(self) -> None:
+        if self._mode == "indeterminate":
+            self._start_activity_animation()
+            return
         self._mode = "indeterminate"
         self._value = 0
         self._check_progress = 0.0
-        if not self._reduce_motion and self._spin.state() != QAbstractAnimation.Running:
-            self._spin.start()
+        self._pulse.stop()
+        self._spin.stop()
+        self._start_activity_animation()
         self._check_animation.stop()
         self.update()
 
     def stop_animation(self) -> None:
         self._spin.stop()
+        self._pulse.stop()
         self._check_animation.stop()
 
     def set_progress_percent(self, value: int) -> None:
         """Nhận phần trăm từ bộ đếm có tổng; giữ đơn điệu trong cùng giai đoạn."""
+        mode_changed = self._mode != "determinate"
         self._mode = "determinate"
         self._value = max(self._value, min(100, max(0, int(value))))
-        self._spin.stop()
+        if mode_changed:
+            self._spin.stop()
+        self._start_activity_animation()
         self.update()
 
     def set_work_progress(self, completed: int, total: int) -> None:
@@ -90,10 +138,13 @@ class CircularProgressIndicator(QWidget):
         self._value = 100
         self._check_progress = 0.0
         self._spin.stop()
+        self._pulse.stop()
         self.update()
 
     def animate_check(self) -> None:
         self._mode = "success"
+        self._spin.stop()
+        self._pulse.stop()
         self._check_progress = 1.0 if self._reduce_motion else 0.0
         if not self._reduce_motion:
             self._check_animation.start()
@@ -108,13 +159,14 @@ class CircularProgressIndicator(QWidget):
         painter.drawArc(rect, 0, 360 * 16)
 
         if self._mode == "indeterminate":
-            pen.setColor(self._accent)
+            pen.setColor(self._pulse_color())
             pen.setWidth(8)
             painter.setPen(pen)
             painter.drawArc(rect, int((90 - self._angle) * 16), 98 * 16)
             return
 
-        color = self._success if self._mode == "success" else self._accent
+        color = self._success if self._mode == "success" else self._pulse_color()
+        text_color = self._success if self._mode == "success" else self._accent
         pen.setColor(color)
         painter.setPen(pen)
         painter.drawArc(rect, 90 * 16, -int(360 * 16 * self._value / 100))
@@ -138,24 +190,33 @@ class CircularProgressIndicator(QWidget):
                                  int(joint[0] + (last[0] - joint[0]) * fraction),
                                  int(joint[1] + (last[1] - joint[1]) * fraction))
         elif self._mode == "complete":
-            painter.setPen(color)
+            painter.setPen(text_color)
             font = painter.font()
             font.setPointSize(20)
             font.setWeight(600)
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignCenter, "100%")
         else:
-            painter.setPen(color)
+            painter.setPen(text_color)
             font = painter.font()
             font.setPointSize(20)
             font.setWeight(600)
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignCenter, f"{self._value}%")
 
+    def _pulse_color(self) -> QColor:
+        """Biến thiên alpha nhẹ; không đổi sắc độ, văn bản hay độ dài cung."""
+        if self._reduce_motion:
+            return QColor(self._accent)
+        color = QColor(self._accent)
+        color.setAlpha(232 + int(23 * self._pulse_phase))
+        return color
+
 
 class _PdfPageWorker(QThread):
     pages_ready = pyqtSignal(int, object, object, object)
     failed = pyqtSignal(int, str)
+    stage_event = pyqtSignal(str, str, object)
 
     def __init__(self, path: Path, center: int, zoom: float, generation: int, parent=None):
         super().__init__(parent)
@@ -165,12 +226,13 @@ class _PdfPageWorker(QThread):
         self.generation = generation
 
     def run(self) -> None:
+        self.stage_event.emit("preview_render", "start", time.perf_counter_ns())
         try:
-            pymupdf = importlib.import_module("pymupdf")
-        except ImportError:
-            self.failed.emit(self.generation, "PyMuPDF is unavailable in the active Python environment.")
-            return
-        try:
+            try:
+                pymupdf = importlib.import_module("pymupdf")
+            except ImportError:
+                self.failed.emit(self.generation, "PyMuPDF is unavailable in the active Python environment.")
+                return
             with pymupdf.open(self.path) as document:
                 if document.page_count == 0:
                     raise ValueError("The PDF contains no pages.")
@@ -192,6 +254,7 @@ class _PdfPageWorker(QThread):
 class WordPreviewWidget(QWidget):
     preview_ready = pyqtSignal(int)
     preview_failed = pyqtSignal(str)
+    perf_stage_event = pyqtSignal(int, str, str, object)
     cancel_requested = pyqtSignal()
     retry_requested = pyqtSignal()
 
@@ -209,7 +272,8 @@ class WordPreviewWidget(QWidget):
         self._success_generation = 0
         self._requested_center = 0
         self._theme = "dark"
-        self._preview_state = "empty"
+        self._preview_state = "idle"
+        self._perf_job_generation = 0
 
         outer = QVBoxLayout(self)
         controls = QHBoxLayout()
@@ -219,6 +283,8 @@ class WordPreviewWidget(QWidget):
         self.zoom_out = QPushButton("−")
         self.zoom_in = QPushButton("+")
         self.fit_width = QPushButton("Vừa chiều rộng")
+        self.zoom_out.setEnabled(False)
+        self.zoom_in.setEnabled(False)
         self.fit_width.setEnabled(False)
         controls.addWidget(self.zoom_out)
         controls.addWidget(self.zoom_in)
@@ -237,6 +303,11 @@ class WordPreviewWidget(QWidget):
 
         self.state_panel = QFrame()
         self.state_panel.setObjectName("previewStatePanel")
+        self.state_panel.setFrameShape(QFrame.NoFrame)
+        self.state_panel.setAutoFillBackground(False)
+        self.state_panel.setStyleSheet(
+            "QFrame#previewStatePanel { background: transparent; border: none; }"
+        )
         state_layout = QVBoxLayout(self.state_panel)
         state_layout.setContentsMargins(36, 28, 36, 28)
         state_layout.addStretch(1)
@@ -245,10 +316,14 @@ class WordPreviewWidget(QWidget):
         self.state_title = QLabel("Bản xem trước Word")
         self.state_title.setObjectName("previewStateTitle")
         self.state_title.setAlignment(Qt.AlignCenter)
+        self.state_title.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.state_title.setAutoFillBackground(False)
         state_layout.addWidget(self.state_title)
         self.state_message = QLabel("Chạy OCR để tạo tài liệu Word có thể chỉnh sửa.")
         self.state_message.setObjectName("previewStateMessage")
         self.state_message.setAlignment(Qt.AlignCenter)
+        self.state_message.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.state_message.setAutoFillBackground(False)
         self.state_message.setWordWrap(True)
         self.state_message.setMaximumWidth(520)
         state_layout.addWidget(self.state_message, alignment=Qt.AlignHCenter)
@@ -276,19 +351,22 @@ class WordPreviewWidget(QWidget):
         self.fit_width.clicked.connect(self.fit_to_width)
         self.scroll.verticalScrollBar().valueChanged.connect(self._update_page_indicator)
         self.set_notice("Chưa có tài liệu. Chạy OCR để tạo bản xem trước Word.")
-        self.set_processing_state("empty", "Chạy OCR để tạo tài liệu Word có thể chỉnh sửa.")
+        self.set_processing_state("idle", "Chạy OCR để tạo tài liệu Word có thể chỉnh sửa.")
 
     def set_theme(self, theme: str) -> None:
         """Đổi nền vùng xem quanh trang; ảnh trang vẫn giữ nguyên màu gốc."""
         self._theme = theme if theme in {"light", "dark"} else "dark"
         self.circular_progress.set_theme(self._theme)
         if hasattr(self, "_preview_state"):
-            self._set_success_appearance(self._preview_state == "success")
+            self._set_success_appearance(self._preview_state == "success_animating")
         background = "#e9eaec" if self._theme == "light" else "#292933"
         border = "#c8cbd0" if self._theme == "light" else "#555"
         self.scroll.setStyleSheet(f"QScrollArea#wordPageCanvas {{ background: {background}; border: 0; }}")
         for label in self._page_labels:
             label.setStyleSheet(f"background: white; border: 1px solid {border};")
+
+    def set_perf_job_generation(self, generation: int) -> None:
+        self._perf_job_generation = int(generation)
 
     def set_notice(self, message: str) -> None:
         self.cancel_success_animation()
@@ -316,37 +394,64 @@ class WordPreviewWidget(QWidget):
         self._page_labels = []
         self._requested_center = 0
         self.notice.hide()
-        self.set_processing_state("processing", "Đang mở tài liệu Word để xem trước …")
+        self.set_processing_state("preparing_preview", "Đang chuẩn bị bản xem trước …")
         self._request_pages(0)
 
     def set_processing_state(self, state: str, message: str = "", cancellable: bool = False) -> None:
         """Hiển thị trạng thái của tài liệu ngay trong khung Word Preview."""
-        if state != "success":
+        state = {"empty": "idle", "success": "success_animating", "completed": "preview_ready"}.get(state, state)
+        previous_state = self._preview_state
+        if state != "success_animating" and previous_state == "success_animating":
             self.cancel_success_animation()
         self._set_success_appearance(False)
         self._preview_state = state
         titles = {
-            "empty": "Bản xem trước Word",
+            "idle": "Bản xem trước Word",
             "processing": "Đang xử lý tài liệu",
+            "preparing_preview": "Đang chuẩn bị bản xem trước...",
             "cancelling": "Đang hủy nhận dạng",
             "failed": "Không thể hoàn tất",
             "cancelled": "Đã hủy nhận dạng",
+            "preview_ready": "Bản xem trước Word",
         }
         self.state_title.setText(titles.get(state, "Bản xem trước Word"))
         self.state_message.setText(message)
-        busy = state in {"processing", "cancelling"}
+        busy = state in {"processing", "preparing_preview", "cancelling"}
         self.circular_progress.setVisible(busy)
-        if state == "processing":
+        if busy and (state != previous_state or self.circular_progress._mode not in {"indeterminate", "determinate"}):
             self.circular_progress.set_indeterminate()
-        elif state != "success":
+        elif not busy:
             self.circular_progress.stop_animation()
         self.state_cancel.setVisible(state == "processing" and cancellable)
         self.state_cancel.setEnabled(state == "processing" and cancellable)
         self.state_retry.setVisible(state in {"failed", "cancelled"})
-        self.content_stack.setCurrentWidget(self.scroll if state == "completed" and self._page_count else self.state_panel)
+        preview_ready = state == "preview_ready" and self._page_count > 0
+        self.zoom_in.setEnabled(preview_ready)
+        self.zoom_out.setEnabled(preview_ready)
+        self.fit_width.setEnabled(preview_ready)
+        self.content_stack.setCurrentWidget(
+            self.scroll if preview_ready else self.state_panel
+        )
         self.notice.hide()
 
-    def set_recognition_progress(self, completed: int, total: int) -> None:
+    def update_processing_message(
+        self, message: str, cancellable: bool = False, reset_progress: bool = False,
+        title: str | None = None,
+    ) -> None:
+        """Cập nhật nhãn; chế độ vòng tròn chỉ đổi ở ranh giới giai đoạn."""
+        if self._preview_state not in {"processing", "preparing_preview", "cancelling"}:
+            return
+        if title:
+            self.state_title.setText(title)
+        self.state_message.setText(message)
+        if reset_progress and self.circular_progress._mode != "indeterminate":
+            self.circular_progress.set_indeterminate()
+        self.state_cancel.setVisible(self._preview_state == "processing" and cancellable)
+        self.state_cancel.setEnabled(self._preview_state == "processing" and cancellable)
+
+    def set_recognition_progress(
+        self, completed: int, total: int, cancellable: bool = True,
+    ) -> None:
         """Hiển thị tỷ lệ có mẫu số thật, ghi rõ đây là giai đoạn nhận dạng."""
         if self._preview_state != "processing" or total <= 0:
             return
@@ -355,18 +460,15 @@ class WordPreviewWidget(QWidget):
         percent = int(safe_completed * 100 / safe_total)
         self.state_title.setText("Đang nhận dạng văn bản")
         self.state_message.setText(
-            f"Giai đoạn nhận dạng: {safe_completed}/{safe_total} vùng · {percent}%"
+            f"{safe_completed}/{safe_total} vùng · {percent}% giai đoạn nhận dạng"
         )
         self.circular_progress.setVisible(True)
         self.circular_progress.set_work_progress(safe_completed, safe_total)
-        self.state_cancel.setVisible(True)
-        self.state_cancel.setEnabled(True)
+        self.state_cancel.setVisible(cancellable)
+        self.state_cancel.setEnabled(cancellable)
 
     def _set_success_appearance(self, active: bool) -> None:
         if active:
-            self.state_panel.setStyleSheet(
-                "QFrame#previewStatePanel { background: transparent; border: none; }"
-            )
             self.state_title.setStyleSheet(
                 f"background: transparent; color: {'#f7f7f8' if self._theme == 'dark' else '#202123'}; "
                 "font-size: 17px; font-weight: 500;"
@@ -376,7 +478,6 @@ class WordPreviewWidget(QWidget):
                 f"background: transparent; color: {color}; font-size: 14px;"
             )
         else:
-            self.state_panel.setStyleSheet("")
             self.state_title.setStyleSheet("")
             self.state_message.setStyleSheet("")
 
@@ -387,31 +488,36 @@ class WordPreviewWidget(QWidget):
         if hasattr(self, "_success_finish"):
             self._success_finish.stop()
         if hasattr(self, "circular_progress"):
-            self.circular_progress._check_animation.stop()
+            self.circular_progress.stop_animation()
 
     def show_success(self, page_count: int) -> None:
-        """Chỉ gọi sau khi ít nhất một trang PDF đã được dựng và nạp vào widget."""
+        """Chỉ thành công sau khi trang đầu đã được dựng nhưng vẫn đang ẩn."""
+        if self._pdf_path is None or self._page_count <= 0 or page_count <= 0:
+            return
+        if self._preview_state in {"success_animating", "preview_ready"}:
+            return
         self.cancel_success_animation()
         self._set_success_appearance(True)
         token = self._success_generation
-        self._preview_state = "success"
+        self._preview_state = "success_animating"
         self.state_title.setText("Đang hoàn tất")
         self.state_message.setText(f"Bản xem trước Word đã sẵn sàng · {page_count} trang")
+        self.content_stack.setCurrentWidget(self.state_panel)
         self.circular_progress.setVisible(True)
         self.circular_progress.show_success()
         if self.circular_progress._reduce_motion:
-            self._show_success_check(self._success_generation)
+            self._show_success_check(token)
             return
         self.state_cancel.hide()
         self.state_retry.hide()
-        self.content_stack.setCurrentWidget(self.state_panel)
         self._success_hold = QTimer(self)
         self._success_hold.setSingleShot(True)
         self._success_hold.timeout.connect(lambda: self._show_success_check(token))
-        self._success_hold.start(260)
+        self._success_hold.start(160)
 
     def _show_success_check(self, token: int) -> None:
-        if token != self._success_generation or self._pdf_path is None:
+        if (token != self._success_generation or self._pdf_path is None
+                or self._preview_state != "success_animating"):
             return
         self.circular_progress.animate_check()
         self.state_title.setText("Đã nhận dạng thành công")
@@ -422,12 +528,18 @@ class WordPreviewWidget(QWidget):
         self._success_finish = QTimer(self)
         self._success_finish.setSingleShot(True)
         self._success_finish.timeout.connect(lambda: self._finish_success(token))
-        self._success_finish.start(520)
+        self._success_finish.start(420)
 
     def _finish_success(self, token: int) -> None:
-        if token != self._success_generation or self._pdf_path is None:
+        if (token != self._success_generation or self._pdf_path is None
+                or self._preview_state != "success_animating"):
             return
-        self._preview_state = "completed"
+        self._preview_state = "preview_ready"
+        self.circular_progress.stop_animation()
+        self.circular_progress.setVisible(False)
+        self.zoom_in.setEnabled(True)
+        self.zoom_out.setEnabled(True)
+        self.fit_width.setEnabled(bool(self._page_count))
         self.content_stack.setCurrentWidget(self.scroll)
 
     def set_zoom(self, zoom: float) -> None:
@@ -479,6 +591,11 @@ class WordPreviewWidget(QWidget):
         worker = _PdfPageWorker(self._pdf_path, self._requested_center, self._zoom, self._generation, self)
         worker.pages_ready.connect(self._pages_ready)
         worker.failed.connect(self._render_failed)
+        perf_generation = self._perf_job_generation
+        worker.stage_event.connect(
+            lambda stage, transition, timestamp_ns, g=perf_generation:
+                self.perf_stage_event.emit(g, stage, transition, timestamp_ns)
+        )
         worker.finished.connect(lambda w=worker: self._worker_finished(w))
         self._render_worker = worker
         worker.start()
@@ -490,9 +607,7 @@ class WordPreviewWidget(QWidget):
             self._page_sizes = list(page_sizes)
             self._page_count = len(self._page_sizes)
             self._rebuild_page_placeholders()
-            self.fit_width.setEnabled(True)
             self.notice.hide()
-            self.scroll.show()
         try:
             for index, image in images:
                 if index < len(self._page_labels):
@@ -502,6 +617,10 @@ class WordPreviewWidget(QWidget):
                     self._page_labels[index].setPixmap(pixmap)
         except Exception as exc:
             message = f"Qt could not display a rendered PDF page ({type(exc).__name__})."
+            if not self._initial_preview_emitted:
+                self.perf_stage_event.emit(
+                    self._perf_job_generation, "preview_render", "end", time.perf_counter_ns()
+                )
             self.set_notice(message)
             self.preview_failed.emit(message)
             return
@@ -513,10 +632,17 @@ class WordPreviewWidget(QWidget):
         self.page_label.setText(f"Trang {current} / {self._page_count}")
         if not self._initial_preview_emitted:
             self._initial_preview_emitted = True
+            self.perf_stage_event.emit(
+                self._perf_job_generation, "preview_render", "end", time.perf_counter_ns()
+            )
             self.preview_ready.emit(self._page_count)
 
     def _render_failed(self, generation: int, message: str) -> None:
         if generation == self._generation:
+            if not self._initial_preview_emitted:
+                self.perf_stage_event.emit(
+                    self._perf_job_generation, "preview_render", "end", time.perf_counter_ns()
+                )
             self.set_notice(message)
             self.preview_failed.emit(message)
 

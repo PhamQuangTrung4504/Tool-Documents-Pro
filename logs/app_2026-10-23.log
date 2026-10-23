@@ -63,3 +63,265 @@
 2026-10-23 08:30:10 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
 2026-10-23 08:30:10 | INFO     | app.ui.main_window:closeEvent:1872 | MainWindow closed.
 2026-10-23 08:30:10 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 08:43:28 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 08:43:28 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 08:43:28 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 08:43:28 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 08:43:28 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 08:43:30 | INFO     | app.ui.main_window:__init__:565 | MainWindow initialized.
+2026-10-23 08:43:30 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 08:43:39 | INFO     | app.ui.main_window:_load_image_from_path:1061 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 08:43:41 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 08:43:43 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 08:43:44 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 08:43:49 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 08:43:49 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 7.92s.
+2026-10-23 08:43:49 | DEBUG    | app.core.ocr_engine:recognize:1195 | Running PaddleOCR Text Detection …
+2026-10-23 08:44:10 | DEBUG    | app.core.ocr_engine:recognize:1427 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 08:45:17 | INFO     | app.core.ocr_engine:recognize:1953 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=N/A, elapsed=87.61s
+2026-10-23 08:45:17 | INFO     | app.ui.main_window:_on_ocr_finished:1312 | OCR result displayed: 34 lines, avg_conf=N/A
+2026-10-23 08:45:17 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\8ee55abb5fd640f691d47434bbbc0feb\document.docx
+2026-10-23 08:45:28 | INFO     | app.ui.main_window:_load_image_from_path:1061 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang1.png ((705, 1074, 3))
+2026-10-23 08:45:29 | DEBUG    | app.core.ocr_engine:recognize:1195 | Running PaddleOCR Text Detection …
+2026-10-23 08:45:49 | DEBUG    | app.core.ocr_engine:recognize:1427 | Recognizing 41 text lines with VietOCR (vgg_transformer) …
+2026-10-23 08:46:24 | DEBUG    | app.core.ocr_engine:recognize:1195 | Running PaddleOCR Text Detection …
+2026-10-23 08:46:42 | DEBUG    | app.core.ocr_engine:recognize:1427 | Recognizing 41 text lines with VietOCR (vgg_transformer) …
+2026-10-23 08:46:58 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 08:46:58 | INFO     | app.ui.main_window:closeEvent:1868 | MainWindow closed.
+2026-10-23 08:46:58 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 09:23:08 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 09:23:08 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 09:23:08 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 09:23:08 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 09:23:08 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 09:23:10 | DEBUG    | app.ui.main_window:__init__:571 | MainWindow GUI initialization: 248.4ms
+2026-10-23 09:23:10 | INFO     | app.ui.main_window:__init__:572 | MainWindow initialized.
+2026-10-23 09:23:10 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 09:23:27 | DEBUG    | app.ui.main_window:_render_source_image:1026 | Source image scaling: 1.0ms
+2026-10-23 09:23:27 | DEBUG    | app.ui.main_window:_show_image:999 | Source display timing: conversion=3.2ms scaling/layout=1.3ms total=4.5ms
+2026-10-23 09:23:27 | INFO     | app.ui.main_window:_load_image_from_path:1089 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 09:23:29 | DEBUG    | app.ui.main_window:_on_run_ocr:1248 | OCR worker construction and signal wiring: 0.3ms
+2026-10-23 09:23:29 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 09:23:30 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 09:23:32 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 09:23:38 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 09:23:38 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 9.55s.
+2026-10-23 09:23:38 | DEBUG    | app.ui.main_window:run:193 | OCR model initialization (worker thread): 9551.8ms
+2026-10-23 09:23:38 | DEBUG    | app.core.ocr_engine:recognize:1195 | Running PaddleOCR Text Detection …
+2026-10-23 09:23:54 | DEBUG    | app.core.ocr_engine:recognize:1350 | PaddleOCR detection stage total (worker thread): 16081.6ms
+2026-10-23 09:23:54 | DEBUG    | app.core.ocr_engine:recognize:1430 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 09:24:28 | DEBUG    | app.ui.main_window:_render_source_image:1026 | Source image scaling: 2.5ms
+2026-10-23 09:24:40 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 09:24:40 | INFO     | app.ui.main_window:closeEvent:1923 | MainWindow closed.
+2026-10-23 09:24:40 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 09:45:26 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 09:45:26 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 09:45:26 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 09:45:26 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 09:45:26 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 09:45:28 | DEBUG    | app.ui.main_window:__init__:657 | MainWindow GUI initialization: 239.2ms
+2026-10-23 09:45:28 | INFO     | app.ui.main_window:__init__:658 | MainWindow initialized.
+2026-10-23 09:45:28 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 09:45:33 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 09:45:33 | INFO     | app.ui.main_window:closeEvent:2023 | MainWindow closed.
+2026-10-23 09:45:33 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 09:45:48 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 09:45:48 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 09:45:48 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 09:45:48 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 09:45:48 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 09:45:50 | DEBUG    | app.ui.main_window:__init__:657 | MainWindow GUI initialization: 218.3ms
+2026-10-23 09:45:50 | INFO     | app.ui.main_window:__init__:658 | MainWindow initialized.
+2026-10-23 09:45:50 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 09:46:05 | DEBUG    | app.ui.main_window:_render_source_image:1112 | Source image scaling: 0.8ms
+2026-10-23 09:46:05 | DEBUG    | app.ui.main_window:_show_image:1085 | Source display timing: conversion=3.1ms scaling/layout=1.0ms total=4.1ms
+2026-10-23 09:46:05 | INFO     | app.ui.main_window:_load_image_from_path:1175 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 09:46:06 | DEBUG    | app.ui.main_window:_on_run_ocr:1334 | OCR worker construction and signal wiring: 0.3ms
+2026-10-23 09:46:06 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 09:46:08 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 09:46:09 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 09:46:14 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 09:46:14 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 8.07s.
+2026-10-23 09:46:14 | DEBUG    | app.ui.main_window:run:260 | OCR model initialization (worker thread): 8069.1ms
+2026-10-23 09:46:14 | INFO     | app.ui.main_window:run:275 | TDP_UI_PERF inference thread counts (no limits applied): {'opencv': 20, 'torch_intra_op': 10, 'torch_inter_op': 14}
+2026-10-23 09:46:14 | DEBUG    | app.core.ocr_engine:recognize:1195 | Running PaddleOCR Text Detection …
+2026-10-23 09:46:30 | DEBUG    | app.core.ocr_engine:recognize:1350 | PaddleOCR detection stage total (worker thread): 15860.2ms
+2026-10-23 09:46:30 | DEBUG    | app.core.ocr_engine:recognize:1430 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 09:47:28 | DEBUG    | app.core.ocr_engine:recognize:1679 | OCR recognition stage including crop and bookkeeping (35 regions, worker thread): 58107.4ms; VietOCR model inference total: 58053.6ms
+2026-10-23 09:47:28 | INFO     | app.core.ocr_engine:recognize:1967 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=N/A, elapsed=74.01s
+2026-10-23 09:47:28 | INFO     | app.ui.main_window:finish:222 | TDP_UI_PERF event-loop latency summary: {'job_generation': 2, 'reason': 'đã nhận kết quả worker', 'interval_ms': 50, 'interpretation': 'độ trễ timer là tín hiệu đáp ứng GUI, không phải thời lượng chính xác của từng tác vụ', 'overall': {'n': 1330, 'max_ms': 4841.0, 'p95_ms': 0.7, 'over_100ms': 11, 'over_250ms': 8, 'over_500ms': 6}, 'stages': {'startup': {'n': 156, 'max_ms': 160.6, 'p95_ms': 3.5, 'over_100ms': 1, 'over_250ms': 0, 'over_500ms': 0}, 'detection': {'n': 1174, 'max_ms': 4841.0, 'p95_ms': 0.7, 'over_100ms': 10, 'over_250ms': 8, 'over_500ms': 6}}}
+2026-10-23 09:47:28 | INFO     | app.ui.main_window:_on_ocr_finished:1463 | OCR result displayed: 34 lines, avg_conf=N/A
+2026-10-23 09:47:28 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\fb923746d9c745aaabaf6098f211a6a4\document.docx
+2026-10-23 09:48:38 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 09:48:38 | INFO     | app.ui.main_window:closeEvent:2023 | MainWindow closed.
+2026-10-23 09:48:38 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 10:04:35 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 10:04:35 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 10:04:35 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 10:04:35 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 10:04:35 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 10:04:36 | DEBUG    | app.ui.main_window:__init__:835 | MainWindow GUI initialization: 221.9ms
+2026-10-23 10:04:36 | INFO     | app.ui.main_window:__init__:836 | MainWindow initialized.
+2026-10-23 10:04:37 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 10:04:46 | DEBUG    | app.ui.main_window:_render_source_image:1291 | Source image scaling: 0.9ms
+2026-10-23 10:04:46 | DEBUG    | app.ui.main_window:_show_image:1264 | Source display timing: conversion=3.1ms scaling/layout=1.0ms total=4.1ms
+2026-10-23 10:04:46 | INFO     | app.ui.main_window:_load_image_from_path:1354 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 10:04:47 | DEBUG    | app.ui.main_window:_on_run_ocr:1515 | OCR worker construction and signal wiring: 0.3ms
+2026-10-23 10:04:47 | INFO     | app.ui.main_window:_apply_debug_opencv_thread_override:400 | TDP_UI_PERF OpenCV thread experiment: before=20, requested=20, after=20
+2026-10-23 10:04:47 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 10:04:48 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 10:04:50 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 10:04:55 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 10:04:55 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 7.91s.
+2026-10-23 10:04:55 | DEBUG    | app.ui.main_window:run:414 | OCR model initialization (worker thread): 7913.7ms
+2026-10-23 10:04:55 | INFO     | app.ui.main_window:run:430 | TDP_UI_PERF inference thread counts (no limits applied): {'opencv': 20, 'torch_intra_op': 10, 'torch_inter_op': 14}
+2026-10-23 10:04:55 | DEBUG    | app.core.ocr_engine:recognize:1206 | Running PaddleOCR Text Detection …
+2026-10-23 10:05:16 | DEBUG    | app.core.ocr_engine:recognize:1361 | PaddleOCR detection stage total (worker thread): 21087.6ms
+2026-10-23 10:05:16 | DEBUG    | app.core.ocr_engine:recognize:1443 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 10:06:18 | DEBUG    | app.core.ocr_engine:recognize:1692 | OCR recognition stage including crop and bookkeeping (35 regions, worker thread): 61652.2ms; VietOCR model inference total: 61594.8ms
+2026-10-23 10:06:18 | INFO     | app.core.ocr_engine:recognize:1982 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=N/A, elapsed=82.79s
+2026-10-23 10:06:18 | INFO     | app.ui.main_window:_on_ocr_finished:1650 | OCR result displayed: 34 lines, avg_conf=N/A
+2026-10-23 10:06:18 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\bc2448fdc69d433ea19bb6cd70e90d8c\document.docx
+2026-10-23 10:06:23 | INFO     | app.ui.main_window:finish:338 | TDP_UI_PERF event-loop latency summary: {'job_generation': 2, 'reason': 'Preview sẵn sàng', 'interval_ms': 50, 'interpretation': 'độ trễ timer là tín hiệu đáp ứng GUI, không phải thời lượng chính xác của từng tác vụ', 'overall': {'n': 1500, 'max_ms': 5600.2, 'p95_ms': 0.8, 'over_100ms': 13, 'over_250ms': 6, 'over_500ms': 6}, 'stages': {'model_loading': {'n': 155, 'max_ms': 142.4, 'p95_ms': 1.8, 'over_100ms': 1, 'over_250ms': 0, 'over_500ms': 0}, 'detection': {'n': 11, 'max_ms': 4004.0, 'p95_ms': 4004.0, 'over_100ms': 11, 'over_250ms': 5, 'over_500ms': 5}, 'recognition': {'n': 1234, 'max_ms': 5600.2, 'p95_ms': 0.6, 'over_100ms': 1, 'over_250ms': 1, 'over_500ms': 1}, 'between_stages': {'n': 1, 'max_ms': 6.0, 'p95_ms': 6.0, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'export': {'n': 2, 'max_ms': 0.0, 'p95_ms': 0.0, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'preview_render': {'n': 97, 'max_ms': 3.4, 'p95_ms': 1.0, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}}, 'worker_stage_durations': [{'stage': 'startup', 'duration_ms': 3.6}, {'stage': 'model_loading', 'duration_ms': 7913.8}, {'stage': 'preprocessing', 'duration_ms': 11.0}, {'stage': 'detection', 'duration_ms': 21088.7}, {'stage': 'recognition', 'duration_ms': 61652.5}, {'stage': 'layout', 'duration_ms': 24.9}, {'stage': 'export', 'duration_ms': 98.6}, {'stage': 'preview_render', 'duration_ms': 4864.3}, {'stage': 'preview_render', 'duration_ms': 14.0}], 'worker_signal_delivery': {'n': 16, 'max_ms': 17.5, 'p95_ms': 17.5, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'stage_transitions': [{'stage': 'startup', 'transition': 'start', 'offset_ms': 0.0, 'gui_delivery_ms': 0.0, 'source': 'ui'}, {'stage': 'model_loading', 'transition': 'start', 'offset_ms': 3.6, 'gui_delivery_ms': 14.7, 'source': 'worker'}, {'stage': 'model_loading', 'transition': 'end', 'offset_ms': 7917.4, 'gui_delivery_ms': 0.2, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'start', 'offset_ms': 7917.7, 'gui_delivery_ms': 0.2, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'end', 'offset_ms': 7928.7, 'gui_delivery_ms': 0.6, 'source': 'worker'}, {'stage': 'detection', 'transition': 'start', 'offset_ms': 7928.7, 'gui_delivery_ms': 0.6, 'source': 'worker'}, {'stage': 'detection', 'transition': 'end', 'offset_ms': 29017.4, 'gui_delivery_ms': 16.9, 'source': 'worker'}, {'stage': 'recognition', 'transition': 'start', 'offset_ms': 29028.5, 'gui_delivery_ms': 5.8, 'source': 'worker'}, {'stage': 'recognition', 'transition': 'end', 'offset_ms': 90681.0, 'gui_delivery_ms': 0.4, 'source': 'worker'}, {'stage': 'layout', 'transition': 'start', 'offset_ms': 90681.0, 'gui_delivery_ms': 0.4, 'source': 'worker'}, {'stage': 'layout', 'transition': 'end', 'offset_ms': 90705.9, 'gui_delivery_ms': 1.8, 'source': 'worker'}, {'stage': 'export', 'transition': 'start', 'offset_ms': 90713.1, 'gui_delivery_ms': 17.5, 'source': 'worker'}, {'stage': 'export', 'transition': 'end', 'offset_ms': 90811.8, 'gui_delivery_ms': 0.2, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'start', 'offset_ms': 90811.8, 'gui_delivery_ms': 0.4, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'end', 'offset_ms': 95676.1, 'gui_delivery_ms': 0.8, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'start', 'offset_ms': 95677.4, 'gui_delivery_ms': 13.1, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'end', 'offset_ms': 95691.4, 'gui_delivery_ms': 0.0, 'source': 'worker'}], 'large_delay_gui_stacks': [{'timestamp_ns': 9204499447200, 'elapsed_since_heartbeat_ms': 805.2, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 8717.4}, {'timestamp_ns': 9205013601100, 'elapsed_since_heartbeat_ms': 273.7, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9231.6}, {'timestamp_ns': 9205294453700, 'elapsed_since_heartbeat_ms': 279.7, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9512.4}, {'timestamp_ns': 9211714615200, 'elapsed_since_heartbeat_ms': 2629.3, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 15932.6}, {'timestamp_ns': 9215111559600, 'elapsed_since_heartbeat_ms': 3395.7, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 19329.5}, {'timestamp_ns': 9219164960100, 'elapsed_since_heartbeat_ms': 4052.9, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 23382.9}]}
+2026-10-23 10:10:29 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 10:10:29 | INFO     | app.ui.main_window:closeEvent:2219 | MainWindow closed.
+2026-10-23 10:10:29 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 10:10:50 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 10:10:50 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 10:10:50 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 10:10:50 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 10:10:50 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 10:10:52 | DEBUG    | app.ui.main_window:__init__:835 | MainWindow GUI initialization: 210.2ms
+2026-10-23 10:10:52 | INFO     | app.ui.main_window:__init__:836 | MainWindow initialized.
+2026-10-23 10:10:52 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 10:11:00 | DEBUG    | app.ui.main_window:_render_source_image:1291 | Source image scaling: 0.8ms
+2026-10-23 10:11:00 | DEBUG    | app.ui.main_window:_show_image:1264 | Source display timing: conversion=3.4ms scaling/layout=1.0ms total=4.3ms
+2026-10-23 10:11:00 | INFO     | app.ui.main_window:_load_image_from_path:1354 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 10:11:01 | DEBUG    | app.ui.main_window:_on_run_ocr:1515 | OCR worker construction and signal wiring: 0.3ms
+2026-10-23 10:11:01 | INFO     | app.ui.main_window:_apply_debug_opencv_thread_override:400 | TDP_UI_PERF OpenCV thread experiment: before=20, requested=4, after=4
+2026-10-23 10:11:01 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 10:11:03 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 10:11:04 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 10:11:10 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 10:11:10 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 8.23s.
+2026-10-23 10:11:10 | DEBUG    | app.ui.main_window:run:414 | OCR model initialization (worker thread): 8225.9ms
+2026-10-23 10:11:10 | INFO     | app.ui.main_window:run:430 | TDP_UI_PERF inference thread counts (no limits applied): {'opencv': 4, 'torch_intra_op': 10, 'torch_inter_op': 14}
+2026-10-23 10:11:10 | DEBUG    | app.core.ocr_engine:recognize:1206 | Running PaddleOCR Text Detection …
+2026-10-23 10:11:30 | DEBUG    | app.core.ocr_engine:recognize:1361 | PaddleOCR detection stage total (worker thread): 20113.9ms
+2026-10-23 10:11:30 | DEBUG    | app.core.ocr_engine:recognize:1443 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 10:12:25 | DEBUG    | app.core.ocr_engine:recognize:1692 | OCR recognition stage including crop and bookkeeping (35 regions, worker thread): 55424.1ms; VietOCR model inference total: 55370.5ms
+2026-10-23 10:12:25 | INFO     | app.core.ocr_engine:recognize:1982 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=N/A, elapsed=75.59s
+2026-10-23 10:12:25 | INFO     | app.ui.main_window:_on_ocr_finished:1650 | OCR result displayed: 34 lines, avg_conf=N/A
+2026-10-23 10:12:25 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\074cc6d6456a4034925b9d43d9bb0f52\document.docx
+2026-10-23 10:12:28 | INFO     | app.ui.main_window:finish:338 | TDP_UI_PERF event-loop latency summary: {'job_generation': 2, 'reason': 'Preview sẵn sàng', 'interval_ms': 50, 'interpretation': 'độ trễ timer là tín hiệu đáp ứng GUI, không phải thời lượng chính xác của từng tác vụ', 'overall': {'n': 1341, 'max_ms': 5196.0, 'p95_ms': 0.8, 'over_100ms': 13, 'over_250ms': 7, 'over_500ms': 6}, 'stages': {'model_loading': {'n': 161, 'max_ms': 138.8, 'p95_ms': 1.1, 'over_100ms': 1, 'over_250ms': 0, 'over_500ms': 0}, 'detection': {'n': 16, 'max_ms': 5196.0, 'p95_ms': 5196.0, 'over_100ms': 12, 'over_250ms': 7, 'over_500ms': 6}, 'recognition': {'n': 1108, 'max_ms': 5.4, 'p95_ms': 0.7, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'layout': {'n': 1, 'max_ms': 14.1, 'p95_ms': 14.1, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'export': {'n': 2, 'max_ms': 0.0, 'p95_ms': 0.0, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'preview_render': {'n': 53, 'max_ms': 6.1, 'p95_ms': 1.6, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}}, 'worker_stage_durations': [{'stage': 'startup', 'duration_ms': 2.2}, {'stage': 'model_loading', 'duration_ms': 8226.0}, {'stage': 'preprocessing', 'duration_ms': 15.3}, {'stage': 'detection', 'duration_ms': 20115.0}, {'stage': 'recognition', 'duration_ms': 55424.5}, {'stage': 'layout', 'duration_ms': 25.0}, {'stage': 'export', 'duration_ms': 100.8}, {'stage': 'preview_render', 'duration_ms': 2613.0}, {'stage': 'preview_render', 'duration_ms': 14.6}], 'worker_signal_delivery': {'n': 16, 'max_ms': 14.0, 'p95_ms': 14.0, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'stage_transitions': [{'stage': 'startup', 'transition': 'start', 'offset_ms': 0.0, 'gui_delivery_ms': 0.0, 'source': 'ui'}, {'stage': 'model_loading', 'transition': 'start', 'offset_ms': 2.2, 'gui_delivery_ms': 14.0, 'source': 'worker'}, {'stage': 'model_loading', 'transition': 'end', 'offset_ms': 8228.2, 'gui_delivery_ms': 0.3, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'start', 'offset_ms': 8228.6, 'gui_delivery_ms': 0.2, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'end', 'offset_ms': 8243.9, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'detection', 'transition': 'start', 'offset_ms': 8243.9, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'detection', 'transition': 'end', 'offset_ms': 28359.0, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'recognition', 'transition': 'start', 'offset_ms': 28368.5, 'gui_delivery_ms': 0.6, 'source': 'worker'}, {'stage': 'recognition', 'transition': 'end', 'offset_ms': 83793.0, 'gui_delivery_ms': 1.2, 'source': 'worker'}, {'stage': 'layout', 'transition': 'start', 'offset_ms': 83793.0, 'gui_delivery_ms': 1.2, 'source': 'worker'}, {'stage': 'layout', 'transition': 'end', 'offset_ms': 83818.0, 'gui_delivery_ms': 3.8, 'source': 'worker'}, {'stage': 'export', 'transition': 'start', 'offset_ms': 83826.8, 'gui_delivery_ms': 5.6, 'source': 'worker'}, {'stage': 'export', 'transition': 'end', 'offset_ms': 83927.6, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'start', 'offset_ms': 83927.7, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'end', 'offset_ms': 86540.6, 'gui_delivery_ms': 0.6, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'start', 'offset_ms': 86541.5, 'gui_delivery_ms': 11.4, 'source': 'worker'}, {'stage': 'preview_render', 'transition': 'end', 'offset_ms': 86556.1, 'gui_delivery_ms': 0.0, 'source': 'worker'}], 'large_delay_gui_stacks': [{'timestamp_ns': 9573030828900, 'elapsed_since_heartbeat_ms': 148.2, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'model_loading', 'offset_ms': 2797.1}, {'timestamp_ns': 9579273496300, 'elapsed_since_heartbeat_ms': 788.3, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9039.8}, {'timestamp_ns': 9579543027700, 'elapsed_since_heartbeat_ms': 260.7, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9309.3}, {'timestamp_ns': 9580075353400, 'elapsed_since_heartbeat_ms': 294.5, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9841.6}, {'timestamp_ns': 9582311665100, 'elapsed_since_heartbeat_ms': 1451.0, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 12077.9}, {'timestamp_ns': 9584214560300, 'elapsed_since_heartbeat_ms': 1901.6, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 13980.8}, {'timestamp_ns': 9587555213100, 'elapsed_since_heartbeat_ms': 5242.2, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 17321.5}]}
+2026-10-23 10:12:35 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 10:12:35 | INFO     | app.ui.main_window:closeEvent:2219 | MainWindow closed.
+2026-10-23 10:12:35 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 10:13:13 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 10:13:13 | INFO     | __main__:main:72 | Tool-Documents-Pro — Starting application …
+2026-10-23 10:13:13 | INFO     | __main__:main:73 | ============================================================
+2026-10-23 10:13:13 | WARNING  | __main__:main:78 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 10:13:13 | INFO     | __main__:main:119 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 10:13:15 | DEBUG    | app.ui.main_window:__init__:835 | MainWindow GUI initialization: 225.8ms
+2026-10-23 10:13:15 | INFO     | app.ui.main_window:__init__:836 | MainWindow initialized.
+2026-10-23 10:13:15 | INFO     | __main__:main:131 | Application window opened.
+2026-10-23 10:13:20 | DEBUG    | app.ui.main_window:_render_source_image:1291 | Source image scaling: 0.8ms
+2026-10-23 10:13:20 | DEBUG    | app.ui.main_window:_show_image:1264 | Source display timing: conversion=3.2ms scaling/layout=1.0ms total=4.2ms
+2026-10-23 10:13:20 | INFO     | app.ui.main_window:_load_image_from_path:1354 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 10:13:24 | DEBUG    | app.ui.main_window:_on_run_ocr:1515 | OCR worker construction and signal wiring: 0.3ms
+2026-10-23 10:13:24 | INFO     | app.ui.main_window:_apply_debug_opencv_thread_override:400 | TDP_UI_PERF OpenCV thread experiment: before=20, requested=4, after=4
+2026-10-23 10:13:24 | INFO     | app.core.ocr_engine:get_global_detector:615 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 10:13:26 | INFO     | app.core.ocr_engine:get_global_detector:651 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 10:13:27 | INFO     | app.core.ocr_engine:get_global_vietocr:675 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 10:13:32 | INFO     | app.core.ocr_engine:get_global_vietocr:682 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 10:13:32 | INFO     | app.core.ocr_engine:_ensure_loaded:787 | Hybrid OCR engines ready in 8.11s.
+2026-10-23 10:13:32 | DEBUG    | app.ui.main_window:run:414 | OCR model initialization (worker thread): 8110.5ms
+2026-10-23 10:13:32 | INFO     | app.ui.main_window:run:430 | TDP_UI_PERF inference thread counts (no limits applied): {'opencv': 4, 'torch_intra_op': 10, 'torch_inter_op': 14}
+2026-10-23 10:13:32 | DEBUG    | app.core.ocr_engine:recognize:1206 | Running PaddleOCR Text Detection …
+2026-10-23 10:13:51 | INFO     | app.ui.main_window:finish:338 | TDP_UI_PERF event-loop latency summary: {'job_generation': 2, 'reason': 'OCR thất bại hoặc bị hủy', 'interval_ms': 50, 'interpretation': 'độ trễ timer là tín hiệu đáp ứng GUI, không phải thời lượng chính xác của từng tác vụ', 'overall': {'n': 172, 'max_ms': 5022.7, 'p95_ms': 209.0, 'over_100ms': 13, 'over_250ms': 6, 'over_500ms': 6}, 'stages': {'model_loading': {'n': 158, 'max_ms': 155.1, 'p95_ms': 1.6, 'over_100ms': 1, 'over_250ms': 0, 'over_500ms': 0}, 'detection': {'n': 13, 'max_ms': 5022.7, 'p95_ms': 5022.7, 'over_100ms': 11, 'over_250ms': 5, 'over_500ms': 5}, 'between_stages': {'n': 1, 'max_ms': 2532.3, 'p95_ms': 2532.3, 'over_100ms': 1, 'over_250ms': 1, 'over_500ms': 1}}, 'worker_stage_durations': [{'stage': 'startup', 'duration_ms': 2.7}, {'stage': 'model_loading', 'duration_ms': 8110.6}, {'stage': 'preprocessing', 'duration_ms': 15.0}, {'stage': 'detection', 'duration_ms': 19015.1}], 'worker_signal_delivery': {'n': 6, 'max_ms': 14.2, 'p95_ms': 14.2, 'over_100ms': 0, 'over_250ms': 0, 'over_500ms': 0}, 'stage_transitions': [{'stage': 'startup', 'transition': 'start', 'offset_ms': 0.0, 'gui_delivery_ms': 0.0, 'source': 'ui'}, {'stage': 'model_loading', 'transition': 'start', 'offset_ms': 2.7, 'gui_delivery_ms': 14.2, 'source': 'worker'}, {'stage': 'model_loading', 'transition': 'end', 'offset_ms': 8113.3, 'gui_delivery_ms': 0.3, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'start', 'offset_ms': 8113.7, 'gui_delivery_ms': 0.2, 'source': 'worker'}, {'stage': 'preprocessing', 'transition': 'end', 'offset_ms': 8128.7, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'detection', 'transition': 'start', 'offset_ms': 8128.8, 'gui_delivery_ms': 0.1, 'source': 'worker'}, {'stage': 'detection', 'transition': 'end', 'offset_ms': 27143.9, 'gui_delivery_ms': 4.6, 'source': 'worker'}], 'large_delay_gui_stacks': [{'timestamp_ns': 9713811815800, 'elapsed_since_heartbeat_ms': 118.1, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'model_loading', 'offset_ms': 614.6}, {'timestamp_ns': 9716024055700, 'elapsed_since_heartbeat_ms': 129.5, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'model_loading', 'offset_ms': 2826.9}, {'timestamp_ns': 9721009535700, 'elapsed_since_heartbeat_ms': 166.0, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'model_loading', 'offset_ms': 7812.4}, {'timestamp_ns': 9722146675700, 'elapsed_since_heartbeat_ms': 802.1, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 8949.5}, {'timestamp_ns': 9722443861300, 'elapsed_since_heartbeat_ms': 294.5, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9246.7}, {'timestamp_ns': 9722723789400, 'elapsed_since_heartbeat_ms': 278.9, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 9526.6}, {'timestamp_ns': 9733770725100, 'elapsed_since_heartbeat_ms': 3497.1, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 20573.6}, {'timestamp_ns': 9737761731200, 'elapsed_since_heartbeat_ms': 3984.2, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 24564.6}, {'timestamp_ns': 9740339345900, 'elapsed_since_heartbeat_ms': 2576.0, 'stack': ['  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 139, in <module>\n    sys.exit(main())\n', '  File "C:\\Users\\pqtru\\OneDrive\\Desktop\\Tool-Documents-Pro\\run.py", line 132, in main\n    exit_code = app.exec_()\n'], 'stage': 'detection', 'offset_ms': 27142.2}]}
+2026-10-23 10:13:52 | INFO     | app.core.ocr_engine:clear_cache:750 | OCREngine cache cleared.
+2026-10-23 10:13:52 | INFO     | app.ui.main_window:closeEvent:2219 | MainWindow closed.
+2026-10-23 10:13:52 | INFO     | __main__:main:134 | Application exited with code 0.
+2026-10-23 15:06:07 | INFO     | __main__:main:69 | ============================================================
+2026-10-23 15:06:07 | INFO     | __main__:main:70 | Tool-Documents-Pro — Starting application …
+2026-10-23 15:06:07 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 15:06:07 | WARNING  | __main__:main:76 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 15:06:07 | INFO     | __main__:main:117 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 15:06:08 | DEBUG    | app.ui.main_window:__init__:849 | MainWindow GUI initialization: 658.6ms
+2026-10-23 15:06:08 | INFO     | app.ui.main_window:__init__:850 | MainWindow initialized.
+2026-10-23 15:06:08 | INFO     | __main__:main:129 | Application window opened.
+2026-10-23 15:14:24 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.9ms
+2026-10-23 15:14:24 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=10.7ms scaling/layout=2.2ms total=12.9ms
+2026-10-23 15:14:24 | INFO     | app.ui.main_window:_load_image_from_path:1368 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\bang2.png ((761, 1123, 3))
+2026-10-23 15:14:26 | WARNING  | app.ui.main_window:_on_run_ocr:1532 | TDP_OCR_PROCESS=1: đang dùng OCR worker subprocess thử nghiệm; QThread mặc định bị giữ nguyên.
+2026-10-23 15:14:26 | DEBUG    | app.ui.main_window:_on_run_ocr:1547 | OCR worker construction and signal wiring: 0.5ms
+2026-10-23 15:14:27 | INFO     | app.ui.ocr_process_adapter:_ensure_started:77 | TDP_OCR_PROCESS worker_ready_ms=1527.9 pid=18776
+2026-10-23 15:14:29 | INFO     | app.core.ocr_engine:get_global_detector:671 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 15:14:31 | INFO     | app.core.ocr_engine:get_global_detector:690 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 15:14:32 | INFO     | app.core.ocr_engine:get_global_vietocr:714 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 15:14:38 | INFO     | app.core.ocr_engine:get_global_vietocr:721 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 15:14:38 | INFO     | app.core.ocr_engine:_ensure_loaded:826 | Hybrid OCR engines ready in 10.72s.
+2026-10-23 15:14:38 | DEBUG    | app.core.ocr_engine:recognize:1245 | Running PaddleOCR Text Detection …
+2026-10-23 15:15:21 | DEBUG    | app.core.ocr_engine:recognize:1400 | PaddleOCR detection stage total (worker thread): 43341.0ms
+2026-10-23 15:15:21 | DEBUG    | app.core.ocr_engine:recognize:1482 | Recognizing 94 text lines with VietOCR (vgg_transformer) …
+2026-10-23 15:16:03 | DEBUG    | app.core.ocr_engine:recognize:1731 | OCR recognition stage including crop and bookkeeping (94 regions, worker thread): 42084.1ms; VietOCR model inference total: 42003.8ms
+2026-10-23 15:16:03 | INFO     | app.core.ocr_engine:recognize:2021 | Hybrid OCR completed: 18 lines, 1 tables detected, avg_conf=N/A, elapsed=85.56s
+2026-10-23 15:16:04 | INFO     | app.ui.ocr_process_adapter:run_job:159 | TDP_OCR_PROCESS result job_id=2-d9fe7458481a401e9795fa56cd8387c1 elapsed_s=96.286 child_private_mb=2738.2
+2026-10-23 15:16:04 | INFO     | app.ui.ocr_process_adapter:run_job:162 | TDP_OCR_PROCESS result generation=2 boxes=91 tables=1 result_sha256=3373d3ca8415d228ccb8be5567dd20c47302cc79c40f123e5be228b512132327
+2026-10-23 15:16:04 | INFO     | app.ui.main_window:_on_ocr_finished:1682 | OCR result displayed: 18 lines, avg_conf=N/A
+2026-10-23 15:16:04 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\afaf7fd512e94356938b563200dd433a\document.docx
+2026-10-23 15:16:23 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.9ms
+2026-10-23 15:16:23 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=2.6ms scaling/layout=2.3ms total=5.0ms
+2026-10-23 15:16:45 | INFO     | app.ui.main_window:_on_export_docx:1897 | Result exported to DOCX: C:\Users\pqtru\Downloads\360.docx
+2026-10-23 15:16:47 | INFO     | app.core.ocr_engine:clear_cache:789 | OCREngine cache cleared.
+2026-10-23 15:16:47 | INFO     | app.ui.main_window:closeEvent:2273 | MainWindow closed.
+2026-10-23 15:16:47 | INFO     | __main__:main:132 | Application exited with code 0.
+2026-10-23 15:18:14 | INFO     | __main__:main:69 | ============================================================
+2026-10-23 15:18:14 | INFO     | __main__:main:70 | Tool-Documents-Pro — Starting application …
+2026-10-23 15:18:14 | INFO     | __main__:main:71 | ============================================================
+2026-10-23 15:18:14 | WARNING  | __main__:main:76 | Python 3.13 detected. Recommended: Python 3.9 — 3.11.
+2026-10-23 15:18:14 | INFO     | __main__:main:117 | Loaded application icon from: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\icon\icon_tool_documents_pro.ico
+2026-10-23 15:18:15 | DEBUG    | app.ui.main_window:__init__:849 | MainWindow GUI initialization: 300.9ms
+2026-10-23 15:18:15 | INFO     | app.ui.main_window:__init__:850 | MainWindow initialized.
+2026-10-23 15:18:15 | INFO     | __main__:main:129 | Application window opened.
+2026-10-23 15:18:40 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 0.9ms
+2026-10-23 15:18:40 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=3.0ms scaling/layout=1.2ms total=4.2ms
+2026-10-23 15:18:40 | INFO     | app.ui.main_window:_load_image_from_path:1368 | Image loaded: C:\Users\pqtru\OneDrive\Desktop\Tool-Documents-Pro\assets\imagetest\vanban1.png ((787, 555, 3))
+2026-10-23 15:18:41 | WARNING  | app.ui.main_window:_on_run_ocr:1532 | TDP_OCR_PROCESS=1: đang dùng OCR worker subprocess thử nghiệm; QThread mặc định bị giữ nguyên.
+2026-10-23 15:18:41 | DEBUG    | app.ui.main_window:_on_run_ocr:1547 | OCR worker construction and signal wiring: 0.5ms
+2026-10-23 15:18:43 | INFO     | app.ui.ocr_process_adapter:_ensure_started:77 | TDP_OCR_PROCESS worker_ready_ms=1535.2 pid=15264
+2026-10-23 15:18:44 | INFO     | app.core.ocr_engine:get_global_detector:671 | Loading PaddleOCR detector for lang='vi' (Singleton) …
+2026-10-23 15:18:46 | INFO     | app.core.ocr_engine:get_global_detector:690 | PaddleOCR detector singleton initialized successfully.
+2026-10-23 15:18:47 | INFO     | app.core.ocr_engine:get_global_vietocr:714 | Loading VietOCR model 'vgg_transformer' (Singleton, beamsearch=True) …
+2026-10-23 15:18:53 | INFO     | app.core.ocr_engine:get_global_vietocr:721 | VietOCR (vgg_transformer) singleton initialized on cpu (beamsearch=True).
+2026-10-23 15:18:53 | INFO     | app.core.ocr_engine:_ensure_loaded:826 | Hybrid OCR engines ready in 9.85s.
+2026-10-23 15:18:53 | DEBUG    | app.core.ocr_engine:recognize:1245 | Running PaddleOCR Text Detection …
+2026-10-23 15:19:24 | DEBUG    | app.core.ocr_engine:recognize:1400 | PaddleOCR detection stage total (worker thread): 31521.9ms
+2026-10-23 15:19:24 | DEBUG    | app.core.ocr_engine:recognize:1482 | Recognizing 35 text lines with VietOCR (vgg_transformer) …
+2026-10-23 15:21:04 | DEBUG    | app.core.ocr_engine:recognize:1731 | OCR recognition stage including crop and bookkeeping (35 regions, worker thread): 100307.8ms; VietOCR model inference total: 100253.7ms
+2026-10-23 15:21:04 | INFO     | app.core.ocr_engine:recognize:2021 | Hybrid OCR completed: 34 lines, 0 tables detected, avg_conf=N/A, elapsed=131.89s
+2026-10-23 15:21:04 | INFO     | app.ui.ocr_process_adapter:run_job:159 | TDP_OCR_PROCESS result job_id=2-c0dd205651eb45a396ad833856428585 elapsed_s=141.746 child_private_mb=2786.7
+2026-10-23 15:21:04 | INFO     | app.ui.ocr_process_adapter:run_job:162 | TDP_OCR_PROCESS result generation=2 boxes=35 tables=0 result_sha256=fb02c8288099b70123c4103cb11f3b2f1584b73682da01ad708933d43be7f43e
+2026-10-23 15:21:05 | INFO     | app.ui.main_window:_on_ocr_finished:1682 | OCR result displayed: 34 lines, avg_conf=N/A
+2026-10-23 15:21:05 | INFO     | app.core.docx_exporter:export_to_docx:567 | DOCX exported successfully: C:\Users\pqtru\AppData\Local\Tool-Documents-Pro\temp\376d17b54aa74de4b69fbfd27cb27a16\document.docx
+2026-10-23 15:27:37 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 2.0ms
+2026-10-23 15:27:37 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.5ms scaling/layout=2.4ms total=3.8ms
+2026-10-23 15:27:39 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.0ms
+2026-10-23 15:27:39 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=2.2ms scaling/layout=1.6ms total=3.8ms
+2026-10-23 15:27:40 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 0.9ms
+2026-10-23 15:27:40 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.5ms scaling/layout=1.3ms total=2.8ms
+2026-10-23 15:27:40 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 0.9ms
+2026-10-23 15:27:40 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.4ms scaling/layout=1.3ms total=2.7ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.2ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.5ms scaling/layout=1.7ms total=3.2ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.1ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.0ms scaling/layout=1.4ms total=2.5ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 1.1ms
+2026-10-23 15:27:41 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.3ms scaling/layout=1.3ms total=2.6ms
+2026-10-23 15:27:55 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 0.8ms
+2026-10-23 15:27:55 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.0ms scaling/layout=1.2ms total=2.2ms
+2026-10-23 15:27:57 | DEBUG    | app.ui.main_window:_render_source_image:1305 | Source image scaling: 0.7ms
+2026-10-23 15:27:57 | DEBUG    | app.ui.main_window:_show_image:1278 | Source display timing: conversion=1.1ms scaling/layout=1.1ms total=2.2ms
+2026-10-23 15:28:00 | INFO     | app.core.ocr_engine:clear_cache:789 | OCREngine cache cleared.
+2026-10-23 15:28:00 | INFO     | app.ui.main_window:closeEvent:2273 | MainWindow closed.
+2026-10-23 15:28:00 | INFO     | __main__:main:132 | Application exited with code 0.

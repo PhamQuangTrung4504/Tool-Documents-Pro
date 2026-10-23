@@ -19,11 +19,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["PADDLE_PDX_EAGER_INIT"] = "False"
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
-# Nạp trước PyTorch để Windows load c10.dll và OpenMP an toàn trước khi Paddle khởi tạo
-try:
-    import torch  # noqa: F401
-except Exception:
-    pass
+# Nạp trước PyTorch để Windows load c10.dll trước mọi import Paddle gián tiếp.
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+from app.native_runtime import bootstrap_torch_before_paddle
+
+bootstrap_torch_before_paddle()
 
 # Lọc bỏ các cảnh báo phụ thuộc không ảnh hưởng runtime
 warnings.filterwarnings("ignore", message=".*RequestsDependencyWarning.*")
@@ -33,10 +35,6 @@ warnings.filterwarnings("ignore", message=".*enable_nested_tensor.*")
 # ---------------------------------------------------------------------------
 # Đảm bảo thư mục gốc nằm trong sys.path
 # ---------------------------------------------------------------------------
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
 # ---------------------------------------------------------------------------
 # Cấu hình logging với loguru
 # ---------------------------------------------------------------------------
@@ -136,4 +134,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     sys.exit(main())

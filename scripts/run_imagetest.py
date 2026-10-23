@@ -30,10 +30,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-try:
-    import torch  # noqa: F401
-except Exception:
-    pass
+from app.native_runtime import bootstrap_torch_before_paddle
+
+bootstrap_torch_before_paddle()
 
 import cv2
 from loguru import logger

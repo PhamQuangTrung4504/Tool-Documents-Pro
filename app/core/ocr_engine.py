@@ -33,6 +33,7 @@ import os
 import re
 import threading
 import time
+import inspect
 from threading import Event
 import unicodedata
 from pathlib import Path
@@ -477,6 +478,67 @@ _GLOBAL_DETECTOR_LOCK = threading.Lock()
 _GLOBAL_VIETOCR: Optional[Any] = None
 _GLOBAL_VIETOCR_LOCK = threading.Lock()
 
+
+def _create_paddleocr_detector(
+    paddleocr_cls: Any,
+    *,
+    lang: str,
+    use_gpu: bool,
+    use_angle_cls: bool,
+    det_db_thresh: float,
+    det_db_box_thresh: float,
+    det_db_unclip_ratio: float,
+    drop_score: float,
+    rec_batch_num: int,
+    ocr_version: str,
+) -> Any:
+    """Tạo detector một lần với tên tham số mà constructor runtime công bố.
+
+    PaddleOCR 3.x đổi tên các tùy chọn từ giao diện 2.x. Chỉ truyền một bộ
+    tham số theo chữ ký thực tế; lỗi cache/model/constructor được giữ nguyên,
+    không bị nhầm thành lý do để thử một constructor khác.
+    """
+    parameters = inspect.signature(paddleocr_cls).parameters
+    accepts_extra = any(
+        item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values()
+    )
+    values = {
+        "lang": lang,
+        "ocr_version": ocr_version,
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "use_textline_orientation": use_angle_cls,
+        "text_det_thresh": det_db_thresh,
+        "text_det_box_thresh": det_db_box_thresh,
+        "text_det_unclip_ratio": det_db_unclip_ratio,
+        "text_rec_score_thresh": drop_score,
+        "text_recognition_batch_size": rec_batch_num,
+    }
+    aliases = {
+        "use_textline_orientation": "use_angle_cls",
+        "text_det_thresh": "det_db_thresh",
+        "text_det_box_thresh": "det_db_box_thresh",
+        "text_det_unclip_ratio": "det_db_unclip_ratio",
+        "text_rec_score_thresh": "drop_score",
+        "text_recognition_batch_size": "rec_batch_num",
+    }
+    kwargs: Dict[str, Any] = {}
+    for name, value in values.items():
+        if name in parameters:
+            kwargs[name] = value
+        elif name in aliases and aliases[name] in parameters:
+            kwargs[aliases[name]] = value
+
+    if "use_gpu" in parameters:
+        kwargs["use_gpu"] = use_gpu
+    elif "device" in parameters or accepts_extra:
+        # PaddleOCR 3.x chuyển cấu hình thiết bị sang common runtime arguments.
+        kwargs["device"] = "gpu:0" if use_gpu else "cpu"
+    if "show_log" in parameters:
+        kwargs["show_log"] = False
+
+    return paddleocr_cls(**kwargs)
+
 def apply_paddlex_patches() -> None:
     """
     Vá triệt để lỗi 'PDX has already been initialized. Reinitialization is not supported.'
@@ -485,12 +547,6 @@ def apply_paddlex_patches() -> None:
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
     os.environ["PADDLE_PDX_EAGER_INIT"] = "False"
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
-
-    # Pre-load PyTorch DLLs trước khi bất kỳ module Paddle nào được import
-    try:
-        import torch  # noqa: F401 # type: ignore
-    except Exception:
-        pass
 
     try:
         import sys
@@ -521,11 +577,6 @@ def apply_paddlex_patches() -> None:
                     pass
     except Exception:
         pass
-
-
-# Áp dụng ngay khi module được import
-apply_paddlex_patches()
-
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +640,11 @@ def get_global_detector(
         if _GLOBAL_DETECTOR is not None:
             return _GLOBAL_DETECTOR
 
+        # Đảm bảo thứ tự DLL tại đúng ranh giới nạp runtime native. Import
+        # engine/model thuần túy không khởi tạo Torch hoặc Paddle sớm.
+        from app.native_runtime import bootstrap_torch_before_paddle
+        bootstrap_torch_before_paddle()
+
         # 1. Áp dụng bản vá ngăn chặn lỗi khởi tạo kép PaddleX
         apply_paddlex_patches()
 
@@ -618,35 +674,18 @@ def get_global_detector(
         _logging.getLogger("ppocr").setLevel(_logging.WARNING)
         _logging.getLogger("paddleocr").setLevel(_logging.WARNING)
 
-        try:
-            _GLOBAL_DETECTOR = PaddleOCR(
-                lang=lang,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=use_angle_cls,
-                text_det_thresh=det_db_thresh,
-                text_det_box_thresh=det_db_box_thresh,
-                text_det_unclip_ratio=det_db_unclip_ratio,
-                text_rec_score_thresh=drop_score,
-                ocr_version=target_version,
-            )
-        except Exception as exc:
-            logger.warning(
-                f"PaddleOCR primary initialization failed ({exc}), "
-                "falling back to standard config …"
-            )
-            _GLOBAL_DETECTOR = PaddleOCR(
-                lang=lang,
-                use_angle_cls=use_angle_cls,
-                use_gpu=use_gpu,
-                det_db_thresh=det_db_thresh,
-                det_db_box_thresh=det_db_box_thresh,
-                det_db_unclip_ratio=det_db_unclip_ratio,
-                drop_score=drop_score,
-                rec_batch_num=rec_batch_num,
-                show_log=False,
-                ocr_version=target_version,
-            )
+        _GLOBAL_DETECTOR = _create_paddleocr_detector(
+            PaddleOCR,
+            lang=lang,
+            use_gpu=use_gpu,
+            use_angle_cls=use_angle_cls,
+            det_db_thresh=det_db_thresh,
+            det_db_box_thresh=det_db_box_thresh,
+            det_db_unclip_ratio=det_db_unclip_ratio,
+            drop_score=drop_score,
+            rec_batch_num=rec_batch_num,
+            ocr_version=target_version,
+        )
 
         logger.info("PaddleOCR detector singleton initialized successfully.")
         return _GLOBAL_DETECTOR
@@ -1083,6 +1122,7 @@ class OCREngine:
         progress_callback: Optional[Callable[[str], None]] = None,
         progress_detail_callback: Optional[Callable[[int, int], None]] = None,
         cancel_event: Optional[Event] = None,
+        stage_callback: Optional[Callable[[str, str, int], None]] = None,
     ) -> OCRResult:
         """
         Nhận dạng chữ từ ảnh với pipeline Hybrid:
@@ -1105,6 +1145,13 @@ class OCREngine:
                 except Exception as exc:
                     logger.debug("Ignoring OCR detailed progress observer failure ({})", type(exc).__name__)
 
+        def report_stage(stage: str, transition: str) -> None:
+            if stage_callback is not None:
+                try:
+                    stage_callback(stage, transition, time.perf_counter_ns())
+                except Exception as exc:
+                    logger.debug("Ignoring OCR stage observer failure ({})", type(exc).__name__)
+
         def check_cancelled() -> None:
             if cancel_event is not None and cancel_event.is_set():
                 raise OCRCancelledError("OCR đã được hủy tại ranh giới an toàn của pipeline.")
@@ -1115,6 +1162,7 @@ class OCREngine:
         t0 = time.perf_counter()
 
         report_progress("Đang đọc và tiền xử lý ảnh …")
+        report_stage("preprocessing", "start")
 
         # 1. Đọc ảnh
         source_path = str(source) if isinstance(source, (str, Path)) else None
@@ -1175,6 +1223,8 @@ class OCREngine:
             "preprocessing_enabled": preprocess, "denoise": denoise,
             "max_side": max_side,
         }, processed_image)
+        report_stage("preprocessing", "end")
+        report_stage("detection", "start")
         report_progress("Đang phát hiện vùng chữ …")
 
         # Thêm padding viền an toàn (16px) trước khi chạy DBNet Detection
@@ -1264,6 +1314,7 @@ class OCREngine:
         # 3. Chạy Detection qua PaddleOCR
         detector = self._ocr
         assert detector is not None, "PaddleOCR detector not initialized"
+        detection_started = time.perf_counter()
         try:
             results = detector.predict(padded_det_img)
             check_cancelled()
@@ -1346,6 +1397,9 @@ class OCREngine:
             except Exception as exc_raw:
                 logger.error(f"Detection fallback failed: {exc_raw}")
 
+        logger.debug("PaddleOCR detection stage total (worker thread): {:.1f}ms", (time.perf_counter() - detection_started) * 1000)
+        report_stage("detection", "end")
+
         # 3.b. Only combine detections when VietOCR will read the fused image
         # region. PaddleOCR text belongs to each original polygon and must not
         # be concatenated and later presented as a prediction for one polygon.
@@ -1418,6 +1472,7 @@ class OCREngine:
                     for index, polygon in enumerate(polygons)
                 ],
             }
+        report_stage("recognition", "start")
         report_progress(f"Đã phát hiện {len(polygons)} vùng; đang nhận dạng …")
 
         # 4. Text Recognition: Sử dụng VietOCR cho tiếng Việt hoặc PaddleOCR
@@ -1427,6 +1482,8 @@ class OCREngine:
             logger.debug(f"Recognizing {len(polygons)} text lines with VietOCR ({self.vietocr_model_name}) …")
 
         progress_interval = max(1, len(polygons) // 100)
+        recognition_started = time.perf_counter()
+        vietocr_inference_seconds = 0.0
         for idx, poly in enumerate(polygons):
             check_cancelled()
             # Preserve legacy textual progress for non-UI callers. The desktop
@@ -1526,7 +1583,9 @@ class OCREngine:
                                     }, sc_padded)
                                     sc_rgb = cv2.cvtColor(sc_padded, cv2.COLOR_BGR2RGB)
                                     sc_pil = Image.fromarray(sc_rgb)
+                                    inference_started = time.perf_counter()
                                     p_res = self._vietocr.predict(sc_pil, return_prob=True)
+                                    vietocr_inference_seconds += time.perf_counter() - inference_started
                                     if isinstance(p_res, tuple):
                                         t_sub = (p_res[0] or "").strip()
                                         c_sub = float(p_res[1]) if p_res[1] is not None else None
@@ -1568,7 +1627,9 @@ class OCREngine:
                                 crop_rgb = cv2.cvtColor(crop_bgr_padded, cv2.COLOR_BGR2RGB)
                                 crop_pil = Image.fromarray(crop_rgb)
                                 if self._vietocr is not None:
+                                    inference_started = time.perf_counter()
                                     pred_res = self._vietocr.predict(crop_pil, return_prob=True)
+                                    vietocr_inference_seconds += time.perf_counter() - inference_started
                                     recognizer_name = f"vietocr:{self.vietocr_model_name}"
                                 else:
                                     pred_res = ("", 0.0)
@@ -1667,7 +1728,14 @@ class OCREngine:
             # Count completed detector regions, including rejected/empty text.
             # This is recognition-stage progress only, never whole-job progress.
             report_progress_detail(idx + 1, len(polygons))
+        logger.debug(
+            "OCR recognition stage including crop and bookkeeping ({} regions, worker thread): {:.1f}ms; VietOCR model inference total: {:.1f}ms",
+            len(polygons), (time.perf_counter() - recognition_started) * 1000,
+            vietocr_inference_seconds * 1000,
+        )
+        report_stage("recognition", "end")
 
+        report_stage("layout", "start")
         # 5. Lọc nhiễu quét do cắt ngang viền ảnh (Border noise filtering)
         box_count_before_border_filter = len(boxes)
         boxes = filter_border_noise_boxes(boxes, image_width=orig_w, image_height=orig_h)
@@ -1958,6 +2026,7 @@ class OCREngine:
         )
         check_cancelled()
         report_progress("Đang hoàn tất kết quả OCR …")
+        report_stage("layout", "end")
         return result
 
     # ------------------------------------------------------------------
